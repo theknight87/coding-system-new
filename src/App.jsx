@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 
 // ═══════════════════════════════════════════════════════════════
 // MASTER DATA STORE
@@ -601,257 +601,1092 @@ function CodingFrameworkPage({ data }) {
 }
 
 // ─── CATEGORIES ADMIN ─────────────────────────────────────────
+const COLOR_PRESETS = [
+  { color:"#1d4ed8", bg:"#dbeafe", name:"Blue"   },
+  { color:"#b45309", bg:"#fef3c7", name:"Amber"  },
+  { color:"#047857", bg:"#d1fae5", name:"Green"  },
+  { color:"#7c3aed", bg:"#ede9fe", name:"Violet" },
+  { color:"#be123c", bg:"#ffe4e6", name:"Rose"   },
+  { color:"#0e7490", bg:"#cffafe", name:"Cyan"   },
+  { color:"#6d28d9", bg:"#f5f3ff", name:"Purple" },
+  { color:"#374151", bg:"#f3f4f6", name:"Gray"   },
+  { color:"#9a3412", bg:"#ffedd5", name:"Orange" },
+  { color:"#155e75", bg:"#ecfeff", name:"Teal"   },
+  { color:"#166534", bg:"#f0fdf4", name:"Emerald"},
+  { color:"#831843", bg:"#fdf2f8", name:"Pink"   },
+];
+
+const ICON_PRESETS = ["⚙️","🔧","🗄️","⛽","📡","🛢️","🔩","📦","🏭","🔬","⚡","🛠️","🔑","📋","💡","🧰","🔄","⚗️"];
+
 function CategoriesPage({ data }) {
   const { categories, setCategories, parts } = data;
-  const cols = [
-    { key:"code", label:"Code", render: r=><Pill>{r.code}</Pill> },
-    { key:"label", label:"Category Name", style:{fontWeight:600,color:T.text} },
-    { key:"icon", label:"Icon" },
-    { key:"parts", label:"Parts", render: r=><strong style={{color:T.accent}}>{parts.filter(p=>p.cat===r.code).length}</strong> },
-    { key:"actions", label:"Actions", render:(r,edit,del)=>(
-      <div style={{display:"flex",gap:6}}>
-        <Btn small variant="secondary" onClick={()=>edit(r)}>Edit</Btn>
-        <Btn small variant="danger" onClick={()=>del(r.code)}>Delete</Btn>
-      </div>
-    )},
-  ];
+
+  const EMPTY = { code:"", label:"", icon:"📦", color:"#1d4ed8", bg:"#dbeafe" };
+  const [form,      setForm]      = useState(EMPTY);
+  const [editingCode, setEditingCode] = useState(null); // null = adding new
+  const [showForm,  setShowForm]  = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [toast,     setToast]     = useState(null);
+  const [search,    setSearch]    = useState("");
+
+  const flash = (text, type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const filtered = useMemo(()=>{
+    if(!search.trim()) return categories;
+    const q = search.toLowerCase();
+    return categories.filter(c=> c.code.toLowerCase().includes(q) || c.label.toLowerCase().includes(q));
+  },[categories, search]);
+
+  const openAdd = () => { setForm(EMPTY); setEditingCode(null); setShowForm(true); };
+  const openEdit = (cat) => { setForm({...cat}); setEditingCode(cat.code); setShowForm(true); };
+  const closeForm = () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
+
+  const handleSave = () => {
+    const code = form.code.trim().toUpperCase();
+    if (!code || !form.label.trim()) return flash("Code and Name are required","err");
+    if (code.length !== 2) return flash("Category code must be exactly 2 characters","err");
+    if (editingCode === null) {
+      // Adding new
+      if (categories.find(c => c.code === code)) return flash(`Code "${code}" already exists`,"err");
+      setCategories(prev => [...prev, { ...form, code }]);
+      flash(`Category "${code} — ${form.label}" added successfully`);
+    } else {
+      // Editing existing
+      if (code !== editingCode && categories.find(c => c.code === code)) return flash(`Code "${code}" already exists`,"err");
+      setCategories(prev => prev.map(c => c.code === editingCode ? { ...form, code } : c));
+      flash(`Category "${code}" updated successfully`);
+    }
+    closeForm();
+  };
+
+  const handleDelete = (cat) => {
+    const usedCount = parts.filter(p => p.cat === cat.code).length;
+    if (usedCount > 0) return flash(`Cannot delete "${cat.code}" — it has ${usedCount} coded part(s). Remove those parts first.`,"err");
+    setCategories(prev => prev.filter(c => c.code !== cat.code));
+    setDeleteTarget(null);
+    flash(`Category "${cat.code}" deleted`);
+  };
+
+  const setColor = (preset) => setForm(f=>({...f, color: preset.color, bg: preset.bg}));
+
+  const fStyle = { display:"flex",flexDirection:"column",gap:4 };
+  const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
+
   return (
-    <CrudPage
-      title="Main Categories (AA)" sub="Manage top-level equipment categories — first code segment"
-      items={categories} setItems={setCategories}
-      fields={[
-        {key:"code",label:"Code (2 chars)",placeholder:"e.g. CP",maxLength:2},
-        {key:"label",label:"Category Name",placeholder:"e.g. Compressors"},
-        {key:"icon",label:"Icon Emoji",placeholder:"e.g. ⚙️"},
-      ]}
-      renderRow={(rows, edit, del) => (
-        <Table cols={cols.map(c=>c.key==="actions"?{...c,render:r=>c.render(r,edit,del)}:c)} rows={rows} />
+    <div>
+      <Toast msg={toast} />
+      <PageHeader title="Main Categories (AA)" sub="Add, edit, or remove top-level equipment categories — first segment of every code" />
+
+      {/* Toolbar */}
+      <Card style={{ marginBottom:20 }}>
+        <div style={{ display:"flex",gap:12,alignItems:"center",flexWrap:"wrap" }}>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search categories…" style={{ maxWidth:260,width:"auto" }} />
+          <span style={{ fontSize:13,color:T.muted }}>{filtered.length} of {categories.length}</span>
+          <div style={{ marginLeft:"auto" }}>
+            <Btn onClick={openAdd}>＋ Add Category</Btn>
+          </div>
+        </div>
+      </Card>
+
+      {/* Cards grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:14, marginBottom:28 }}>
+        {filtered.map(cat => {
+          const partCount = parts.filter(p=>p.cat===cat.code).length;
+          return (
+            <Card key={cat.code} style={{ borderLeft:`5px solid ${cat.color}`, position:"relative" }}>
+              <div style={{ display:"flex",alignItems:"flex-start",gap:14 }}>
+                {/* Icon */}
+                <div style={{ width:48,height:48,borderRadius:10,background:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0 }}>
+                  {cat.icon}
+                </div>
+                {/* Info */}
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                    <span style={{ fontFamily:"monospace",fontWeight:800,fontSize:15,color:cat.color,background:cat.bg,padding:"2px 8px",borderRadius:4 }}>{cat.code}</span>
+                    <span style={{ fontSize:12,color:T.muted,background:T.subtle,padding:"2px 8px",borderRadius:4,fontWeight:600 }}>
+                      {partCount} part{partCount!==1?"s":""}
+                    </span>
+                  </div>
+                  <div style={{ fontWeight:700,fontSize:15,color:T.text,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{cat.label}</div>
+                  <div style={{ fontFamily:"monospace",fontSize:11,color:T.muted }}>{cat.code}-BB-CC-DD-EE-0001</div>
+                </div>
+              </div>
+              {/* Actions */}
+              <div style={{ display:"flex",gap:8,marginTop:14,paddingTop:12,borderTop:`1px solid ${T.border}` }}>
+                <Btn small variant="secondary" onClick={()=>openEdit(cat)} style={{ flex:1 }}>✏️ Edit</Btn>
+                <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)} style={{ flex:1 }}>🗑 Delete</Btn>
+              </div>
+            </Card>
+          );
+        })}
+
+        {/* Add-new card */}
+        <div
+          onClick={openAdd}
+          style={{ border:`2px dashed ${T.border}`,borderRadius:8,padding:20,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer",minHeight:140,color:T.muted,transition:"border-color .15s,background .15s" }}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=T.accent;e.currentTarget.style.background="#f0f9ff";}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}
+        >
+          <span style={{ fontSize:32 }}>＋</span>
+          <span style={{ fontSize:13,fontWeight:700 }}>Add New Category</span>
+        </div>
+      </div>
+
+      {/* Table view */}
+      <Card style={{ marginBottom:24 }}>
+        <SectionHeader>All Categories — Quick Reference</SectionHeader>
+        <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+          <thead>
+            <tr style={{ background:T.header }}>
+              {["Code","Category","Icon","Parts Coded","Code Format","Actions"].map(h=>(
+                <th key={h} style={{ padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#94a3b8",fontSize:10,textTransform:"uppercase",letterSpacing:0.8,whiteSpace:"nowrap" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((cat,i)=>{
+              const pc = parts.filter(p=>p.cat===cat.code).length;
+              return (
+                <tr key={cat.code} style={{ borderBottom:`1px solid ${T.border}`,background:i%2?T.subtle:T.card }}>
+                  <td style={{ padding:"8px 12px" }}><Pill color={cat.color} bg={cat.bg}>{cat.code}</Pill></td>
+                  <td style={{ padding:"8px 12px",fontWeight:700,color:T.text }}>{cat.label}</td>
+                  <td style={{ padding:"8px 12px",fontSize:18 }}>{cat.icon}</td>
+                  <td style={{ padding:"8px 12px" }}>
+                    <span style={{ fontWeight:700,color:pc>0?T.accent:T.muted }}>{pc}</span>
+                  </td>
+                  <td style={{ padding:"8px 12px",fontFamily:"monospace",fontSize:11,color:T.muted }}>
+                    <span style={{ color:cat.color,fontWeight:700 }}>{cat.code}</span>-BB-CC-DD-EE-0001
+                  </td>
+                  <td style={{ padding:"8px 12px" }}>
+                    <div style={{ display:"flex",gap:6 }}>
+                      <Btn small variant="secondary" onClick={()=>openEdit(cat)}>✏️ Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)}>🗑 Delete</Btn>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* ── ADD / EDIT MODAL ── */}
+      {showForm && (
+        <Modal title={editingCode ? `Edit Category — ${editingCode}` : "Add New Category"} onClose={closeForm}>
+          <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+
+            {/* Code + Icon row */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <div style={fStyle}>
+                <label style={lStyle}>Code (exactly 2 chars) *</label>
+                <Input
+                  value={form.code}
+                  onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))}
+                  placeholder="e.g. CP"
+                  maxLength={2}
+                  style={{ fontFamily:"monospace",fontWeight:800,fontSize:16,letterSpacing:2,textTransform:"uppercase" }}
+                />
+              </div>
+              <div style={fStyle}>
+                <label style={lStyle}>Icon Emoji</label>
+                <Input value={form.icon} onChange={e=>setForm(f=>({...f,icon:e.target.value}))} placeholder="e.g. ⚙️" />
+              </div>
+            </div>
+
+            {/* Name */}
+            <div style={fStyle}>
+              <label style={lStyle}>Category Name *</label>
+              <Input value={form.label} onChange={e=>setForm(f=>({...f,label:e.target.value}))} placeholder="e.g. Compressors" />
+            </div>
+
+            {/* Icon quick-pick */}
+            <div style={fStyle}>
+              <label style={lStyle}>Quick Icon Pick</label>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:6 }}>
+                {ICON_PRESETS.map(ic=>(
+                  <button key={ic} onClick={()=>setForm(f=>({...f,icon:ic}))}
+                    style={{ fontSize:20,background:form.icon===ic?T.accentLight:"#f1f5f9",border:`2px solid ${form.icon===ic?T.accent:"transparent"}`,borderRadius:6,padding:"4px 8px",cursor:"pointer" }}>
+                    {ic}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color preset */}
+            <div style={fStyle}>
+              <label style={lStyle}>Color Theme</label>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
+                {COLOR_PRESETS.map(p=>(
+                  <button key={p.color} onClick={()=>setColor(p)} title={p.name}
+                    style={{ width:32,height:32,borderRadius:6,background:p.bg,border:`3px solid ${form.color===p.color?p.color:"transparent"}`,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
+                    <span style={{ width:14,height:14,borderRadius:3,background:p.color,display:"block" }}/>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live preview */}
+            <div style={{ background:T.subtle,borderRadius:8,padding:14,border:`1px solid ${T.border}` }}>
+              <div style={{ fontSize:11,fontWeight:700,color:T.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:0.8 }}>Preview</div>
+              <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+                <div style={{ width:44,height:44,borderRadius:8,background:form.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,border:`2px solid ${form.color}22` }}>
+                  {form.icon||"📦"}
+                </div>
+                <div>
+                  <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:3 }}>
+                    <span style={{ fontFamily:"monospace",fontWeight:800,fontSize:14,color:form.color,background:form.bg,padding:"2px 8px",borderRadius:4 }}>
+                      {form.code||"XX"}
+                    </span>
+                    <span style={{ fontWeight:700,fontSize:14,color:T.text }}>{form.label||"Category Name"}</span>
+                  </div>
+                  <span style={{ fontFamily:"monospace",fontSize:11,color:T.muted }}>
+                    <span style={{ color:form.color,fontWeight:700 }}>{form.code||"XX"}</span>-BB-CC-DD-EE-0001
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4 }}>
+              <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
+              <Btn onClick={handleSave}>{editingCode ? "💾 Save Changes" : "＋ Add Category"}</Btn>
+            </div>
+          </div>
+        </Modal>
       )}
-      newItemDefaults={{code:"",label:"",icon:"📦",color:T.accent,bg:T.accentLight}}
-      validateFn={(f,items,editing)=>{
-        if(!f.code||!f.label) return "Code and Name are required";
-        if(f.code.length!==2) return "Code must be exactly 2 characters";
-      }}
-      legendItems={categories.map(c=>({code:c.code,label:c.label}))}
-    />
+
+      {/* ── DELETE CONFIRM MODAL ── */}
+      {deleteTarget && (
+        <Modal title="Delete Category" onClose={()=>setDeleteTarget(null)}>
+          <div style={{ marginBottom:20 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:12,padding:14,background:T.dangerBg,borderRadius:8,marginBottom:14 }}>
+              <span style={{ fontSize:28 }}>{deleteTarget.icon}</span>
+              <div>
+                <div style={{ fontWeight:800,fontSize:15,color:T.danger }}>{deleteTarget.code} — {deleteTarget.label}</div>
+                <div style={{ fontSize:12,color:T.muted,marginTop:2 }}>{parts.filter(p=>p.cat===deleteTarget.code).length} parts use this category</div>
+              </div>
+            </div>
+            <p style={{ fontSize:13,color:T.text,lineHeight:1.6 }}>
+              Are you sure you want to permanently delete this category?{" "}
+              {parts.filter(p=>p.cat===deleteTarget.code).length > 0
+                ? <strong style={{ color:T.danger }}>This category still has coded parts — you must remove those first.</strong>
+                : "This action cannot be undone."
+              }
+            </p>
+          </div>
+          <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+            <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete Category</Btn>
+          </div>
+        </Modal>
+      )}
+
+      <CodeLegend items={categories.map(c=>({code:c.code,label:c.label}))} />
+    </div>
   );
 }
 
 // ─── MANUFACTURERS ADMIN ──────────────────────────────────────
 function ManufacturersPage({ data }) {
-  const { manufacturers, setManufacturers, categories } = data;
-  const cols = [
-    { key:"code", label:"Code", render:r=><Pill>{r.code}</Pill> },
-    { key:"label", label:"Manufacturer", style:{fontWeight:600,color:T.text} },
-    { key:"catCodes", label:"Equipment Type", render:r=>(
-      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-        {(r.catCodes||[]).map(c=>{const cat=categories.find(x=>x.code===c); return <Pill key={c} color={cat?.color||T.muted} bg={cat?.bg||T.subtle}>{c}</Pill>;})}
-      </div>
-    )},
-    { key:"actions", label:"Actions", render:(r,edit,del)=>(
-      <div style={{display:"flex",gap:6}}>
-        <Btn small variant="secondary" onClick={()=>edit(r)}>Edit</Btn>
-        <Btn small variant="danger" onClick={()=>del(r.code)}>Delete</Btn>
-      </div>
-    )},
-  ];
+  const { manufacturers, setManufacturers, categories, parts } = data;
+  const EMPTY = { code:"", label:"", catCodes:[] };
+  const [form, setForm] = useState(EMPTY);
+  const [editingCode, setEditingCode] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const flash = (text, type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+  const filtered = useMemo(()=>{
+    const q = search.toLowerCase();
+    return !q ? manufacturers : manufacturers.filter(m=> m.code.toLowerCase().includes(q)||m.label.toLowerCase().includes(q));
+  },[manufacturers,search]);
+
+  const openAdd  = () => { setForm(EMPTY); setEditingCode(null); setShowForm(true); };
+  const openEdit = (m)  => { setForm({...m, catCodes: Array.isArray(m.catCodes)?m.catCodes:[]}); setEditingCode(m.code); setShowForm(true); };
+  const closeForm= () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
+
+  const handleSave = () => {
+    const code = form.code.trim().toUpperCase();
+    if(!code||!form.label.trim()) return flash("Code and Name are required","err");
+    if(code.length!==2) return flash("Manufacturer code must be exactly 2 characters","err");
+    if(!form.catCode) return flash("Please select an equipment type","err");
+    const record = { code, label: form.label.trim(), catCodes: [form.catCode] };
+    if(editingCode===null){
+      if(manufacturers.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
+      setManufacturers(p=>[...p,record]);
+      flash(`Manufacturer "${code} — ${record.label}" added`);
+    } else {
+      if(code!==editingCode && manufacturers.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
+      setManufacturers(p=>p.map(m=>m.code===editingCode?record:m));
+      flash(`Manufacturer "${code}" updated`);
+    }
+    closeForm();
+  };
+
+  const handleDelete = (mfr) => {
+    const used = parts.filter(p=>p.mfr===mfr.code).length;
+    if(used>0) return flash(`Cannot delete "${mfr.code}" — ${used} part(s) use it. Remove those parts first.`,"err");
+    setManufacturers(p=>p.filter(m=>m.code!==mfr.code));
+    setDeleteTarget(null);
+    flash(`Manufacturer "${mfr.code}" deleted`);
+  };
+
+  const fStyle = { display:"flex",flexDirection:"column",gap:4 };
+  const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
+
+  // Group by category for display
+  const groups = categories.map(cat=>({
+    ...cat,
+    items: filtered.filter(m=>(m.catCodes||[]).includes(cat.code))
+  })).filter(g=>g.items.length>0 || filtered.some(m=>!(m.catCodes||[]).length));
+
   return (
-    <CrudPage
-      title="Manufacturers (BB)" sub="Equipment manufacturers — second code segment"
-      items={manufacturers} setItems={setManufacturers}
-      fields={[
-        {key:"code",label:"Code (2 chars)",placeholder:"e.g. GA",maxLength:2},
-        {key:"label",label:"Manufacturer Name",placeholder:"e.g. Galileo"},
-        {key:"catCodes",label:"Primary Category Code",placeholder:"e.g. CP"},
-      ]}
-      renderRow={(rows,edit,del)=>(
-        <Table cols={cols.map(c=>c.key==="actions"?{...c,render:r=>c.render(r,edit,del)}:c)} rows={rows} />
+    <div>
+      <Toast msg={toast}/>
+      <PageHeader title="Manufacturers (BB)" sub="Add, edit, or remove equipment manufacturers — second segment of every code"/>
+
+      <Card style={{marginBottom:20}}>
+        <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search manufacturers…" style={{maxWidth:260,width:"auto"}}/>
+          <span style={{fontSize:13,color:T.muted}}>{filtered.length} of {manufacturers.length}</span>
+          <div style={{marginLeft:"auto"}}><Btn onClick={openAdd}>＋ Add Manufacturer</Btn></div>
+        </div>
+      </Card>
+
+      {/* Cards grouped by category */}
+      {categories.map(cat=>{
+        const catItems = filtered.filter(m=>(m.catCodes||[]).includes(cat.code));
+        if(catItems.length===0&&search) return null;
+        return (
+          <div key={cat.code} style={{marginBottom:24}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <span style={{fontSize:18}}>{cat.icon}</span>
+              <span style={{fontWeight:800,fontSize:15,color:T.text}}>{cat.label}</span>
+              <span style={{fontFamily:"monospace",fontWeight:700,fontSize:12,color:cat.color,background:cat.bg,padding:"2px 8px",borderRadius:4}}>{cat.code}</span>
+              <span style={{fontSize:12,color:T.muted}}>({catItems.length} manufacturer{catItems.length!==1?"s":""})</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12,marginBottom:8}}>
+              {catItems.map(mfr=>{
+                const pc = parts.filter(p=>p.mfr===mfr.code).length;
+                return (
+                  <Card key={mfr.code} style={{borderLeft:`4px solid ${cat.color}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                      <span style={{fontFamily:"monospace",fontWeight:800,fontSize:15,color:cat.color,background:cat.bg,padding:"2px 8px",borderRadius:4}}>{mfr.code}</span>
+                      <span style={{fontSize:12,color:T.muted,background:T.subtle,padding:"2px 8px",borderRadius:4,fontWeight:600}}>{pc} part{pc!==1?"s":""}</span>
+                    </div>
+                    <div style={{fontWeight:700,fontSize:15,color:T.text,marginBottom:4}}>{mfr.label}</div>
+                    <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginBottom:12}}>{cat.code}-{mfr.code}-CC-DD-EE-0001</div>
+                    <div style={{display:"flex",gap:8,paddingTop:10,borderTop:`1px solid ${T.border}`}}>
+                      <Btn small variant="secondary" onClick={()=>openEdit(mfr)} style={{flex:1}}>✏️ Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(mfr)} style={{flex:1}}>🗑 Delete</Btn>
+                    </div>
+                  </Card>
+                );
+              })}
+              {/* Add card */}
+              <div onClick={()=>{setForm({...EMPTY,catCode:cat.code});setEditingCode(null);setShowForm(true);}}
+                style={{border:`2px dashed ${T.border}`,borderRadius:8,padding:16,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:120,color:T.muted,transition:"all .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=cat.color;e.currentTarget.style.background=cat.bg+"44";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}>
+                <span style={{fontSize:26}}>＋</span>
+                <span style={{fontSize:12,fontWeight:700}}>Add to {cat.label}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* ADD / EDIT MODAL */}
+      {showForm && (
+        <Modal title={editingCode?`Edit Manufacturer — ${editingCode}`:"Add New Manufacturer"} onClose={closeForm}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={fStyle}>
+                <label style={lStyle}>Code (exactly 2 chars) *</label>
+                <Input value={form.code||""} onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))} placeholder="e.g. GA" maxLength={2}
+                  style={{fontFamily:"monospace",fontWeight:800,fontSize:16,letterSpacing:2}}/>
+              </div>
+              <div style={fStyle}>
+                <label style={lStyle}>Equipment Type *</label>
+                <Select value={form.catCode||form.catCodes?.[0]||""} onChange={e=>setForm(f=>({...f,catCode:e.target.value}))}>
+                  <option value="">Select category…</option>
+                  {categories.map(c=><option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+                </Select>
+              </div>
+            </div>
+            <div style={fStyle}>
+              <label style={lStyle}>Manufacturer Name *</label>
+              <Input value={form.label||""} onChange={e=>setForm(f=>({...f,label:e.target.value}))} placeholder="e.g. Galileo"/>
+            </div>
+            {/* Preview */}
+            <div style={{background:T.subtle,borderRadius:8,padding:12,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,marginBottom:6,textTransform:"uppercase"}}>Preview</div>
+              {(()=>{const cat=categories.find(c=>c.code===(form.catCode||form.catCodes?.[0]));return(
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:cat?.color||T.muted,background:cat?.bg||T.subtle,padding:"3px 10px",borderRadius:4}}>{form.code||"XX"}</span>
+                  <span style={{fontWeight:700,color:T.text}}>{form.label||"Manufacturer Name"}</span>
+                  <span style={{fontFamily:"monospace",fontSize:11,color:T.muted}}>→ {cat?.code||"AA"}-{form.code||"BB"}-CC-DD-EE-0001</span>
+                </div>
+              );})()}
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
+              <Btn onClick={handleSave}>{editingCode?"💾 Save Changes":"＋ Add Manufacturer"}</Btn>
+            </div>
+          </div>
+        </Modal>
       )}
-      newItemDefaults={{code:"",label:"",catCodes:[]}}
-      validateFn={(f)=>{
-        if(!f.code||!f.label) return "Code and Name are required";
-        if(f.code.length!==2) return "Manufacturer code must be 2 characters";
-      }}
-      legendItems={manufacturers.map(m=>({code:m.code,label:m.label}))}
-    />
+
+      {/* DELETE CONFIRM */}
+      {deleteTarget&&(
+        <Modal title="Delete Manufacturer" onClose={()=>setDeleteTarget(null)}>
+          <div style={{marginBottom:20}}>
+            <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:14}}>
+              <div style={{fontWeight:800,fontSize:15,color:T.danger}}>{deleteTarget.code} — {deleteTarget.label}</div>
+              <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.mfr===deleteTarget.code).length} parts use this manufacturer</div>
+            </div>
+            <p style={{fontSize:13,color:T.text,lineHeight:1.6}}>
+              {parts.filter(p=>p.mfr===deleteTarget.code).length>0
+                ?<strong style={{color:T.danger}}>This manufacturer still has coded parts — remove those first.</strong>
+                :"Are you sure? This action cannot be undone."}
+            </p>
+          </div>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete</Btn>
+          </div>
+        </Modal>
+      )}
+
+      <CodeLegend items={manufacturers.map(m=>({code:m.code,label:m.label}))}/>
+    </div>
   );
 }
 
 // ─── MODELS ADMIN ─────────────────────────────────────────────
 function ModelsPage({ data }) {
-  const { models, setModels, manufacturers, engineSystems } = data;
+  const { models, setModels, manufacturers, engineSystems, parts } = data;
+  const EMPTY = { code:"", label:"", mfrCode:"" };
+  const [form, setForm] = useState(EMPTY);
+  const [editingCode, setEditingCode] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [search, setSearch] = useState("");
 
-  const cols = [
-    { key:"code",    label:"Code",         render:r=><Pill>{r.code}</Pill> },
-    { key:"label",   label:"Model Name",   style:{fontWeight:700,color:T.text} },
-    { key:"mfrCode", label:"Manufacturer", render:r=>{
-      const m=manufacturers.find(x=>x.code===r.mfrCode);
-      const isEng = m?.catCodes?.includes("EN");
-      return <Pill color={isEng?"#b45309":"#1d4ed8"} bg={isEng?"#fef3c7":"#dbeafe"}>{r.mfrCode} — {m?.label||"?"}</Pill>;
-    }},
-    { key:"type", label:"Type", render:r=>{
-      const m=manufacturers.find(x=>x.code===r.mfrCode);
-      const isEng = m?.catCodes?.includes("EN");
-      return isEng
-        ? <span style={{fontSize:11,background:"#fef3c7",color:"#b45309",padding:"2px 8px",borderRadius:4,fontWeight:700}}>🔧 Engine</span>
-        : <span style={{fontSize:11,background:"#dbeafe",color:"#1d4ed8",padding:"2px 8px",borderRadius:4,fontWeight:700}}>⚙️ Compressor</span>;
-    }},
-    { key:"actions", label:"Actions", render:(r,edit,del)=>(
-      <div style={{display:"flex",gap:6}}>
-        <Btn small variant="secondary" onClick={()=>edit(r)}>✏️ Edit</Btn>
-        <Btn small variant="danger"    onClick={()=>del(r.code)}>🗑 Delete</Btn>
-      </div>
-    )},
-  ];
+  const flash = (text,type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+  const filtered = useMemo(()=>{
+    const q=search.toLowerCase();
+    return !q ? models : models.filter(m=>m.code.toLowerCase().includes(q)||m.label.toLowerCase().includes(q)||m.mfrCode.toLowerCase().includes(q));
+  },[models,search]);
 
-  // Group by manufacturer for display
-  const catMfrs = manufacturers.filter(m=>m.catCodes.includes("EN"));
-  const engModelCodes = models.filter(m=>catMfrs.some(mfr=>mfr.code===m.mfrCode)).map(m=>m.code);
+  const openAdd  = (mfrCode="") => { setForm({...EMPTY,mfrCode}); setEditingCode(null); setShowForm(true); };
+  const openEdit = (m) => { setForm({...m}); setEditingCode(m.code); setShowForm(true); };
+  const closeForm= () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
+
+  const handleSave = () => {
+    const code = form.code.trim().toUpperCase();
+    if(!code||!form.label.trim()||!form.mfrCode) return flash("All fields are required","err");
+    if(code.length<2||code.length>5) return flash("Model code must be 2–5 characters","err");
+    const record = { code, label:form.label.trim(), mfrCode:form.mfrCode };
+    if(editingCode===null){
+      if(models.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
+      setModels(p=>[...p,record]);
+      flash(`Model "${code} — ${record.label}" added`);
+    } else {
+      if(code!==editingCode && models.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
+      setModels(p=>p.map(m=>m.code===editingCode?record:m));
+      flash(`Model "${code}" updated`);
+    }
+    closeForm();
+  };
+
+  const handleDelete = (model) => {
+    const used = parts.filter(p=>p.model===model.code).length;
+    if(used>0) return flash(`Cannot delete "${model.code}" — ${used} part(s) use it.`,"err");
+    setModels(p=>p.filter(m=>m.code!==model.code));
+    setDeleteTarget(null);
+    flash(`Model "${model.code}" deleted`);
+  };
+
+  const fStyle = { display:"flex",flexDirection:"column",gap:4 };
+  const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
 
   return (
     <div>
-      <CrudPage
-        title="Equipment Models (CC)" sub="Machine models per manufacturer — third code segment. Full edit & delete supported."
-        items={models} setItems={setModels}
-        fields={[
-          {key:"code",   label:"Model Code (2–5 chars)",    placeholder:"e.g. CA03",  maxLength:5},
-          {key:"label",  label:"Model Description",          placeholder:"e.g. 3406 NA"},
-          {key:"mfrCode",label:"Manufacturer",               type:"select", options:manufacturers.map(m=>({value:m.code,label:`${m.code} — ${m.label}`}))},
-        ]}
-        renderRow={(rows,edit,del)=>(
-          <>
-            {/* Caterpillar group highlight */}
-            <div style={{ padding:"8px 12px",background:"#fffbeb",borderBottom:`1px solid ${T.border}`,fontSize:12,color:"#b45309",fontWeight:700 }}>
-              🔧 Engine Models — use 10 System Sections (BAS / LUB / COL / AIR / FUE / ELS / OPS / ENC / GEN / SRV) as DD segment
+      <Toast msg={toast}/>
+      <PageHeader title="Equipment Models (CC)" sub="Add, edit, or remove models per manufacturer — third code segment"/>
+
+      <Card style={{marginBottom:20}}>
+        <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search models…" style={{maxWidth:260,width:"auto"}}/>
+          <span style={{fontSize:13,color:T.muted}}>{filtered.length} of {models.length}</span>
+          <div style={{marginLeft:"auto"}}><Btn onClick={()=>openAdd()}>＋ Add Model</Btn></div>
+        </div>
+      </Card>
+
+      {/* Grouped by manufacturer */}
+      {manufacturers.map(mfr=>{
+        const mfrModels = filtered.filter(m=>m.mfrCode===mfr.code);
+        if(mfrModels.length===0&&search) return null;
+        const isEngine = (mfr.catCodes||[]).includes("EN");
+        const color = isEngine?"#b45309":"#1d4ed8";
+        const bg    = isEngine?"#fef3c7":"#dbeafe";
+        const icon  = isEngine?"🔧":"⚙️";
+        return (
+          <div key={mfr.code} style={{marginBottom:24}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <span style={{fontSize:18}}>{icon}</span>
+              <span style={{fontWeight:800,fontSize:15,color:T.text}}>{mfr.label}</span>
+              <span style={{fontFamily:"monospace",fontWeight:700,fontSize:12,color,background:bg,padding:"2px 8px",borderRadius:4}}>{mfr.code}</span>
+              {isEngine&&<span style={{fontSize:11,background:"#fef3c7",color:"#b45309",padding:"2px 8px",borderRadius:4,fontWeight:700}}>Engine</span>}
+              <span style={{fontSize:12,color:T.muted}}>({mfrModels.length} model{mfrModels.length!==1?"s":""})</span>
             </div>
-            <Table cols={cols.map(c=>c.key==="actions"?{...c,render:r=>c.render(r,edit,del)}:c)} rows={rows} />
-          </>
-        )}
-        newItemDefaults={{code:"",label:"",mfrCode:""}}
-        validateFn={(f)=>{
-          if(!f.code||!f.label||!f.mfrCode) return "All fields are required";
-          if(f.code.length<2||f.code.length>5) return "Model code must be 2–5 characters";
-        }}
-        legendItems={[
-          ...manufacturers.filter(m=>m.catCodes.includes("EN")).map(m=>({code:m.code,label:`${m.label} (Engine)`})),
-          ...engineSystems.map(s=>({code:s.code,label:s.label+" — Engine System Section"})),
-        ]}
-      />
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
+              {mfrModels.map(model=>{
+                const pc=parts.filter(p=>p.model===model.code).length;
+                return (
+                  <Card key={model.code} style={{borderLeft:`4px solid ${color}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <span style={{fontFamily:"monospace",fontWeight:800,fontSize:14,color,background:bg,padding:"2px 8px",borderRadius:4}}>{model.code}</span>
+                      <span style={{fontSize:11,color:T.muted,background:T.subtle,padding:"2px 6px",borderRadius:4,fontWeight:600}}>{pc} part{pc!==1?"s":""}</span>
+                    </div>
+                    <div style={{fontWeight:700,fontSize:14,color:T.text,marginBottom:4}}>{model.label}</div>
+                    <div style={{fontFamily:"monospace",fontSize:10,color:T.muted,marginBottom:10}}>
+                      AA-{mfr.code}-<span style={{color,fontWeight:800}}>{model.code}</span>-DD-EE-0001
+                    </div>
+                    <div style={{display:"flex",gap:6,paddingTop:8,borderTop:`1px solid ${T.border}`}}>
+                      <Btn small variant="secondary" onClick={()=>openEdit(model)} style={{flex:1}}>✏️ Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(model)} style={{flex:1}}>🗑 Delete</Btn>
+                    </div>
+                  </Card>
+                );
+              })}
+              {/* Add card for this manufacturer */}
+              <div onClick={()=>openAdd(mfr.code)}
+                style={{border:`2px dashed ${T.border}`,borderRadius:8,padding:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:110,color:T.muted,transition:"all .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.background=bg+"44";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}>
+                <span style={{fontSize:24}}>＋</span>
+                <span style={{fontSize:12,fontWeight:700}}>Add {mfr.label} Model</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* ADD / EDIT MODAL */}
+      {showForm&&(
+        <Modal title={editingCode?`Edit Model — ${editingCode}`:"Add New Model"} onClose={closeForm}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={fStyle}>
+                <label style={lStyle}>Model Code (2–5 chars) *</label>
+                <Input value={form.code||""} onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))} placeholder="e.g. CA03" maxLength={5}
+                  style={{fontFamily:"monospace",fontWeight:800,fontSize:15}}/>
+              </div>
+              <div style={fStyle}>
+                <label style={lStyle}>Manufacturer *</label>
+                <Select value={form.mfrCode||""} onChange={e=>setForm(f=>({...f,mfrCode:e.target.value}))}>
+                  <option value="">Select…</option>
+                  {manufacturers.map(m=><option key={m.code} value={m.code}>{m.code} — {m.label}</option>)}
+                </Select>
+              </div>
+            </div>
+            <div style={fStyle}>
+              <label style={lStyle}>Model Description *</label>
+              <Input value={form.label||""} onChange={e=>setForm(f=>({...f,label:e.target.value}))} placeholder="e.g. 3406 NA"/>
+            </div>
+            {/* Preview */}
+            <div style={{background:T.subtle,borderRadius:8,padding:12,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,marginBottom:6,textTransform:"uppercase"}}>Preview</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:T.accent,background:T.accentLight,padding:"3px 10px",borderRadius:4}}>
+                  {form.mfrCode||"BB"}-{form.code||"CC"}
+                </span>
+                <span style={{fontWeight:700,color:T.text}}>{form.label||"Model Name"}</span>
+              </div>
+              <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}>
+                AA-{form.mfrCode||"BB"}-<span style={{color:T.accent,fontWeight:700}}>{form.code||"CC"}</span>-DD-EE-0001
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
+              <Btn onClick={handleSave}>{editingCode?"💾 Save Changes":"＋ Add Model"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* DELETE CONFIRM */}
+      {deleteTarget&&(
+        <Modal title="Delete Model" onClose={()=>setDeleteTarget(null)}>
+          <div style={{marginBottom:20}}>
+            <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:14}}>
+              <div style={{fontWeight:800,fontSize:15,color:T.danger}}>{deleteTarget.code} — {deleteTarget.label}</div>
+              <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.model===deleteTarget.code).length} parts use this model</div>
+            </div>
+            <p style={{fontSize:13,color:T.text,lineHeight:1.6}}>
+              {parts.filter(p=>p.model===deleteTarget.code).length>0
+                ?<strong style={{color:T.danger}}>This model still has coded parts — remove those first.</strong>
+                :"Are you sure? This action cannot be undone."}
+            </p>
+          </div>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete</Btn>
+          </div>
+        </Modal>
+      )}
+
+      <CodeLegend items={models.map(m=>({code:m.code,label:`${m.label} (${m.mfrCode})`}))}/>
     </div>
   );
 }
 
 // ─── DISCIPLINES ──────────────────────────────────────────────
 function DisciplinesPage({ data }) {
-  const { disciplines, engineSystems } = data;
+  const { disciplines, setDisciplines, engineSystems, setEngineSystems, parts } = data;
+
+  // ── Standard Disciplines editor ──
+  const EMPTY_D = { code:"", label:"", desc:"", color:"#1d4ed8", bg:"#dbeafe" };
+  const [formD, setFormD] = useState(EMPTY_D);
+  const [editD, setEditD] = useState(null);
+  const [showD, setShowD] = useState(false);
+  const [delD,  setDelD]  = useState(null);
+
+  // ── Engine Systems editor ──
+  const EMPTY_E = { code:"", label:"", color:"#1d4ed8", bg:"#dbeafe" };
+  const [formE, setFormE] = useState(EMPTY_E);
+  const [editE, setEditE] = useState(null);
+  const [showE, setShowE] = useState(false);
+  const [delE,  setDelE]  = useState(null);
+
+  const [toast, setToast] = useState(null);
+  const flash = (text,type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const fStyle = { display:"flex",flexDirection:"column",gap:4 };
+  const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
+
+  // Save discipline
+  const saveD = () => {
+    const code = formD.code.trim().toUpperCase();
+    if(!code||!formD.label.trim()) return flash("Code and Name required","err");
+    if(code.length<2||code.length>3) return flash("Discipline code must be 2–3 chars","err");
+    const rec = { code, label:formD.label.trim(), desc:formD.desc.trim(), color:formD.color, bg:formD.bg };
+    if(editD===null){
+      if(disciplines.find(d=>d.code===code)) return flash("Code already exists","err");
+      setDisciplines(p=>[...p,rec]); flash(`Discipline "${code}" added`);
+    } else {
+      setDisciplines(p=>p.map(d=>d.code===editD?rec:d)); flash(`Discipline "${code}" updated`);
+    }
+    setShowD(false); setEditD(null); setFormD(EMPTY_D);
+  };
+  const deleteD = (d) => {
+    const used=parts.filter(p=>p.disc===d.code).length;
+    if(used>0) return flash(`Cannot delete — ${used} part(s) use this discipline`,"err");
+    setDisciplines(p=>p.filter(x=>x.code!==d.code)); setDelD(null); flash(`Discipline "${d.code}" deleted`);
+  };
+
+  // Save engine system
+  const saveE = () => {
+    const code = formE.code.trim().toUpperCase();
+    if(!code||!formE.label.trim()) return flash("Code and Name required","err");
+    if(code.length<2||code.length>4) return flash("System code must be 2–4 chars","err");
+    const rec = { code, label:formE.label.trim(), color:formE.color, bg:formE.bg };
+    if(editE===null){
+      if(engineSystems.find(s=>s.code===code)) return flash("Code already exists","err");
+      setEngineSystems(p=>[...p,rec]); flash(`Engine System "${code}" added`);
+    } else {
+      setEngineSystems(p=>p.map(s=>s.code===editE?rec:s)); flash(`Engine System "${code}" updated`);
+    }
+    setShowE(false); setEditE(null); setFormE(EMPTY_E);
+  };
+  const deleteE = (s) => {
+    const used=parts.filter(p=>p.disc===s.code).length;
+    if(used>0) return flash(`Cannot delete — ${used} part(s) use this system`,"err");
+    setEngineSystems(p=>p.filter(x=>x.code!==s.code)); setDelE(null); flash(`Engine System "${s.code}" deleted`);
+  };
+
+  const ColorPicker = ({value, bg: bgVal, onChange}) => (
+    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+      {COLOR_PRESETS.map(p=>(
+        <button key={p.color} onClick={()=>onChange(p)} title={p.name}
+          style={{width:28,height:28,borderRadius:5,background:p.bg,border:`3px solid ${value===p.color?p.color:"transparent"}`,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <span style={{width:12,height:12,borderRadius:2,background:p.color,display:"block"}}/>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div>
-      <PageHeader title="Disciplines & System Sections (DD)" sub="Fourth code segment — Standard disciplines for all categories; Engine-specific system sections for EN" />
+      <Toast msg={toast}/>
+      <PageHeader title="Disciplines & Engine Systems (DD)" sub="Fourth code segment — Standard disciplines for all categories; Engine-specific system sections for EN"/>
 
-      {/* Standard Disciplines */}
-      <div style={{ marginBottom:8 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14 }}>
-          <span style={{ fontSize:14,fontWeight:800,color:T.text }}>Standard Disciplines</span>
-          <span style={{ fontSize:12,background:"#dbeafe",color:"#1d4ed8",padding:"2px 10px",borderRadius:4,fontWeight:700 }}>CP · ST · DI · IN · LC · TL · OT</span>
+      {/* ══ STANDARD DISCIPLINES ══ */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontWeight:800,fontSize:16,color:T.text}}>Standard Disciplines</span>
+          <span style={{fontSize:12,background:"#dbeafe",color:"#1d4ed8",padding:"2px 10px",borderRadius:4,fontWeight:700}}>CP · ST · DI · IN · LC · TL · OT</span>
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:16,marginBottom:24 }}>
-          {disciplines.map(d => (
-            <Card key={d.code} style={{ borderTop:`4px solid ${d.color}` }}>
-              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10 }}>
-                <Pill color={d.color} bg={d.bg} size={14}>{d.code}</Pill>
+        <Btn small onClick={()=>{setFormD(EMPTY_D);setEditD(null);setShowD(true);}}>＋ Add Discipline</Btn>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14,marginBottom:28}}>
+        {disciplines.map(d=>(
+          <Card key={d.code} style={{borderTop:`4px solid ${d.color}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <Pill color={d.color} bg={d.bg} size={14}>{d.code}</Pill>
+              <div style={{display:"flex",gap:6}}>
+                <Btn small variant="secondary" onClick={()=>{setFormD({...d});setEditD(d.code);setShowD(true);}}>✏️</Btn>
+                <Btn small variant="danger" onClick={()=>setDelD(d)}>🗑</Btn>
               </div>
-              <div style={{ fontWeight:800,fontSize:18,color:T.text,marginBottom:6 }}>{d.label}</div>
-              <div style={{ fontSize:13,color:T.muted,marginBottom:12 }}>{d.desc}</div>
-              <div style={{ padding:"8px 10px",background:T.subtle,borderRadius:6,fontFamily:"monospace",fontSize:12,color:T.muted }}>
-                AA-BB-CC-<span style={{color:d.color,fontWeight:800}}>{d.code}</span>-EE-0001
-              </div>
-            </Card>
-          ))}
+            </div>
+            <div style={{fontWeight:800,fontSize:17,color:T.text,marginBottom:4}}>{d.label}</div>
+            <div style={{fontSize:13,color:T.muted,marginBottom:10}}>{d.desc}</div>
+            <div style={{padding:"7px 10px",background:T.subtle,borderRadius:5,fontFamily:"monospace",fontSize:11,color:T.muted}}>
+              AA-BB-CC-<span style={{color:d.color,fontWeight:800}}>{d.code}</span>-EE-0001
+            </div>
+          </Card>
+        ))}
+        {/* Add card */}
+        <div onClick={()=>{setFormD(EMPTY_D);setEditD(null);setShowD(true);}}
+          style={{border:`2px dashed ${T.border}`,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer",minHeight:140,color:T.muted,transition:"all .15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=T.accent;e.currentTarget.style.background="#f0f9ff";}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}>
+          <span style={{fontSize:28}}>＋</span><span style={{fontSize:13,fontWeight:700}}>Add Discipline</span>
         </div>
       </div>
 
-      {/* Engine System Sections */}
-      <Card style={{ marginBottom:24,borderLeft:"4px solid #b45309" }}>
-        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16 }}>
-          <span style={{ fontSize:20 }}>🔧</span>
-          <div>
-            <div style={{ fontWeight:800,fontSize:15,color:T.text }}>Engine System Sections</div>
-            <div style={{ fontSize:12,color:T.muted }}>Used exclusively for Engines (EN) category — replaces ME/EL/AC for Caterpillar & Waukesha models</div>
+      {/* ══ ENGINE SYSTEMS ══ */}
+      <Card style={{marginBottom:24,borderLeft:"4px solid #b45309"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:20}}>🔧</span>
+            <div>
+              <div style={{fontWeight:800,fontSize:15,color:T.text}}>Engine System Sections</div>
+              <div style={{fontSize:12,color:T.muted}}>Exclusively for Engines (EN) — replaces ME/EL/AC for Caterpillar & Waukesha</div>
+            </div>
           </div>
-          <span style={{ marginLeft:"auto",fontSize:12,background:"#fef3c7",color:"#b45309",padding:"2px 10px",borderRadius:4,fontWeight:700 }}>EN category only</span>
+          <Btn small onClick={()=>{setFormE(EMPTY_E);setEditE(null);setShowE(true);}}>＋ Add System</Btn>
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10 }}>
-          {engineSystems.map((s,i) => (
-            <div key={s.code} style={{ display:"flex",alignItems:"center",gap:10,background:s.bg,borderRadius:7,padding:"10px 14px",border:`1px solid ${s.color}22` }}>
-              <span style={{ fontFamily:"monospace",fontWeight:800,color:s.color,fontSize:13,minWidth:36 }}>{s.code}</span>
-              <div>
-                <div style={{ fontSize:13,fontWeight:600,color:s.color }}>{s.label}</div>
-                <div style={{ fontFamily:"monospace",fontSize:10,color:T.muted,marginTop:2 }}>EN-CA/WK-MODEL-{s.code}-EE-0001</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10}}>
+          {engineSystems.map(s=>(
+            <div key={s.code} style={{display:"flex",alignItems:"center",gap:10,background:s.bg,borderRadius:7,padding:"10px 14px",border:`1px solid ${s.color}22`}}>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:"monospace",fontWeight:800,color:s.color,fontSize:13}}>{s.code}</div>
+                <div style={{fontSize:13,fontWeight:600,color:s.color,marginTop:2}}>{s.label}</div>
               </div>
+              <div style={{display:"flex",gap:4}}>
+                <Btn small variant="secondary" onClick={()=>{setFormE({...s});setEditE(s.code);setShowE(true);}}>✏️</Btn>
+                <Btn small variant="danger" onClick={()=>setDelE(s)}>🗑</Btn>
+              </div>
+            </div>
+          ))}
+          {/* Add engine system card */}
+          <div onClick={()=>{setFormE(EMPTY_E);setEditE(null);setShowE(true);}}
+            style={{border:`2px dashed #fbbf24`,borderRadius:7,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:70,color:"#b45309",transition:"all .15s",padding:10}}
+            onMouseEnter={e=>{e.currentTarget.style.background="#fef3c7";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+            <span style={{fontSize:22}}>＋</span><span style={{fontSize:12,fontWeight:700}}>Add Engine System</span>
+          </div>
+        </div>
+      </Card>
+
+      <Card style={{marginBottom:24}}>
+        <SectionHeader>Auxiliary Circuits (AC) — Scope</SectionHeader>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8}}>
+          {["Lubrication Systems","Cooling Systems","P&ID Components","Pressure Gauges","Pressure Switches","Pressure Transmitters","Temperature Gauges","Temperature Switches","Temperature Transmitters","Level Gauges","Flow Meters","Relief Valves","Solenoid Valves","Hoses","Fittings","Lubricants","Coolants","Separators","Dryers","Auxiliary Valves"].map(item=>(
+            <div key={item} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#d1fae5",borderRadius:5}}>
+              <span style={{color:"#047857",fontWeight:700}}>✓</span>
+              <span style={{fontSize:13,color:"#065f46"}}>{item}</span>
             </div>
           ))}
         </div>
       </Card>
 
-      <Card style={{ marginBottom:24 }}>
-        <SectionHeader>Auxiliary Circuits (AC) — Scope</SectionHeader>
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8 }}>
-          {["Lubrication Systems","Cooling Systems","P&ID Components","Pressure Gauges","Pressure Switches","Pressure Transmitters","Temperature Gauges","Temperature Switches","Temperature Transmitters","Level Gauges","Flow Meters","Relief Valves","Solenoid Valves","Hoses","Fittings","Lubricants","Coolants","Separators","Dryers","Auxiliary Valves"].map(item=>(
-            <div key={item} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#d1fae5",borderRadius:5 }}>
-              <span style={{ color:"#047857",fontWeight:700 }}>✓</span>
-              <span style={{ fontSize:13,color:"#065f46" }}>{item}</span>
+      {/* ── DISCIPLINE MODAL ── */}
+      {showD&&(
+        <Modal title={editD?`Edit Discipline — ${editD}`:"Add New Discipline"} onClose={()=>{setShowD(false);setFormD(EMPTY_D);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={fStyle}>
+                <label style={lStyle}>Code (2–3 chars) *</label>
+                <Input value={formD.code||""} onChange={e=>setFormD(f=>({...f,code:e.target.value.toUpperCase()}))} placeholder="e.g. ME" maxLength={3}
+                  style={{fontFamily:"monospace",fontWeight:800,fontSize:16,letterSpacing:2}}/>
+              </div>
+              <div style={fStyle}>
+                <label style={lStyle}>Label *</label>
+                <Input value={formD.label||""} onChange={e=>setFormD(f=>({...f,label:e.target.value}))} placeholder="e.g. Mechanical"/>
+              </div>
             </div>
-          ))}
+            <div style={fStyle}>
+              <label style={lStyle}>Description</label>
+              <Input value={formD.desc||""} onChange={e=>setFormD(f=>({...f,desc:e.target.value}))} placeholder="e.g. Rotating & static mechanical components"/>
+            </div>
+            <div style={fStyle}>
+              <label style={lStyle}>Color Theme</label>
+              <ColorPicker value={formD.color} bg={formD.bg} onChange={p=>setFormD(f=>({...f,color:p.color,bg:p.bg}))}/>
+            </div>
+            <div style={{background:T.subtle,borderRadius:8,padding:12,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,marginBottom:6,textTransform:"uppercase"}}>Preview</div>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontFamily:"monospace",fontWeight:800,color:formD.color,background:formD.bg,padding:"3px 10px",borderRadius:4}}>{formD.code||"XX"}</span>
+                <span style={{fontWeight:700,color:T.text}}>{formD.label||"Discipline Name"}</span>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <Btn variant="secondary" onClick={()=>{setShowD(false);setFormD(EMPTY_D);}}>Cancel</Btn>
+              <Btn onClick={saveD}>{editD?"💾 Save Changes":"＋ Add Discipline"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── ENGINE SYSTEM MODAL ── */}
+      {showE&&(
+        <Modal title={editE?`Edit Engine System — ${editE}`:"Add New Engine System"} onClose={()=>{setShowE(false);setFormE(EMPTY_E);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={fStyle}>
+                <label style={lStyle}>Code (2–4 chars) *</label>
+                <Input value={formE.code||""} onChange={e=>setFormE(f=>({...f,code:e.target.value.toUpperCase()}))} placeholder="e.g. FUE" maxLength={4}
+                  style={{fontFamily:"monospace",fontWeight:800,fontSize:16,letterSpacing:2}}/>
+              </div>
+              <div style={fStyle}>
+                <label style={lStyle}>System Name *</label>
+                <Input value={formE.label||""} onChange={e=>setFormE(f=>({...f,label:e.target.value}))} placeholder="e.g. Fuel System"/>
+              </div>
+            </div>
+            <div style={fStyle}>
+              <label style={lStyle}>Color Theme</label>
+              <ColorPicker value={formE.color} bg={formE.bg} onChange={p=>setFormE(f=>({...f,color:p.color,bg:p.bg}))}/>
+            </div>
+            <div style={{background:"#fffbeb",borderRadius:8,padding:12,border:"1px solid #fbbf24"}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,marginBottom:6,textTransform:"uppercase"}}>Preview</div>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontFamily:"monospace",fontWeight:800,color:formE.color,background:formE.bg,padding:"3px 10px",borderRadius:4}}>{formE.code||"XXX"}</span>
+                <span style={{fontWeight:700,color:T.text}}>{formE.label||"System Name"}</span>
+              </div>
+              <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}>EN-CA/WK-MODEL-<span style={{color:formE.color,fontWeight:700}}>{formE.code||"XXX"}</span>-EE-0001</div>
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <Btn variant="secondary" onClick={()=>{setShowE(false);setFormE(EMPTY_E);}}>Cancel</Btn>
+              <Btn onClick={saveE}>{editE?"💾 Save Changes":"＋ Add Engine System"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* DELETE CONFIRM — Discipline */}
+      {delD&&(<Modal title="Delete Discipline" onClose={()=>setDelD(null)}>
+        <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:16}}>
+          <div style={{fontWeight:800,color:T.danger}}>{delD.code} — {delD.label}</div>
+          <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.disc===delD.code).length} parts use this</div>
         </div>
-      </Card>
+        <p style={{fontSize:13,color:T.text,marginBottom:16,lineHeight:1.6}}>
+          {parts.filter(p=>p.disc===delD.code).length>0
+            ?<strong style={{color:T.danger}}>Remove all parts in this discipline first.</strong>
+            :"This action cannot be undone."}
+        </p>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <Btn variant="secondary" onClick={()=>setDelD(null)}>Cancel</Btn>
+          <Btn variant="danger" onClick={()=>deleteD(delD)}>🗑 Delete</Btn>
+        </div>
+      </Modal>)}
+
+      {/* DELETE CONFIRM — Engine System */}
+      {delE&&(<Modal title="Delete Engine System" onClose={()=>setDelE(null)}>
+        <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:16}}>
+          <div style={{fontWeight:800,color:T.danger}}>{delE.code} — {delE.label}</div>
+          <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.disc===delE.code).length} parts use this</div>
+        </div>
+        <p style={{fontSize:13,color:T.text,marginBottom:16,lineHeight:1.6}}>
+          {parts.filter(p=>p.disc===delE.code).length>0
+            ?<strong style={{color:T.danger}}>Remove all parts in this system first.</strong>
+            :"This action cannot be undone."}
+        </p>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <Btn variant="secondary" onClick={()=>setDelE(null)}>Cancel</Btn>
+          <Btn variant="danger" onClick={()=>deleteE(delE)}>🗑 Delete</Btn>
+        </div>
+      </Modal>)}
 
       <CodeLegend items={[
         ...disciplines.map(d=>({code:d.code,label:d.label+" (Standard)"})),
         ...engineSystems.map(s=>({code:s.code,label:s.label+" (Engine Only)"})),
-      ]} />
+      ]}/>
     </div>
   );
 }
 
 // ─── FUNCTIONAL GROUPS ────────────────────────────────────────
 function FunctionalGroupsPage({ data }) {
-  const { funcGroups, setFuncGroups, disciplines } = data;
-  const grouped = disciplines.map(d => ({
-    ...d,
-    items: funcGroups.filter(f=>f.disc===d.code),
-  }));
-  const cols = [
-    { key:"code", label:"Code", render:r=><Pill>{r.code}</Pill> },
-    { key:"label", label:"Functional Group", style:{fontWeight:600,color:T.text} },
-    { key:"disc", label:"Discipline", render:r=>{const dsc=T.disc[r.disc]||{c:T.muted,b:T.subtle};return <Pill color={dsc.c} bg={dsc.b}>{r.disc}</Pill>;} },
-    { key:"actions", label:"Actions", render:(r,edit,del)=>(
-      <div style={{display:"flex",gap:6}}>
-        <Btn small variant="secondary" onClick={()=>edit(r)}>Edit</Btn>
-        <Btn small variant="danger" onClick={()=>del(r.code)}>Delete</Btn>
-      </div>
-    )},
-  ];
+  const { funcGroups, setFuncGroups, disciplines, parts } = data;
+  const EMPTY = { code:"", label:"", disc:"ME" };
+  const [form, setForm] = useState(EMPTY);
+  const [editingCode, setEditingCode] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const flash = (text,type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+  const filtered = useMemo(()=>{
+    const q=search.toLowerCase();
+    return !q ? funcGroups : funcGroups.filter(f=>f.code.toLowerCase().includes(q)||f.label.toLowerCase().includes(q));
+  },[funcGroups,search]);
+
+  const openAdd  = (disc="ME") => { setForm({...EMPTY,disc}); setEditingCode(null); setShowForm(true); };
+  const openEdit = (fg) => { setForm({...fg}); setEditingCode(fg.code); setShowForm(true); };
+  const closeForm= () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
+
+  const handleSave = () => {
+    const code = form.code.trim().toUpperCase();
+    if(!code||!form.label.trim()||!form.disc) return flash("All fields are required","err");
+    if(code.length<2||code.length>4) return flash("Code must be 2–4 characters","err");
+    const rec = { code, label:form.label.trim(), disc:form.disc };
+    if(editingCode===null){
+      if(funcGroups.find(f=>f.code===code)) return flash(`Code "${code}" already exists`,"err");
+      setFuncGroups(p=>[...p,rec]); flash(`Functional Group "${code}" added`);
+    } else {
+      if(code!==editingCode && funcGroups.find(f=>f.code===code)) return flash(`Code "${code}" already exists`,"err");
+      setFuncGroups(p=>p.map(f=>f.code===editingCode?rec:f)); flash(`Functional Group "${code}" updated`);
+    }
+    closeForm();
+  };
+
+  const handleDelete = (fg) => {
+    const used=parts.filter(p=>p.fg===fg.code).length;
+    if(used>0) return flash(`Cannot delete "${fg.code}" — ${used} part(s) use it.`,"err");
+    setFuncGroups(p=>p.filter(f=>f.code!==fg.code)); setDeleteTarget(null); flash(`"${fg.code}" deleted`);
+  };
+
+  const fStyle = { display:"flex",flexDirection:"column",gap:4 };
+  const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
+
   return (
     <div>
-      <PageHeader title="Functional Groups (EE)" sub="Component function classification — fifth code segment" />
-      {grouped.map(g => (
-        <Card key={g.code} style={{ marginBottom:20,borderLeft:`4px solid ${g.color}` }}>
-          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14 }}>
-            <Pill color={g.color} bg={g.bg} size={13}>{g.code}</Pill>
-            <span style={{ fontWeight:700,fontSize:15,color:T.text }}>{g.label}</span>
-            <span style={{ fontSize:12,color:T.muted }}>({g.items.length} groups)</span>
-          </div>
-          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8 }}>
-            {g.items.map(fg => (
-              <div key={fg.code} style={{ display:"flex",alignItems:"center",gap:8,background:T.subtle,borderRadius:6,padding:"7px 12px",border:`1px solid ${T.border}` }}>
-                <Pill color={g.color} bg={g.bg} size={11}>{fg.code}</Pill>
-                <span style={{ fontSize:13,color:T.text }}>{fg.label}</span>
+      <Toast msg={toast}/>
+      <PageHeader title="Functional Groups (EE)" sub="Add, edit, or remove functional component groups — fifth code segment"/>
+
+      <Card style={{marginBottom:20}}>
+        <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search functional groups…" style={{maxWidth:260,width:"auto"}}/>
+          <span style={{fontSize:13,color:T.muted}}>{filtered.length} of {funcGroups.length}</span>
+          <div style={{marginLeft:"auto"}}><Btn onClick={()=>openAdd()}>＋ Add Functional Group</Btn></div>
+        </div>
+      </Card>
+
+      {/* Grouped by discipline */}
+      {disciplines.map(disc=>{
+        const items = filtered.filter(f=>f.disc===disc.code);
+        if(items.length===0&&search) return null;
+        return (
+          <div key={disc.code} style={{marginBottom:24}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontFamily:"monospace",fontWeight:800,fontSize:14,color:disc.color,background:disc.bg,padding:"3px 10px",borderRadius:4}}>{disc.code}</span>
+                <span style={{fontWeight:800,fontSize:15,color:T.text}}>{disc.label}</span>
+                <span style={{fontSize:12,color:T.muted}}>({items.length} group{items.length!==1?"s":""})</span>
               </div>
-            ))}
+              <Btn small onClick={()=>openAdd(disc.code)}>＋ Add to {disc.label}</Btn>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
+              {items.map(fg=>{
+                const pc=parts.filter(p=>p.fg===fg.code).length;
+                return (
+                  <Card key={fg.code} style={{borderLeft:`3px solid ${disc.color}`,padding:14}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:disc.color,background:disc.bg,padding:"2px 8px",borderRadius:4}}>{fg.code}</span>
+                      <span style={{fontSize:11,color:T.muted,fontWeight:600}}>{pc} part{pc!==1?"s":""}</span>
+                    </div>
+                    <div style={{fontWeight:600,fontSize:14,color:T.text,marginBottom:10}}>{fg.label}</div>
+                    <div style={{display:"flex",gap:6}}>
+                      <Btn small variant="secondary" onClick={()=>openEdit(fg)} style={{flex:1}}>✏️ Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(fg)} style={{flex:1}}>🗑</Btn>
+                    </div>
+                  </Card>
+                );
+              })}
+              {/* Add card */}
+              <div onClick={()=>openAdd(disc.code)}
+                style={{border:`2px dashed ${disc.color}44`,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:100,color:disc.color,transition:"all .15s",padding:10}}
+                onMouseEnter={e=>{e.currentTarget.style.background=disc.bg+"66";}}
+                onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+                <span style={{fontSize:24}}>＋</span>
+                <span style={{fontSize:12,fontWeight:700}}>Add {disc.code} Group</span>
+              </div>
+            </div>
           </div>
-        </Card>
-      ))}
-      <CodeLegend items={funcGroups.map(f=>({code:f.code,label:f.label}))} />
+        );
+      })}
+
+      {/* ADD / EDIT MODAL */}
+      {showForm&&(
+        <Modal title={editingCode?`Edit Functional Group — ${editingCode}`:"Add New Functional Group"} onClose={closeForm}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={fStyle}>
+                <label style={lStyle}>Code (2–4 chars) *</label>
+                <Input value={form.code||""} onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))} placeholder="e.g. BRG" maxLength={4}
+                  style={{fontFamily:"monospace",fontWeight:800,fontSize:16,letterSpacing:2}}/>
+              </div>
+              <div style={fStyle}>
+                <label style={lStyle}>Discipline *</label>
+                <Select value={form.disc||"ME"} onChange={e=>setForm(f=>({...f,disc:e.target.value}))}>
+                  {disciplines.map(d=><option key={d.code} value={d.code}>{d.code} — {d.label}</option>)}
+                </Select>
+              </div>
+            </div>
+            <div style={fStyle}>
+              <label style={lStyle}>Group Name *</label>
+              <Input value={form.label||""} onChange={e=>setForm(f=>({...f,label:e.target.value}))} placeholder="e.g. Bearing"/>
+            </div>
+            {/* Preview */}
+            {(()=>{const d=disciplines.find(x=>x.code===form.disc);return(
+              <div style={{background:T.subtle,borderRadius:8,padding:12,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.muted,marginBottom:6,textTransform:"uppercase"}}>Preview</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:d?.color||T.muted,background:d?.bg||T.subtle,padding:"3px 10px",borderRadius:4}}>{form.code||"EE"}</span>
+                  <span style={{fontWeight:700,color:T.text}}>{form.label||"Group Name"}</span>
+                  <span style={{fontSize:11,color:T.muted}}>({d?.label})</span>
+                </div>
+                <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}>
+                  AA-BB-CC-{form.disc||"DD"}-<span style={{color:d?.color||T.muted,fontWeight:700}}>{form.code||"EE"}</span>-0001
+                </div>
+              </div>
+            );})()}
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
+              <Btn onClick={handleSave}>{editingCode?"💾 Save Changes":"＋ Add Group"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* DELETE CONFIRM */}
+      {deleteTarget&&(
+        <Modal title="Delete Functional Group" onClose={()=>setDeleteTarget(null)}>
+          <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:16}}>
+            <div style={{fontWeight:800,color:T.danger}}>{deleteTarget.code} — {deleteTarget.label}</div>
+            <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.fg===deleteTarget.code).length} parts use this group</div>
+          </div>
+          <p style={{fontSize:13,color:T.text,marginBottom:16,lineHeight:1.6}}>
+            {parts.filter(p=>p.fg===deleteTarget.code).length>0
+              ?<strong style={{color:T.danger}}>Remove all parts in this group first.</strong>
+              :"Are you sure? This action cannot be undone."}
+          </p>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete</Btn>
+          </div>
+        </Modal>
+      )}
+
+      <CodeLegend items={funcGroups.map(f=>({code:f.code,label:f.label}))}/>
     </div>
   );
 }
@@ -1357,12 +2192,12 @@ export default function App() {
   const [categories,    setCategories]    = useState(INIT_CATEGORIES);
   const [manufacturers, setManufacturers] = useState(INIT_MANUFACTURERS);
   const [models,        setModels]        = useState(INIT_MODELS);
-  const [disciplines]                     = useState(INIT_DISCIPLINES);
+  const [disciplines,   setDisciplines]   = useState(INIT_DISCIPLINES);
   const [engineSystems, setEngineSystems] = useState(ENGINE_SYSTEMS);
   const [funcGroups,    setFuncGroups]    = useState(INIT_FUNC_GROUPS);
   const [parts,         setParts]         = useState(INIT_PARTS);
 
-  const data = { categories, setCategories, manufacturers, setManufacturers, models, setModels, disciplines, engineSystems, setEngineSystems, funcGroups, setFuncGroups, parts, setParts };
+  const data = { categories, setCategories, manufacturers, setManufacturers, models, setModels, disciplines, setDisciplines, engineSystems, setEngineSystems, funcGroups, setFuncGroups, parts, setParts };
 
   const pageMap = {
     dashboard:     <Dashboard data={data} />,
