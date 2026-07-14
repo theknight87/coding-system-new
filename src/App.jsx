@@ -727,12 +727,19 @@ function CrudPage({ title, sub, items, setItems, fields, renderRow, emptyMsg, le
     setShowModal(false);
   };
 
-  const handleDelete = (code) => {
-    setItems(prev => prev.filter(i => i.code !== code));
-    setDeleteId(null);
-    flash("Record deleted");
-  };
+  const handleDelete = async (cat) => {
+    const usedCount = parts.filter(p => p.cat === cat.code).length;
+    if (usedCount > 0) return flash(`Cannot delete — it has ${usedCount} coded part(s).`,"err");
+    
+    // إرسال أمر الحذف لقاعدة البيانات
+    const { error } = await db.softDeleteCategory(cat.code);
+    if (error) return flash(`DB Error: ${error.message}`, "err");
 
+    // إذا نجح الحذف، نقوم بتحديث الشاشة
+    setCategories(prev => prev.filter(c => c.code !== cat.code));
+    setDeleteTarget(null);
+    flash(`Category "${cat.code}" deleted successfully`);
+  };
   return (
     <div>
       <Toast msg={toast} />
