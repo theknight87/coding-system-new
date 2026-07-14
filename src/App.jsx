@@ -1021,23 +1021,39 @@ function CategoriesPage({ data }) {
   const openEdit = (cat) => { setForm({...cat}); setEditingCode(cat.code); setShowForm(true); };
   const closeForm = () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
 
-  const handleSave = () => {
-    const code = form.code.trim().toUpperCase();
-    if (!code || !form.label.trim()) return flash("Code and Name are required","err");
-    if (code.length !== 2) return flash("Category code must be exactly 2 characters","err");
-    if (editingCode === null) {
-      // Adding new
-      if (categories.find(c => c.code === code)) return flash(`Code "${code}" already exists`,"err");
-      setCategories(prev => [...prev, { ...form, code }]);
-      flash(`Category "${code} — ${form.label}" added successfully`);
-    } else {
-      // Editing existing
-      if (code !== editingCode && categories.find(c => c.code === code)) return flash(`Code "${code}" already exists`,"err");
-      setCategories(prev => prev.map(c => c.code === editingCode ? { ...form, code } : c));
-      flash(`Category "${code}" updated successfully`);
-    }
-    closeForm();
-  };
+  const handleSave = async () => {
+    const code = form.code.trim().toUpperCase();
+    if (!code || !form.label.trim()) return flash("Code and Name are required","err");
+    if (code.length !== 2) return flash("Category code must be exactly 2 characters","err");
+    
+    // تجهيز البيانات
+    const recordToSave = { ...form, code };
+
+    if (editingCode === null) {
+      // 1. التأكد إن الكود مش متكرر محلياً
+      if (categories.find(c => c.code === code)) return flash(`Code "${code}" already exists`,"err");
+      
+      // 2. الحفظ في قاعدة البيانات (Supabase)
+      const { error } = await db.insertCategory(recordToSave);
+      if (error) return flash(`DB Error: ${error.message}`, "err");
+
+      // 3. تحديث الواجهة محلياً
+      setCategories(prev => [...prev, recordToSave]);
+      flash(`Category "${code} — ${form.label}" added successfully`);
+    } else {
+      // 1. التأكد أثناء التعديل
+      if (code !== editingCode && categories.find(c => c.code === code)) return flash(`Code "${code}" already exists`,"err");
+      
+      // 2. التعديل في قاعدة البيانات
+      const { error } = await db.updateCategory(editingCode, recordToSave);
+      if (error) return flash(`DB Error: ${error.message}`, "err");
+
+      // 3. تحديث الواجهة محلياً
+      setCategories(prev => prev.map(c => c.code === editingCode ? recordToSave : c));
+      flash(`Category "${code}" updated successfully`);
+    }
+    closeForm();
+  };
 
   const handleDelete = (cat) => {
     const usedCount = parts.filter(p => p.cat === cat.code).length;
