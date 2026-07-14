@@ -1062,13 +1062,19 @@ function CategoriesPage({ data }) {
     closeForm();
   };
 
-  const handleDelete = (cat) => {
-    const usedCount = parts.filter(p => p.cat === cat.code).length;
-    if (usedCount > 0) return flash(`Cannot delete "${cat.code}" — it has ${usedCount} coded part(s). Remove those parts first.`,"err");
-    setCategories(prev => prev.filter(c => c.code !== cat.code));
-    setDeleteTarget(null);
-    flash(`Category "${cat.code}" deleted`);
-  };
+  const handleDelete = async (cat) => {
+    const usedCount = parts.filter(p => p.cat === cat.code).length;
+    if (usedCount > 0) return flash(`Cannot delete — it has ${usedCount} coded part(s).`,"err");
+    
+    // إرسال أمر الحذف لقاعدة البيانات
+    const { error } = await db.softDeleteCategory(cat.code);
+    if (error) return flash(`DB Error: ${error.message}`, "err");
+
+    // إذا نجح الحذف، نقوم بتحديث الشاشة
+    setCategories(prev => prev.filter(c => c.code !== cat.code));
+    setDeleteTarget(null);
+    flash(`Category "${cat.code}" deleted successfully`);
+  };
 
   const setColor = (preset) => setForm(f=>({...f, color: preset.color, bg: preset.bg}));
 
