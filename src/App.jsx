@@ -1866,7 +1866,7 @@ function DisciplinesPage({ data }) {
   const { disciplines, engineSystems, parts, ops } = data;
 
   // ── Standard Disciplines editor ──
-  const EMPTY_D = { code:"", label:"", desc:"", color:"#1d4ed8", bg:"#dbeafe" };
+  const EMPTY_D = { code:"", label:"", description:"", color:"#1d4ed8", bg:"#dbeafe" };
   const [formD, setFormD] = useState(EMPTY_D);
   const [editD, setEditD] = useState(null);
   const [showD, setShowD] = useState(false);
