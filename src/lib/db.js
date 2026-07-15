@@ -23,7 +23,7 @@ export async function fetchCategories() {
   return supabase.from('categories').select('*').is('deleted_at', null).order('code');
 }
 export async function insertCategory(row) {
-  const { data, error } = await supabase.from('categories').insert(row).select().single();
+  const { data, error } = await supabase.from('categories').upsert(row, { onConflict: 'code', ignoreDuplicates: false }).select().single();
   if (!error) await logAudit('CREATE', 'categories', data.code, null, data);
   return { data, error };
 }
@@ -80,7 +80,7 @@ export async function softDeleteModel(code) {
 
 // ─── DISCIPLINES ──────────────────────────────────────────────
 export async function fetchDisciplines() {
-  return supabase.from('disciplines').select('*').is('deleted_at', null).order('code');
+  return supabase.from('disciplines').select('code,label,description,color,bg,deleted_at').is('deleted_at', null).order('code');
 }
 export async function insertDiscipline(row) {
   const { data, error } = await supabase.from('disciplines').insert(row).select().single();
