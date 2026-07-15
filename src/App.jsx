@@ -1891,7 +1891,7 @@ function DisciplinesPage({ data }) {
     if(!code||!formD.label.trim()) return flash("Code and Name required","err");
     if(code.length<2||code.length>3) return flash("Discipline code must be 2–3 chars","err");
     if(editD===null && disciplines.find(d=>d.code===code)) return flash("Code already exists","err");
-    const rec = { code, label:formD.label.trim(), desc:formD.desc.trim(), color:formD.color, bg:formD.bg };
+    const rec = { code, label:formD.label.trim(), description:formD.desc.trim(), color:formD.color, bg:formD.bg };
     const { error } = await ops.saveDiscipline(rec, editD);
     if(error) return flash(`Error: ${error.message}`,"err");
     flash(editD ? `Discipline "${code}" updated` : `Discipline "${code}" added`);
