@@ -284,7 +284,7 @@ function useDb(initData) {
         });
         return { error: null };
       }
-      const dbRow = { code:row.code, label:row.label, desc:row.desc??'', color:row.color, bg:row.bg };
+      const dbRow = { code:row.code, label:row.label, description:row.desc??'', color:row.color, bg:row.bg };
       const res = editingCode
         ? await db.updateDiscipline(editingCode, dbRow)
         : await db.insertDiscipline(dbRow);
