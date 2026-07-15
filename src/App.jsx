@@ -126,7 +126,7 @@ function LoginPage() {
 const mapCat   = r => ({ code:r.code, label:r.label, icon:r.icon, color:r.color, bg:r.bg });
 const mapMfr   = r => ({ code:r.code, label:r.label, catCodes:r.cat_codes??[] });
 const mapModel = r => ({ code:r.code, label:r.label, mfrCode:r.mfr_code });
-const mapDisc  = r => ({ code:r.code, label:r.label, desc:r.desc??'', color:r.color, bg:r.bg });
+const mapDisc  = r => ({ code:r.code, label:r.label, desc:r.description??r.desc??'', color:r.color, bg:r.bg });
 const mapEng   = r => ({ code:r.code, label:r.label, color:r.color, bg:r.bg });
 const mapFg    = r => ({ code:r.code, label:r.label, disc:r.disc });
 const mapPart  = r => ({
@@ -2311,61 +2311,88 @@ function FunctionalGroupsPage({ data }) {
 
 // ─── CODE GENERATOR ───────────────────────────────────────────
 function CodeGeneratorPage({ data }) {
-  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts, ops } = data;
-  const [step, setStep] = useState({ cat:"",mfr:"",model:"",disc:"",fg:"" });
-  const [toast, setToast] = useState(null);
-  const flash = (text,type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3000); };
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts, ops, dbReady } = data;
+  const [step,      setStep]      = useState({ cat:"",mfr:"",model:"",disc:"",fg:"" });
+  const [seqMode,   setSeqMode]   = useState("auto");   // "auto" | "manual"
+  const [manualSeq, setManualSeq] = useState("");
+  const [partNo,    setPartNo]    = useState("");
+  const [oemPart,   setOemPart]   = useState("");
+  const [qty,       setQty]       = useState(0);
+  const [unit,      setUnit]      = useState("EA");
+  const [loc,       setLoc]       = useState("");
+  const [remarks,   setRemarks]   = useState("");
+  const [imageUrl,  setImageUrl]  = useState(null);
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [toast,     setToast]     = useState(null);
 
-  const isEngine = step.cat === "EN";
+  const flash = (text,type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const isEngine       = step.cat === "EN";
   const activeSections = isEngine ? engineSystems : disciplines;
-
-  const filteredMfrs = manufacturers.filter(m => !step.cat || (m.catCodes||[]).includes(step.cat));
+  const filteredMfrs   = manufacturers.filter(m => !step.cat || (m.catCodes||[]).includes(step.cat));
   const filteredModels = models.filter(m => !step.mfr || m.mfrCode === step.mfr);
-  // For engines, all functional groups are available (no disc filter), for others filter by disc
-  const filteredFG = isEngine
-    ? funcGroups.filter(f => !step.disc || true) // all FGs available for engine systems
+  const filteredFG     = isEngine
+    ? funcGroups
     : funcGroups.filter(f => !step.disc || f.disc === step.disc);
 
   const canGenerate = step.cat && step.mfr && step.model && step.disc && step.fg;
 
-  const nextSeq = () => {
+  // Auto sequence
+  const autoSeq = useMemo(() => {
+    if (!canGenerate) return "0001";
     const prefix = `${step.cat}-${step.mfr}-${step.model}-${step.disc}-${step.fg}-`;
     const existing = parts.filter(p => p.code.startsWith(prefix));
     const nums = existing.map(p => parseInt(p.code.split("-").pop() || "0"));
     const max = nums.length ? Math.max(...nums) : 0;
     return String(max + 1).padStart(4, "0");
-  };
+  }, [canGenerate, step, parts]);
 
-  const seqNum = canGenerate ? nextSeq() : "0001";
+  const seqNum = seqMode === "auto"
+    ? autoSeq
+    : String(parseInt(manualSeq)||1).padStart(4,"0");
+
   const generatedCode = canGenerate ? `${step.cat}-${step.mfr}-${step.model}-${step.disc}-${step.fg}-${seqNum}` : null;
 
-  const cat = categories.find(c=>c.code===step.cat);
-  const mfr = manufacturers.find(m=>m.code===step.mfr);
-  const model = models.find(m=>m.code===step.model);
-  const disc = isEngine
-    ? engineSystems.find(s=>s.code===step.disc)
-    : disciplines.find(d=>d.code===step.disc);
-  const fg = funcGroups.find(f=>f.code===step.fg);
+  // Check if code already exists
+  const codeExists = generatedCode && parts.some(p => p.code === generatedCode);
 
-  const shortDesc = (mfr&&model&&fg) ? `${mfr.label} ${model.label.replace("Model ","")} ${fg.label}` : "—";
-  const longDesc = (fg&&mfr&&cat&&model) ? `${fg.label} for ${mfr.label} ${cat.label} ${model.label}` : "—";
+  const cat   = categories.find(c=>c.code===step.cat);
+  const mfr   = manufacturers.find(m=>m.code===step.mfr);
+  const model = models.find(m=>m.code===step.model);
+  const disc  = isEngine ? engineSystems.find(s=>s.code===step.disc) : disciplines.find(d=>d.code===step.disc);
+  const fg    = funcGroups.find(f=>f.code===step.fg);
+
+  const shortDesc = (mfr&&model&&fg) ? `${mfr.label} ${model.label} ${fg.label}` : "—";
+  const longDesc  = (fg&&mfr&&cat&&model) ? `${fg.label} for ${mfr.label} ${cat.label} ${model.label}` : "—";
+
+  // Reset saved state when step changes
+  useEffect(() => { setSaved(false); setImageUrl(null); }, [step, seqMode, manualSeq]);
 
   const handleSave = async () => {
-    if(!canGenerate) return;
+    if (!canGenerate) return;
+    if (codeExists) return flash(`Code "${generatedCode}" already exists in the database`,"err");
     const newPart = {
-      code: generatedCode,
-      shortDesc, longDesc,
-      cat: step.cat, mfr: step.mfr, model: step.model,
-      disc: step.disc, fg: step.fg,
-      partNo:"", oemPart:"", qty:0, unit:"EA", loc:"",
-      minStock:0, maxStock:0, remarks:"", status:"Active",
+      code:generatedCode, shortDesc, longDesc,
+      cat:step.cat, mfr:step.mfr, model:step.model, disc:step.disc, fg:step.fg,
+      partNo, oemPart, qty:Number(qty)||0, unit, loc, minStock:0, maxStock:0,
+      remarks, status:"Active", imageUrl:imageUrl||null, datasheetUrl:null,
     };
+    setSaving(true);
     const { error } = await ops.savePart(newPart, null);
-    if(error) { flash(`Error saving: ${error.message}`,"err"); return; }
-    flash(`Code ${generatedCode} saved to Master Table`);
+    setSaving(false);
+    if (error) { flash(`Error: ${error.message}`,"err"); return; }
+    setSaved(true);
+    flash(`✅ Code ${generatedCode} saved to Master Table`);
   };
 
-  const sStep = { padding:"10px 16px", borderRadius:6, background:T.subtle, border:`1px solid ${T.border}`, marginBottom:14 };
+  const resetForm = () => {
+    setStep({cat:"",mfr:"",model:"",disc:"",fg:""});
+    setSeqMode("auto"); setManualSeq(""); setPartNo(""); setOemPart("");
+    setQty(0); setUnit("EA"); setLoc(""); setRemarks(""); setImageUrl(null); setSaved(false);
+  };
+
+  const sStep  = { padding:"10px 16px", borderRadius:6, background:T.subtle, border:`1px solid ${T.border}`, marginBottom:12 };
   const sLabel = { fontSize:11, fontWeight:700, color:T.muted, letterSpacing:1, textTransform:"uppercase", marginBottom:6, display:"block" };
 
   return (
@@ -2373,10 +2400,12 @@ function CodeGeneratorPage({ data }) {
       <Toast msg={toast} />
       <PageHeader title="Code Generator" sub="Build a valid 6-segment spare part code step by step" />
 
-      <div style={{ display:"grid",gridTemplateColumns:"1.1fr 1fr",gap:20 }}>
-        {/* Steps */}
+      <div style={{ display:"grid", gridTemplateColumns:"1.1fr 1fr", gap:20, alignItems:"start" }}>
+
+        {/* ── LEFT: Steps ── */}
         <Card>
           <SectionHeader>Step-by-Step Selection</SectionHeader>
+
           {/* Step 1 */}
           <div style={sStep}>
             <span style={sLabel}>Step 1 — AA: Main Category</span>
@@ -2385,100 +2414,187 @@ function CodeGeneratorPage({ data }) {
               {categories.map(c=><option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
             </Select>
           </div>
+
           {/* Step 2 */}
-          <div style={{...sStep,opacity:step.cat?1:0.5}}>
+          <div style={{...sStep,opacity:step.cat?1:0.4}}>
             <span style={sLabel}>Step 2 — BB: Manufacturer</span>
             <Select value={step.mfr} onChange={e=>setStep(s=>({...s,mfr:e.target.value,model:"",disc:"",fg:""}))} disabled={!step.cat}>
               <option value="">Select Manufacturer…</option>
               {filteredMfrs.map(m=><option key={m.code} value={m.code}>{m.code} — {m.label}</option>)}
             </Select>
           </div>
+
           {/* Step 3 */}
-          <div style={{...sStep,opacity:step.mfr?1:0.5}}>
+          <div style={{...sStep,opacity:step.mfr?1:0.4}}>
             <span style={sLabel}>Step 3 — CC: Equipment Model</span>
             <Select value={step.model} onChange={e=>setStep(s=>({...s,model:e.target.value,disc:"",fg:""}))} disabled={!step.mfr}>
               <option value="">Select Model…</option>
               {filteredModels.map(m=><option key={m.code} value={m.code}>{m.code} — {m.label}</option>)}
             </Select>
           </div>
+
           {/* Step 4 */}
-          <div style={{...sStep,opacity:step.model?1:0.5,borderColor:isEngine?"#fbbf24":"#e2e8f0",background:isEngine?"#fffbeb":T.subtle}}>
-            <span style={sLabel}>Step 4 — DD: {isEngine ? "Engine System Section" : "Discipline"}</span>
-            {isEngine && <div style={{ fontSize:11,color:"#b45309",marginBottom:6,fontWeight:600 }}>🔧 Engine-specific system sections</div>}
+          <div style={{...sStep,opacity:step.model?1:0.4,borderColor:isEngine?"#fbbf24":T.border,background:isEngine?"#fffbeb":T.subtle}}>
+            <span style={sLabel}>Step 4 — DD: {isEngine?"Engine System":"Discipline"}</span>
+            {isEngine&&<div style={{fontSize:11,color:"#b45309",marginBottom:6,fontWeight:600}}>🔧 Engine-specific system sections</div>}
             <Select value={step.disc} onChange={e=>setStep(s=>({...s,disc:e.target.value,fg:""}))} disabled={!step.model}>
-              <option value="">{isEngine ? "Select Engine System…" : "Select Discipline…"}</option>
+              <option value="">{isEngine?"Select Engine System…":"Select Discipline…"}</option>
               {activeSections.map(d=><option key={d.code} value={d.code}>{d.code} — {d.label}</option>)}
             </Select>
           </div>
+
           {/* Step 5 */}
-          <div style={{...sStep,opacity:step.disc?1:0.5}}>
+          <div style={{...sStep,opacity:step.disc?1:0.4}}>
             <span style={sLabel}>Step 5 — EE: Functional Group</span>
             <Select value={step.fg} onChange={e=>setStep(s=>({...s,fg:e.target.value}))} disabled={!step.disc}>
               <option value="">Select Functional Group…</option>
               {filteredFG.map(f=><option key={f.code} value={f.code}>{f.code} — {f.label}</option>)}
             </Select>
           </div>
-          {/* Step 6 */}
-          <div style={{...sStep,background:"#f0f9ff",borderColor:"#bae6fd",opacity:canGenerate?1:0.5}}>
-            <span style={sLabel}>Step 6 — NNNN: Auto Sequence</span>
-            <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:22,color:T.accent }}>{seqNum}</div>
-            <div style={{ fontSize:11,color:T.muted,marginTop:4 }}>Auto-incremented from existing codes in this series</div>
+
+          {/* Step 6 — Sequence (auto + manual) */}
+          <div style={{...sStep,background:"#f0f9ff",borderColor:"#bae6fd",opacity:canGenerate?1:0.4}}>
+            <span style={sLabel}>Step 6 — NNNN: Sequence Number</span>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <button onClick={()=>setSeqMode("auto")}
+                style={{flex:1,padding:"6px",borderRadius:5,border:`2px solid ${seqMode==="auto"?T.accent:T.border}`,background:seqMode==="auto"?T.accentLight:"#fff",color:seqMode==="auto"?T.accent:T.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                🔄 Auto
+              </button>
+              <button onClick={()=>setSeqMode("manual")}
+                style={{flex:1,padding:"6px",borderRadius:5,border:`2px solid ${seqMode==="manual"?"#047857":T.border}`,background:seqMode==="manual"?"#d1fae5":"#fff",color:seqMode==="manual"?"#047857":T.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                ✏️ Manual
+              </button>
+            </div>
+            {seqMode==="auto"
+              ? <div style={{fontFamily:"monospace",fontWeight:800,fontSize:22,color:T.accent}}>{autoSeq}
+                  <span style={{fontSize:11,color:T.muted,fontWeight:400,marginLeft:10}}>auto-incremented</span>
+                </div>
+              : <Input
+                  type="number" min={1} max={9999}
+                  value={manualSeq}
+                  onChange={e=>setManualSeq(e.target.value)}
+                  placeholder="e.g. 5"
+                  style={{fontFamily:"monospace",fontWeight:800,fontSize:18}}
+                />
+            }
           </div>
+
+          {/* Part details (optional, before save) */}
+          {canGenerate && (
+            <div style={{marginTop:4}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10}}>
+                Part Details (Optional)
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                <div><label style={sLabel}>Part No.</label><Input value={partNo} onChange={e=>setPartNo(e.target.value)} placeholder="e.g. AN-BRG-001"/></div>
+                <div><label style={sLabel}>OEM Part No.</label><Input value={oemPart} onChange={e=>setOemPart(e.target.value)} placeholder="e.g. 1234567"/></div>
+                <div><label style={sLabel}>Qty</label><Input type="number" value={qty} onChange={e=>setQty(e.target.value)} placeholder="0"/></div>
+                <div>
+                  <label style={sLabel}>Unit</label>
+                  <Select value={unit} onChange={e=>setUnit(e.target.value)}>
+                    {["EA","SET","KIT","L","KG","M","BOX","ROLL"].map(u=><option key={u}>{u}</option>)}
+                  </Select>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}><label style={sLabel}>Location</label><Input value={loc} onChange={e=>setLoc(e.target.value)} placeholder="e.g. WH-A1"/></div>
+              <div><label style={sLabel}>Remarks</label><Input value={remarks} onChange={e=>setRemarks(e.target.value)} placeholder="e.g. Critical spare, change every 500hr"/></div>
+            </div>
+          )}
         </Card>
 
-        {/* Output Panel */}
-        <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+        {/* ── RIGHT: Output + Image ── */}
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+
           {/* Generated Code */}
-          <Card style={{ borderTop:`3px solid ${T.accent}` }}>
-            <div style={{ fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:12 }}>Generated Code</div>
-            {generatedCode
-              ? <>
-                  <div style={{ textAlign:"center",margin:"12px 0" }}>
-                    <span style={{ background:T.header,color:"#38bdf8",fontFamily:"monospace",fontWeight:800,fontSize:24,padding:"12px 20px",borderRadius:8,letterSpacing:3,display:"inline-block" }}>
-                      {generatedCode}
-                    </span>
-                  </div>
-                  <div style={{ fontSize:12,color:T.success,textAlign:"center",marginBottom:12 }}>✅ Valid 6-segment code</div>
-                  <Btn onClick={handleSave} style={{ width:"100%" }}>💾 Save to Master Table</Btn>
-                </>
-              : <div style={{ textAlign:"center",padding:"28px 0",color:T.muted,fontSize:13 }}>Complete all 5 selections to generate code</div>
-            }
+          <Card style={{borderTop:`3px solid ${T.accent}`}}>
+            <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>Generated Code</div>
+            {generatedCode ? (
+              <>
+                <div style={{textAlign:"center",margin:"12px 0"}}>
+                  <span style={{background:T.header,color:"#38bdf8",fontFamily:"monospace",fontWeight:800,fontSize:22,padding:"12px 18px",borderRadius:8,letterSpacing:3,display:"inline-block"}}>
+                    {generatedCode}
+                  </span>
+                </div>
+                {codeExists
+                  ? <div style={{textAlign:"center",color:T.danger,fontWeight:700,fontSize:13,marginBottom:10}}>⚠️ This code already exists</div>
+                  : <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
+                }
+                {saved
+                  ? <div style={{display:"flex",gap:8}}>
+                      <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>✅ Saved!</div>
+                      <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>＋ New Code</Btn>
+                    </div>
+                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists}>
+                      {saving?"Saving…":"💾 Save to Master Table"}
+                    </Btn>
+                }
+              </>
+            ) : (
+              <div style={{textAlign:"center",padding:"28px 0",color:T.muted,fontSize:13}}>Complete all 5 selections to generate code</div>
+            )}
           </Card>
 
-          {/* Interpretation Panel */}
+          {/* Code Interpretation */}
           {generatedCode && (
             <Card>
-              <div style={{ fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:12 }}>Code Interpretation</div>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>Code Breakdown</div>
               {[
-                {seg:step.cat,name:"Main Category",val:cat?.label},
-                {seg:step.mfr,name:"Manufacturer",val:mfr?.label},
-                {seg:step.model,name:"Model",val:model?.label},
-                {seg:step.disc,name:"Discipline",val:disc?.label},
-                {seg:step.fg,name:"Functional Group",val:fg?.label},
-                {seg:seqNum,name:"Sequence",val:`Item Number ${parseInt(seqNum)}`},
-              ].map(b => (
-                <div key={b.seg} style={{ display:"flex",alignItems:"center",gap:12,marginBottom:8,padding:"7px 10px",background:T.subtle,borderRadius:6 }}>
-                  <Pill size={12}>{b.seg}</Pill>
+                {seg:step.cat,  name:"Main Category",   val:cat?.label},
+                {seg:step.mfr,  name:"Manufacturer",     val:mfr?.label},
+                {seg:step.model,name:"Model",             val:model?.label},
+                {seg:step.disc, name:isEngine?"Engine System":"Discipline", val:disc?.label},
+                {seg:step.fg,   name:"Functional Group", val:fg?.label},
+                {seg:seqNum,    name:"Sequence",          val:`Item Number ${parseInt(seqNum)}`},
+              ].map(b=>(
+                <div key={b.seg} style={{display:"flex",alignItems:"center",gap:12,marginBottom:7,padding:"6px 10px",background:T.subtle,borderRadius:5}}>
+                  <Pill size={11}>{b.seg}</Pill>
                   <div>
-                    <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase" }}>{b.name}</div>
-                    <div style={{ fontSize:14,fontWeight:600,color:T.text }}>{b.val}</div>
+                    <div style={{fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase"}}>{b.name}</div>
+                    <div style={{fontSize:13,fontWeight:600,color:T.text}}>{b.val||"—"}</div>
                   </div>
                 </div>
               ))}
             </Card>
           )}
 
+          {/* Descriptions */}
           {generatedCode && (
             <Card>
-              <div style={{ fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:10 }}>Generated Descriptions</div>
-              <div style={{ marginBottom:10 }}>
-                <div style={{ fontSize:11,color:T.muted,fontWeight:700,marginBottom:3 }}>SHORT DESCRIPTION</div>
-                <div style={{ fontSize:14,fontWeight:700,color:T.text,padding:"7px 10px",background:"#f0f9ff",borderRadius:5 }}>{shortDesc}</div>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Auto-Generated Descriptions</div>
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,color:T.muted,fontWeight:700,marginBottom:3}}>SHORT</div>
+                <div style={{fontSize:13,fontWeight:700,color:T.text,padding:"6px 10px",background:"#f0f9ff",borderRadius:5}}>{shortDesc}</div>
               </div>
               <div>
-                <div style={{ fontSize:11,color:T.muted,fontWeight:700,marginBottom:3 }}>LONG DESCRIPTION</div>
-                <div style={{ fontSize:14,color:T.text,padding:"7px 10px",background:"#f0f9ff",borderRadius:5 }}>{longDesc}</div>
+                <div style={{fontSize:11,color:T.muted,fontWeight:700,marginBottom:3}}>LONG</div>
+                <div style={{fontSize:13,color:T.text,padding:"6px 10px",background:"#f0f9ff",borderRadius:5}}>{longDesc}</div>
               </div>
+            </Card>
+          )}
+
+          {/* Image Upload */}
+          {generatedCode && (
+            <Card style={{borderLeft:"3px solid #0e7490"}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>
+                📷 Part Image (Optional)
+              </div>
+              {dbReady
+                ? <FileUpload
+                    partCode={generatedCode}
+                    bucket="part-images"
+                    label="Upload part photo (JPG / PNG / WEBP, max 10MB)"
+                    currentUrl={imageUrl}
+                    onUploaded={url=>{ setImageUrl(url); flash("Image uploaded successfully"); }}
+                  />
+                : <div style={{fontSize:12,color:T.muted,padding:"12px",background:T.subtle,borderRadius:6}}>
+                    🟡 Image upload requires a connected Supabase database. Running in local mode.
+                  </div>
+              }
+              {imageUrl && (
+                <div style={{marginTop:10,padding:"8px 12px",background:"#d1fae5",borderRadius:6,fontSize:12,color:"#047857",fontWeight:600}}>
+                  ✅ Image will be saved with the part when you click "Save to Master Table"
+                </div>
+              )}
             </Card>
           )}
         </div>
@@ -2486,8 +2602,8 @@ function CodeGeneratorPage({ data }) {
 
       <CodeLegend items={[
         {code:"AA",label:"Main Category"},{code:"BB",label:"Manufacturer"},
-        {code:"CC",label:"Model"},{code:"DD",label:"Discipline"},
-        {code:"EE",label:"Functional Group"},{code:"NNNN",label:"Auto-Sequence Number"},
+        {code:"CC",label:"Model"},{code:"DD",label:"Discipline / Engine System"},
+        {code:"EE",label:"Functional Group"},{code:"NNNN",label:"Sequence Number (auto or manual)"},
       ]} />
     </div>
   );
