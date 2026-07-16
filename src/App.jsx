@@ -2604,12 +2604,20 @@ function CodeGeneratorPage({ data }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PART DETAIL MODAL
+// PART DETAIL MODAL — View + Edit + Delete
 // ═══════════════════════════════════════════════════════════════
 
-function PartDetailModal({ part, data, onClose }) {
+function PartDetailModal({ part, data, onClose, onDeleted }) {
   if (!part) return null;
-  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups } = data;
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
+
+  const [mode,      setMode]      = useState('view'); // 'view' | 'edit' | 'confirm-delete'
+  const [form,      setForm]      = useState({ ...part });
+  const [saving,    setSaving]    = useState(false);
+  const [toast,     setToast]     = useState(null);
+  const [imgUrl,    setImgUrl]    = useState(part.imageUrl || null);
+
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
   const cat  = categories.find(c => c.code === part.cat);
   const mfr  = manufacturers.find(m => m.code === part.mfr);
@@ -2621,116 +2629,179 @@ function PartDetailModal({ part, data, onClose }) {
   const fg   = funcGroups.find(f => f.code === part.fg);
 
   const segments = [
-    { seg: part.cat,   label: "Main Category",   val: cat?.label,  color: cat?.color  || T.accent, bg: cat?.bg  || T.accentLight },
-    { seg: part.mfr,   label: "Manufacturer",     val: mfr?.label,  color: "#b45309",               bg: "#fef3c7" },
-    { seg: part.model, label: "Model",             val: mdl?.label,  color: "#047857",               bg: "#d1fae5" },
-    { seg: part.disc,  label: isEng ? "Engine System" : "Discipline", val: disc?.label, color: disc?.color || "#374151", bg: disc?.bg || "#f3f4f6" },
-    { seg: part.fg,    label: "Functional Group", val: fg?.label,   color: "#6d28d9",               bg: "#f5f3ff" },
+    { seg:part.cat,   label:"Category",              val:cat?.label,  color:cat?.color||T.accent, bg:cat?.bg||T.accentLight },
+    { seg:part.mfr,   label:"Manufacturer",           val:mfr?.label,  color:"#b45309", bg:"#fef3c7" },
+    { seg:part.model, label:"Model",                  val:mdl?.label,  color:"#047857", bg:"#d1fae5" },
+    { seg:part.disc,  label:isEng?"Engine System":"Discipline", val:disc?.label, color:disc?.color||"#374151", bg:disc?.bg||"#f3f4f6" },
+    { seg:part.fg,    label:"Functional Group",       val:fg?.label,   color:"#6d28d9", bg:"#f5f3ff" },
+    { seg:part.code.split("-").pop(), label:"Sequence", val:`Item #${parseInt(part.code.split("-").pop())}`, color:"#475569", bg:"#f1f5f9" },
   ];
 
-  const fields = [
-    { label: "Part Number",     val: part.partNo    || "—" },
-    { label: "OEM Part Number", val: part.oemPart   || "—" },
-    { label: "Quantity",        val: `${part.qty} ${part.unit}` },
-    { label: "Location",        val: part.loc       || "—" },
-    { label: "Min Stock",       val: part.minStock  ?? "—" },
-    { label: "Max Stock",       val: part.maxStock  ?? "—" },
-    { label: "Status",          val: part.status    || "Active" },
-    { label: "Remarks",         val: part.remarks   || "—" },
-  ];
+  const handleSave = async () => {
+    setSaving(true);
+    const dbRow = {
+      short_desc:form.shortDesc, long_desc:form.longDesc,
+      part_no:form.partNo||'', oem_part:form.oemPart||'',
+      qty:Number(form.qty)||0, unit:form.unit||'EA',
+      location:form.loc||'', min_stock:Number(form.minStock)||0,
+      max_stock:Number(form.maxStock)||0, remarks:form.remarks||'',
+      status:form.status||'Active', image_url:imgUrl||null,
+    };
+    const { error } = await ops.savePart({ ...form, imageUrl:imgUrl }, part.code);
+    setSaving(false);
+    if (error) { flash(`Error: ${error.message}`, 'err'); return; }
+    flash('Part updated successfully');
+    setMode('view');
+  };
 
-  const statusColor = { Active: T.success, Inactive: T.warn, Obsolete: T.danger };
-  const statusBg    = { Active: T.successBg, Inactive: T.warnBg, Obsolete: T.dangerBg };
+  const handleDelete = async () => {
+    setSaving(true);
+    const { error } = await ops.deletePart(part.code);
+    setSaving(false);
+    if (error) { flash(`Error: ${error.message}`, 'err'); setMode('view'); return; }
+    if (onDeleted) onDeleted(part.code);
+    onClose();
+  };
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+  const statusColor = { Active:T.success,   Inactive:T.warn,   Obsolete:T.danger };
+  const statusBg    = { Active:T.successBg, Inactive:T.warnBg, Obsolete:T.dangerBg };
 
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}
-      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
-      <div style={{ background:T.card,borderRadius:12,width:"100%",maxWidth:720,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.4)" }}>
+      onClick={e=>{ if(e.target===e.currentTarget && mode!=='confirm-delete') onClose(); }}>
+      <Toast msg={toast}/>
+      <div style={{ background:T.card,borderRadius:12,width:"100%",maxWidth:740,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.4)",display:"flex",flexDirection:"column" }}>
 
         {/* Header */}
-        <div style={{ padding:"20px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:T.card,zIndex:1 }}>
+        <div style={{ padding:"18px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"flex-start",justifyContent:"space-between",position:"sticky",top:0,background:T.card,zIndex:1 }}>
           <div>
             <div style={{ marginBottom:6 }}><CodeTag code={part.code}/></div>
-            <div style={{ fontWeight:800,fontSize:17,color:T.text }}>{part.shortDesc}</div>
-            <div style={{ fontSize:13,color:T.muted,marginTop:2 }}>{part.longDesc}</div>
+            <div style={{ fontWeight:800,fontSize:16,color:T.text }}>{part.shortDesc}</div>
           </div>
-          <button onClick={onClose} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.muted,padding:4 }}>✕</button>
+          <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
+            {mode==='view' && <>
+              <Btn small onClick={()=>setMode('edit')}>✏️ Edit</Btn>
+              <Btn small variant="danger" onClick={()=>setMode('confirm-delete')}>🗑 Delete</Btn>
+            </>}
+            <button onClick={onClose} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.muted,padding:4 }}>✕</button>
+          </div>
         </div>
 
-        <div style={{ padding:"20px 24px" }}>
+        {/* CONFIRM DELETE */}
+        {mode==='confirm-delete' && (
+          <div style={{ padding:24 }}>
+            <div style={{ background:T.dangerBg,borderRadius:8,padding:20,marginBottom:20,border:`1px solid #fca5a5` }}>
+              <div style={{ fontWeight:800,fontSize:16,color:T.danger,marginBottom:8 }}>⚠️ Delete this spare part?</div>
+              <div style={{ fontFamily:"monospace",fontWeight:700,color:T.danger,fontSize:14,marginBottom:6 }}>{part.code}</div>
+              <div style={{ fontSize:13,color:T.text }}>{part.shortDesc}</div>
+            </div>
+            <p style={{ fontSize:13,color:T.muted,marginBottom:20 }}>This will soft-delete the record. It will no longer appear in any page but is recoverable from the database.</p>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="secondary" onClick={()=>setMode('view')}>Cancel</Btn>
+              <Btn variant="danger" onClick={handleDelete} disabled={saving}>{saving?"Deleting…":"🗑 Confirm Delete"}</Btn>
+            </div>
+          </div>
+        )}
 
-          {/* Image */}
-          {part.imageUrl && (
+        {/* VIEW MODE */}
+        {mode==='view' && (
+          <div style={{ padding:"20px 24px" }}>
+            {/* Image */}
             <div style={{ marginBottom:20,textAlign:"center" }}>
-              <img
-                src={part.imageUrl}
-                alt={part.shortDesc}
-                style={{ maxWidth:"100%",maxHeight:300,borderRadius:10,border:`1px solid ${T.border}`,objectFit:"contain",background:"#f8fafc" }}
-                onError={e=>{ e.target.style.display="none"; }}
-              />
+              {part.imageUrl
+                ? <img src={part.imageUrl} alt={part.shortDesc} style={{ maxWidth:"100%",maxHeight:280,borderRadius:10,border:`1px solid ${T.border}`,objectFit:"contain",background:"#f8fafc" }} onError={e=>e.target.style.display="none"}/>
+                : <div style={{ padding:"28px 0",background:T.subtle,borderRadius:10,border:`1px dashed ${T.border}` }}>
+                    <div style={{ fontSize:32,marginBottom:4 }}>📷</div>
+                    <div style={{ fontSize:12,color:T.muted }}>No image — click Edit to add one</div>
+                  </div>
+              }
             </div>
-          )}
-          {!part.imageUrl && (
-            <div style={{ marginBottom:20,textAlign:"center",padding:"32px 0",background:T.subtle,borderRadius:10,border:`1px dashed ${T.border}` }}>
-              <div style={{ fontSize:32,marginBottom:6 }}>📷</div>
-              <div style={{ fontSize:12,color:T.muted }}>No image uploaded</div>
-            </div>
-          )}
-
-          {/* Code segments */}
-          <div style={{ marginBottom:20 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Code Breakdown</div>
-            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+            {/* Segments */}
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:20 }}>
               {segments.map(s=>(
                 <div key={s.seg} style={{ background:s.bg,borderRadius:7,padding:"8px 14px",textAlign:"center",minWidth:80 }}>
-                  <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:14,color:s.color }}>{s.seg}</div>
+                  <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:13,color:s.color }}>{s.seg}</div>
                   <div style={{ fontSize:10,color:s.color,marginTop:2,fontWeight:600 }}>{s.label}</div>
                   <div style={{ fontSize:11,color:T.text,marginTop:2 }}>{s.val||"—"}</div>
                 </div>
               ))}
-              <div style={{ background:"#f1f5f9",borderRadius:7,padding:"8px 14px",textAlign:"center",minWidth:80 }}>
-                <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:14,color:"#475569" }}>{part.code.split("-").pop()}</div>
-                <div style={{ fontSize:10,color:"#64748b",marginTop:2,fontWeight:600 }}>Sequence</div>
-                <div style={{ fontSize:11,color:T.text,marginTop:2 }}>Item #{parseInt(part.code.split("-").pop())}</div>
-              </div>
             </div>
-          </div>
-
-          {/* Fields grid */}
-          <div style={{ marginBottom:20 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Part Details</div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-              {fields.map(f=>(
-                <div key={f.label} style={{ background:T.subtle,borderRadius:6,padding:"10px 14px" }}>
-                  <div style={{ fontSize:11,color:T.muted,fontWeight:700,marginBottom:3,textTransform:"uppercase",letterSpacing:0.6 }}>{f.label}</div>
-                  <div style={{ fontSize:14,fontWeight:600,color:
-                    f.label==="Status" ? (statusColor[f.val]||T.text) : T.text,
-                    background: f.label==="Status" ? (statusBg[f.val]||"transparent") : "transparent",
-                    padding: f.label==="Status" ? "1px 8px" : 0,
-                    borderRadius: f.label==="Status" ? 4 : 0,
-                    display: "inline-block",
+            {/* Details grid */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20 }}>
+              {[
+                {label:"Short Description", val:part.shortDesc},
+                {label:"Long Description",  val:part.longDesc},
+                {label:"Part Number",       val:part.partNo||"—"},
+                {label:"OEM Part Number",   val:part.oemPart||"—"},
+                {label:"Quantity",          val:`${part.qty} ${part.unit}`},
+                {label:"Location",          val:part.loc||"—"},
+                {label:"Min Stock",         val:part.minStock??0},
+                {label:"Max Stock",         val:part.maxStock??0},
+                {label:"Status",            val:part.status||"Active"},
+                {label:"Remarks",           val:part.remarks||"—"},
+              ].map(f=>(
+                <div key={f.label} style={{ background:T.subtle,borderRadius:6,padding:"9px 12px" }}>
+                  <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>{f.label}</div>
+                  <div style={{ fontSize:13,fontWeight:600,
+                    color:f.label==="Status"?(statusColor[f.val]||T.text):T.text,
+                    background:f.label==="Status"?(statusBg[f.val]||"transparent"):"transparent",
+                    display:"inline-block",padding:f.label==="Status"?"1px 8px":0,borderRadius:4,
                   }}>{f.val}</div>
                 </div>
               ))}
             </div>
+            <div style={{ display:"flex",justifyContent:"flex-end" }}>
+              <Btn variant="secondary" onClick={onClose}>Close</Btn>
+            </div>
           </div>
+        )}
 
-          {/* Attachments */}
-          {(part.datasheetUrl || part.manualUrl || part.drawingUrl) && (
-            <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Attachments</div>
-              <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
-                {part.datasheetUrl && <a href={part.datasheetUrl} target="_blank" rel="noreferrer" style={{ color:T.accent,fontSize:13,background:T.accentLight,padding:"6px 12px",borderRadius:6,textDecoration:"none",fontWeight:600 }}>📄 Datasheet</a>}
-                {part.manualUrl    && <a href={part.manualUrl}    target="_blank" rel="noreferrer" style={{ color:"#047857",fontSize:13,background:"#d1fae5",padding:"6px 12px",borderRadius:6,textDecoration:"none",fontWeight:600 }}>📖 Manual</a>}
-                {part.drawingUrl   && <a href={part.drawingUrl}   target="_blank" rel="noreferrer" style={{ color:"#6d28d9",fontSize:13,background:"#f5f3ff",padding:"6px 12px",borderRadius:6,textDecoration:"none",fontWeight:600 }}>📐 Drawing</a>}
+        {/* EDIT MODE */}
+        {mode==='edit' && (
+          <div style={{ padding:"20px 24px" }}>
+            <div style={{ background:"#fffbeb",border:"1px solid #fbbf24",borderRadius:7,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#92400e",fontWeight:600 }}>
+              ✏️ Editing editable fields only. The 6-segment code (<strong>{part.code}</strong>) cannot be changed.
+            </div>
+            <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+                <div><label style={sLabel}>Short Description</label><Input value={form.shortDesc||""} onChange={e=>setForm(f=>({...f,shortDesc:e.target.value}))}/></div>
+                <div><label style={sLabel}>Long Description</label><Input value={form.longDesc||""} onChange={e=>setForm(f=>({...f,longDesc:e.target.value}))}/></div>
+                <div><label style={sLabel}>Part Number</label><Input value={form.partNo||""} onChange={e=>setForm(f=>({...f,partNo:e.target.value}))} placeholder="e.g. AN-BRG-001"/></div>
+                <div><label style={sLabel}>OEM Part Number</label><Input value={form.oemPart||""} onChange={e=>setForm(f=>({...f,oemPart:e.target.value}))} placeholder="e.g. 1234567"/></div>
+                <div><label style={sLabel}>Quantity</label><Input type="number" value={form.qty||0} onChange={e=>setForm(f=>({...f,qty:e.target.value}))}/></div>
+                <div><label style={sLabel}>Unit</label>
+                  <Select value={form.unit||"EA"} onChange={e=>setForm(f=>({...f,unit:e.target.value}))}>
+                    {["EA","SET","KIT","L","KG","M","BOX","ROLL"].map(u=><option key={u}>{u}</option>)}
+                  </Select>
+                </div>
+                <div><label style={sLabel}>Location</label><Input value={form.loc||""} onChange={e=>setForm(f=>({...f,loc:e.target.value}))} placeholder="e.g. WH-A1"/></div>
+                <div><label style={sLabel}>Status</label>
+                  <Select value={form.status||"Active"} onChange={e=>setForm(f=>({...f,status:e.target.value}))}>
+                    {["Active","Inactive","Obsolete"].map(s=><option key={s}>{s}</option>)}
+                  </Select>
+                </div>
+                <div><label style={sLabel}>Min Stock</label><Input type="number" value={form.minStock||0} onChange={e=>setForm(f=>({...f,minStock:e.target.value}))}/></div>
+                <div><label style={sLabel}>Max Stock</label><Input type="number" value={form.maxStock||0} onChange={e=>setForm(f=>({...f,maxStock:e.target.value}))}/></div>
+              </div>
+              <div><label style={sLabel}>Remarks</label><Input value={form.remarks||""} onChange={e=>setForm(f=>({...f,remarks:e.target.value}))}/></div>
+
+              {/* Image upload in edit mode */}
+              <div>
+                <label style={sLabel}>Part Image</label>
+                {dbReady
+                  ? <FileUpload partCode={part.code} bucket="part-images" label="" currentUrl={imgUrl} onUploaded={url=>{setImgUrl(url);flash("Image uploaded");}}/>
+                  : <div style={{ fontSize:12,color:T.muted,padding:10,background:T.subtle,borderRadius:6 }}>🟡 Image upload requires live DB</div>
+                }
+              </div>
+
+              <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+                <Btn variant="secondary" onClick={()=>setMode('view')}>Cancel</Btn>
+                <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"💾 Save Changes"}</Btn>
               </div>
             </div>
-          )}
-
-          <div style={{ display:"flex",justifyContent:"flex-end" }}>
-            <Btn variant="secondary" onClick={onClose}>Close</Btn>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -2895,7 +2966,7 @@ function HierarchyTreePage({ data }) {
         ...engineSystems.map(s=>({code:s.code,label:s.label+" (Engine System)"})),
         ...disciplines.map(d=>({code:d.code,label:d.label+" (Other Categories)"})),
       ]} />
-      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)}/>}
+      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)} onDeleted={()=>setSelectedPart(null)}/>}
     </div>
   );
 }
@@ -3005,7 +3076,7 @@ function MasterTablePage({ data }) {
         {code:"Max",label:"Maximum Stock Level"},{code:"OEM",label:"Original Equipment Manufacturer"},
       ]} />
 
-      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)}/>}
+      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)} onDeleted={()=>setSelectedPart(null)}/>}
     </div>
   );
 }
