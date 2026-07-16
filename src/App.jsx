@@ -1526,9 +1526,7 @@ function ManufacturersPage({ data }) {
     if(!code||!form.label.trim()) return flash("Code and Name are required","err");
     if(code.length!==2) return flash("Manufacturer code must be exactly 2 characters","err");
     if(!form.catCode) return flash("Please select an equipment type","err");
-    if(editingCode===null){
-      if(manufacturers.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
-    }
+    if(editingCode===null && manufacturers.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
     setSaving(true);
     const record = { code, label: form.label.trim(), catCodes: [form.catCode] };
     const { error } = await ops.saveManufacturer(record, editingCode);
@@ -1866,7 +1864,7 @@ function DisciplinesPage({ data }) {
   const { disciplines, engineSystems, parts, ops } = data;
 
   // ── Standard Disciplines editor ──
-  const EMPTY_D = { code:"", label:"", description:"", color:"#1d4ed8", bg:"#dbeafe" };
+  const EMPTY_D = { code:"", label:"", desc:"", color:"#1d4ed8", bg:"#dbeafe" };
   const [formD, setFormD] = useState(EMPTY_D);
   const [editD, setEditD] = useState(null);
   const [showD, setShowD] = useState(false);
@@ -1891,7 +1889,7 @@ function DisciplinesPage({ data }) {
     if(!code||!formD.label.trim()) return flash("Code and Name required","err");
     if(code.length<2||code.length>3) return flash("Discipline code must be 2–3 chars","err");
     if(editD===null && disciplines.find(d=>d.code===code)) return flash("Code already exists","err");
-    const rec = { code, label:formD.label.trim(), description:formD.desc.trim(), color:formD.color, bg:formD.bg };
+    const rec = { code, label:formD.label.trim(), desc:formD.desc.trim(), color:formD.color, bg:formD.bg };
     const { error } = await ops.saveDiscipline(rec, editD);
     if(error) return flash(`Error: ${error.message}`,"err");
     flash(editD ? `Discipline "${code}" updated` : `Discipline "${code}" added`);
@@ -2371,7 +2369,6 @@ function CodeGeneratorPage({ data }) {
 
   const handleSave = async () => {
     if (!canGenerate) return;
-    if (codeExists) return flash(`Code "${generatedCode}" already exists in the database`,"err");
     const newPart = {
       code:generatedCode, shortDesc, longDesc,
       cat:step.cat, mfr:step.mfr, model:step.model, disc:step.disc, fg:step.fg,
@@ -2515,16 +2512,13 @@ function CodeGeneratorPage({ data }) {
                     {generatedCode}
                   </span>
                 </div>
-                {codeExists
-                  ? <div style={{textAlign:"center",color:T.danger,fontWeight:700,fontSize:13,marginBottom:10}}>⚠️ This code already exists</div>
-                  : <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
-                }
+                <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
                 {saved
                   ? <div style={{display:"flex",gap:8}}>
                       <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>✅ Saved!</div>
                       <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>＋ New Code</Btn>
                     </div>
-                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists}>
+                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving}>
                       {saving?"Saving…":"💾 Save to Master Table"}
                     </Btn>
                 }
@@ -2609,10 +2603,144 @@ function CodeGeneratorPage({ data }) {
   );
 }
 
-// ─── HIERARCHY TREE ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// PART DETAIL MODAL
+// ═══════════════════════════════════════════════════════════════
+
+function PartDetailModal({ part, data, onClose }) {
+  if (!part) return null;
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups } = data;
+
+  const cat  = categories.find(c => c.code === part.cat);
+  const mfr  = manufacturers.find(m => m.code === part.mfr);
+  const mdl  = models.find(m => m.code === part.model);
+  const isEng = part.cat === "EN";
+  const disc = isEng
+    ? engineSystems.find(s => s.code === part.disc)
+    : disciplines.find(d => d.code === part.disc);
+  const fg   = funcGroups.find(f => f.code === part.fg);
+
+  const segments = [
+    { seg: part.cat,   label: "Main Category",   val: cat?.label,  color: cat?.color  || T.accent, bg: cat?.bg  || T.accentLight },
+    { seg: part.mfr,   label: "Manufacturer",     val: mfr?.label,  color: "#b45309",               bg: "#fef3c7" },
+    { seg: part.model, label: "Model",             val: mdl?.label,  color: "#047857",               bg: "#d1fae5" },
+    { seg: part.disc,  label: isEng ? "Engine System" : "Discipline", val: disc?.label, color: disc?.color || "#374151", bg: disc?.bg || "#f3f4f6" },
+    { seg: part.fg,    label: "Functional Group", val: fg?.label,   color: "#6d28d9",               bg: "#f5f3ff" },
+  ];
+
+  const fields = [
+    { label: "Part Number",     val: part.partNo    || "—" },
+    { label: "OEM Part Number", val: part.oemPart   || "—" },
+    { label: "Quantity",        val: `${part.qty} ${part.unit}` },
+    { label: "Location",        val: part.loc       || "—" },
+    { label: "Min Stock",       val: part.minStock  ?? "—" },
+    { label: "Max Stock",       val: part.maxStock  ?? "—" },
+    { label: "Status",          val: part.status    || "Active" },
+    { label: "Remarks",         val: part.remarks   || "—" },
+  ];
+
+  const statusColor = { Active: T.success, Inactive: T.warn, Obsolete: T.danger };
+  const statusBg    = { Active: T.successBg, Inactive: T.warnBg, Obsolete: T.dangerBg };
+
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
+      <div style={{ background:T.card,borderRadius:12,width:"100%",maxWidth:720,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.4)" }}>
+
+        {/* Header */}
+        <div style={{ padding:"20px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:T.card,zIndex:1 }}>
+          <div>
+            <div style={{ marginBottom:6 }}><CodeTag code={part.code}/></div>
+            <div style={{ fontWeight:800,fontSize:17,color:T.text }}>{part.shortDesc}</div>
+            <div style={{ fontSize:13,color:T.muted,marginTop:2 }}>{part.longDesc}</div>
+          </div>
+          <button onClick={onClose} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.muted,padding:4 }}>✕</button>
+        </div>
+
+        <div style={{ padding:"20px 24px" }}>
+
+          {/* Image */}
+          {part.imageUrl && (
+            <div style={{ marginBottom:20,textAlign:"center" }}>
+              <img
+                src={part.imageUrl}
+                alt={part.shortDesc}
+                style={{ maxWidth:"100%",maxHeight:300,borderRadius:10,border:`1px solid ${T.border}`,objectFit:"contain",background:"#f8fafc" }}
+                onError={e=>{ e.target.style.display="none"; }}
+              />
+            </div>
+          )}
+          {!part.imageUrl && (
+            <div style={{ marginBottom:20,textAlign:"center",padding:"32px 0",background:T.subtle,borderRadius:10,border:`1px dashed ${T.border}` }}>
+              <div style={{ fontSize:32,marginBottom:6 }}>📷</div>
+              <div style={{ fontSize:12,color:T.muted }}>No image uploaded</div>
+            </div>
+          )}
+
+          {/* Code segments */}
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Code Breakdown</div>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {segments.map(s=>(
+                <div key={s.seg} style={{ background:s.bg,borderRadius:7,padding:"8px 14px",textAlign:"center",minWidth:80 }}>
+                  <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:14,color:s.color }}>{s.seg}</div>
+                  <div style={{ fontSize:10,color:s.color,marginTop:2,fontWeight:600 }}>{s.label}</div>
+                  <div style={{ fontSize:11,color:T.text,marginTop:2 }}>{s.val||"—"}</div>
+                </div>
+              ))}
+              <div style={{ background:"#f1f5f9",borderRadius:7,padding:"8px 14px",textAlign:"center",minWidth:80 }}>
+                <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:14,color:"#475569" }}>{part.code.split("-").pop()}</div>
+                <div style={{ fontSize:10,color:"#64748b",marginTop:2,fontWeight:600 }}>Sequence</div>
+                <div style={{ fontSize:11,color:T.text,marginTop:2 }}>Item #{parseInt(part.code.split("-").pop())}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Fields grid */}
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Part Details</div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              {fields.map(f=>(
+                <div key={f.label} style={{ background:T.subtle,borderRadius:6,padding:"10px 14px" }}>
+                  <div style={{ fontSize:11,color:T.muted,fontWeight:700,marginBottom:3,textTransform:"uppercase",letterSpacing:0.6 }}>{f.label}</div>
+                  <div style={{ fontSize:14,fontWeight:600,color:
+                    f.label==="Status" ? (statusColor[f.val]||T.text) : T.text,
+                    background: f.label==="Status" ? (statusBg[f.val]||"transparent") : "transparent",
+                    padding: f.label==="Status" ? "1px 8px" : 0,
+                    borderRadius: f.label==="Status" ? 4 : 0,
+                    display: "inline-block",
+                  }}>{f.val}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Attachments */}
+          {(part.datasheetUrl || part.manualUrl || part.drawingUrl) && (
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Attachments</div>
+              <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
+                {part.datasheetUrl && <a href={part.datasheetUrl} target="_blank" rel="noreferrer" style={{ color:T.accent,fontSize:13,background:T.accentLight,padding:"6px 12px",borderRadius:6,textDecoration:"none",fontWeight:600 }}>📄 Datasheet</a>}
+                {part.manualUrl    && <a href={part.manualUrl}    target="_blank" rel="noreferrer" style={{ color:"#047857",fontSize:13,background:"#d1fae5",padding:"6px 12px",borderRadius:6,textDecoration:"none",fontWeight:600 }}>📖 Manual</a>}
+                {part.drawingUrl   && <a href={part.drawingUrl}   target="_blank" rel="noreferrer" style={{ color:"#6d28d9",fontSize:13,background:"#f5f3ff",padding:"6px 12px",borderRadius:6,textDecoration:"none",fontWeight:600 }}>📐 Drawing</a>}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display:"flex",justifyContent:"flex-end" }}>
+            <Btn variant="secondary" onClick={onClose}>Close</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function HierarchyTreePage({ data }) {
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts } = data;
-  const [expanded, setExpanded] = useState({ ROOT:true });
+  const [expanded,     setExpanded]     = useState({ ROOT:true });
+  const [selectedPart, setSelectedPart] = useState(null);
   const toggle = k => setExpanded(e=>({...e,[k]:!e[k]}));
 
   const expandAll = () => {
@@ -2680,10 +2808,16 @@ function HierarchyTreePage({ data }) {
             return (
               <Node key={fg.code} label={fg.label} pill={fg.code} pillColor="#6d28d9" pillBg="#f5f3ff" nodeKey={fgKey} depth={5} count={fgParts.length}>
                 {fgParts.map(p=>(
-                  <div key={p.code} style={{ marginLeft:90,padding:"4px 8px",borderRadius:4,marginBottom:2,background:"#f8fafc",display:"flex",alignItems:"center",gap:8 }}>
+                  <div key={p.code}
+                    onClick={()=>setSelectedPart(p)}
+                    style={{ marginLeft:90,padding:"5px 10px",borderRadius:5,marginBottom:3,background:"#f8fafc",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:`1px solid transparent`,transition:"all .15s" }}
+                    onMouseEnter={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor=T.accent;}}
+                    onMouseLeave={e=>{e.currentTarget.style.background="#f8fafc";e.currentTarget.style.borderColor="transparent";}}>
                     <span style={{ fontSize:11,color:"#94a3b8" }}>—</span>
                     <CodeTag code={p.code} />
-                    <span style={{ fontSize:12,color:T.muted }}>{p.shortDesc}</span>
+                    <span style={{ fontSize:12,color:T.muted,flex:1 }}>{p.shortDesc}</span>
+                    {p.imageUrl&&<span style={{ fontSize:11 }}>📷</span>}
+                    <span style={{ fontSize:11,color:T.accent,fontWeight:600 }}>View →</span>
                   </div>
                 ))}
               </Node>
@@ -2761,6 +2895,7 @@ function HierarchyTreePage({ data }) {
         ...engineSystems.map(s=>({code:s.code,label:s.label+" (Engine System)"})),
         ...disciplines.map(d=>({code:d.code,label:d.label+" (Other Categories)"})),
       ]} />
+      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)}/>}
     </div>
   );
 }
@@ -2769,14 +2904,15 @@ function HierarchyTreePage({ data }) {
 function MasterTablePage({ data }) {
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts, ops } = data;
   const allSections = [...disciplines, ...engineSystems];
-  const [search, setSearch] = useState("");
-  const [fCat, setFCat] = useState("");
-  const [fDisc, setFDisc] = useState("");
-  const [fStatus, setFStatus] = useState("");
+  const [search,       setSearch]       = useState("");
+  const [fCat,         setFCat]         = useState("");
+  const [fDisc,        setFDisc]        = useState("");
+  const [fStatus,      setFStatus]      = useState("");
+  const [selectedPart, setSelectedPart] = useState(null);
 
   const filtered = useMemo(() => parts.filter(p => {
     const q = search.toLowerCase();
-    const ms = !q || [p.code,p.shortDesc,p.longDesc,p.partNo,p.oemPart,p.loc].some(v=>v.toLowerCase().includes(q));
+    const ms = !q || [p.code,p.shortDesc,p.longDesc,p.partNo,p.oemPart,p.loc].some(v=>(v||"").toLowerCase().includes(q));
     return ms && (!fCat||p.cat===fCat) && (!fDisc||p.disc===fDisc) && (!fStatus||p.status===fStatus);
   }), [parts,search,fCat,fDisc,fStatus]);
 
@@ -2809,37 +2945,67 @@ function MasterTablePage({ data }) {
           <span style={{ marginLeft:"auto",fontSize:13,color:T.muted }}>{filtered.length} results</span>
         </div>
       </Card>
+
+      <div style={{ fontSize:12,color:T.muted,marginBottom:10 }}>👆 Click any row to view full part details</div>
+
       <Card>
-        <Table
-          cols={[
-            { key:"code", label:"Spare Part Code", render:r=><CodeTag code={r.code}/> },
-            { key:"shortDesc", label:"Short Description", style:{fontWeight:600,color:T.text,whiteSpace:"nowrap"} },
-            { key:"cat", label:"Category", render:r=>{const c=categories.find(x=>x.code===r.cat);return <Pill color={c?.color} bg={c?.bg}>{r.cat}</Pill>;} },
-            { key:"mfr", label:"Mfr.", render:r=><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill> },
-            { key:"model", label:"Model", render:r=>{const m=models.find(x=>x.code===r.model);return <span style={{fontSize:12,color:T.muted}}>{m?.label||r.model}</span>;} },
-            { key:"disc", label:"System/Disc", render:r=>{
-              const sec = allSections.find(s=>s.code===r.disc);
-              const dc = T.disc[r.disc]||{c:sec?.color||T.muted,b:sec?.bg||T.subtle};
-              return <Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill>;
-            }},
-            { key:"fg", label:"Func. Group", render:r=>{const f=funcGroups.find(x=>x.code===r.fg);return <Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill>;} },
-            { key:"partNo", label:"Part No.", style:{fontFamily:"monospace",fontSize:12,color:T.muted,whiteSpace:"nowrap"} },
-            { key:"qty", label:"Qty", style:{textAlign:"center",fontWeight:700} },
-            { key:"unit", label:"Unit", style:{color:T.muted,fontSize:12} },
-            { key:"loc", label:"Location", style:{fontFamily:"monospace",fontSize:12,color:T.muted} },
-            { key:"minStock", label:"Min", style:{textAlign:"center",fontSize:12,color:T.warn} },
-            { key:"maxStock", label:"Max", style:{textAlign:"center",fontSize:12,color:T.success} },
-            { key:"status", label:"Status", render:r=><Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill> },
-          ]}
-          rows={filtered}
-        />
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+            <thead>
+              <tr style={{ background:T.header }}>
+                {["","Spare Part Code","Short Description","Cat","Mfr","Model","Disc","Func Group","Part No","Qty","Unit","Location","Min","Max","Status"].map(h=>(
+                  <th key={h} style={{ padding:"9px 10px",textAlign:"left",fontWeight:700,color:"#94a3b8",textTransform:"uppercase",fontSize:10,letterSpacing:0.8,whiteSpace:"nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length===0
+                ? <tr><td colSpan={15} style={{ textAlign:"center",padding:36,color:T.muted }}>No parts match your search.</td></tr>
+                : filtered.map((r,i)=>{
+                  const cat  = categories.find(x=>x.code===r.cat);
+                  const mdl  = models.find(x=>x.code===r.model);
+                  const sec  = allSections.find(x=>x.code===r.disc);
+                  const dc   = T.disc[r.disc]||{c:sec?.color||T.muted,b:sec?.bg||T.subtle};
+                  return (
+                    <tr key={r.code}
+                      onClick={()=>setSelectedPart(r)}
+                      style={{ borderBottom:`1px solid ${T.border}`,background:i%2?T.subtle:T.card,cursor:"pointer",transition:"background .1s" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                      onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
+                      <td style={{ padding:"8px 10px",textAlign:"center" }}>
+                        {r.imageUrl ? <span style={{ fontSize:14 }}>📷</span> : <span style={{ fontSize:11,color:"#d1d5db" }}>—</span>}
+                      </td>
+                      <td style={{ padding:"8px 10px" }}><CodeTag code={r.code}/></td>
+                      <td style={{ padding:"8px 10px",fontWeight:600,color:T.text,whiteSpace:"nowrap",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis" }}>{r.shortDesc}</td>
+                      <td style={{ padding:"8px 10px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
+                      <td style={{ padding:"8px 10px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
+                      <td style={{ padding:"8px 10px",fontSize:12,color:T.muted }}>{mdl?.label||r.model}</td>
+                      <td style={{ padding:"8px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
+                      <td style={{ padding:"8px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
+                      <td style={{ padding:"8px 10px",fontFamily:"monospace",fontSize:11,color:T.muted }}>{r.partNo||"—"}</td>
+                      <td style={{ padding:"8px 10px",textAlign:"center",fontWeight:700 }}>{r.qty}</td>
+                      <td style={{ padding:"8px 10px",color:T.muted,fontSize:11 }}>{r.unit}</td>
+                      <td style={{ padding:"8px 10px",fontFamily:"monospace",fontSize:11,color:T.muted }}>{r.loc||"—"}</td>
+                      <td style={{ padding:"8px 10px",textAlign:"center",fontSize:11,color:T.warn }}>{r.minStock}</td>
+                      <td style={{ padding:"8px 10px",textAlign:"center",fontSize:11,color:T.success }}>{r.maxStock}</td>
+                      <td style={{ padding:"8px 10px" }}><Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill></td>
+                    </tr>
+                  );
+                })
+              }
+            </tbody>
+          </table>
+        </div>
       </Card>
+
       <CodeLegend items={[
         ...categories.map(c=>({code:c.code,label:c.label})),
         ...disciplines.map(d=>({code:d.code,label:d.label})),
         {code:"Qty",label:"Quantity on Hand"},{code:"Min",label:"Minimum Stock Level"},
         {code:"Max",label:"Maximum Stock Level"},{code:"OEM",label:"Original Equipment Manufacturer"},
       ]} />
+
+      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)}/>}
     </div>
   );
 }
