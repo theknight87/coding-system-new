@@ -2969,116 +2969,228 @@ function HierarchyTreePage({ data }) {
       {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)} onDeleted={()=>setSelectedPart(null)}/>}
     </div>
   );
-}
+}// ─── MASTER TABLE ─────────────────────────────────────────────
+const PAGE_SIZE = 50;
 
-// ─── MASTER TABLE ─────────────────────────────────────────────
 function MasterTablePage({ data }) {
-  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts, ops } = data;
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
   const allSections = [...disciplines, ...engineSystems];
-  const [search,       setSearch]       = useState("");
-  const [fCat,         setFCat]         = useState("");
-  const [fDisc,        setFDisc]        = useState("");
-  const [fStatus,      setFStatus]      = useState("");
+
+  // Filters
+  const [search,   setSearch]   = useState("");
+  const [fCat,     setFCat]     = useState("");
+  const [fMfr,     setFMfr]     = useState("");
+  const [fModel,   setFModel]   = useState("");
+  const [fDisc,    setFDisc]    = useState("");
+  const [fStatus,  setFStatus]  = useState("");
+
+  // Pagination
+  const [page,       setPage]       = useState(0);
+  const [total,      setTotal]      = useState(0);
+  const [rows,       setRows]       = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [searchInput,setSearchInput]= useState("");
+
+  // Part detail modal
   const [selectedPart, setSelectedPart] = useState(null);
 
-  const filtered = useMemo(() => parts.filter(p => {
-    const q = search.toLowerCase();
-    const ms = !q || [p.code,p.shortDesc,p.longDesc,p.partNo,p.oemPart,p.loc].some(v=>(v||"").toLowerCase().includes(q));
-    return ms && (!fCat||p.cat===fCat) && (!fDisc||p.disc===fDisc) && (!fStatus||p.status===fStatus);
-  }), [parts,search,fCat,fDisc,fStatus]);
+  const filters = useMemo(()=>({
+    search: search||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
+    model: fModel||undefined, disc: fDisc||undefined, status: fStatus||undefined,
+  }),[search, fCat, fMfr, fModel, fDisc, fStatus]);
+
+  // Debounce search
+  useEffect(()=>{
+    const t = setTimeout(()=>setSearch(searchInput), 400);
+    return ()=>clearTimeout(t);
+  },[searchInput]);
+
+  // Reset page on filter change
+  useEffect(()=>{ setPage(0); },[filters]);
+
+  // Fetch from DB when dbReady, else use INIT_PARTS
+  useEffect(()=>{
+    if (!dbReady) {
+      // local mode — use INIT_PARTS from data
+      setRows(data.parts || []);
+      setTotal((data.parts||[]).length);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      db.fetchPartsCount(filters),
+      db.fetchParts(filters, page, PAGE_SIZE),
+    ]).then(([countRes, dataRes]) => {
+      setTotal(countRes.count ?? 0);
+      setRows((dataRes.data ?? []).map(mapPart));
+    }).finally(()=>setLoading(false));
+  },[filters, page, dbReady]);
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const filteredMfrs  = manufacturers.filter(m => !fCat  || (m.catCodes||[]).includes(fCat));
+  const filteredModels= models.filter(m => !fMfr || m.mfrCode === fMfr);
+
+  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
 
   return (
     <div>
-      <PageHeader title="Master Spare Parts Table" sub={`Complete coded parts inventory — ${parts.length} total records`} />
-      <Card style={{ marginBottom:20 }}>
-        <div style={{ display:"flex",gap:12,flexWrap:"wrap",alignItems:"center" }}>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search code, description, part no, location…" style={{ maxWidth:320,width:"auto",flex:"1 1 220px" }} />
-          <Select value={fCat} onChange={e=>setFCat(e.target.value)} style={{ width:"auto",flex:"0 0 160px" }}>
+      <PageHeader title="Master Spare Parts Table" sub={`${total.toLocaleString()} total coded parts`} />
+
+      {/* Filters */}
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <input
+            value={searchInput}
+            onChange={e=>setSearchInput(e.target.value)}
+            placeholder="🔍 Code, description, part no…"
+            style={{ ...selStyle, minWidth:220, flex:"1 1 200px" }}
+          />
+          <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
             <option value="">All Categories</option>
             {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
-          </Select>
-          <Select value={fDisc} onChange={e=>setFDisc(e.target.value)} style={{ width:"auto",flex:"0 0 180px" }}>
-            <option value="">All Disciplines / Systems</option>
-            <optgroup label="Standard Disciplines">
-              {disciplines.map(d=><option key={d.code} value={d.code}>{d.label}</option>)}
-            </optgroup>
-            <optgroup label="Engine System Sections">
-              {engineSystems.map(s=><option key={s.code} value={s.code}>{s.label}</option>)}
-            </optgroup>
-          </Select>
-          <Select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={{ width:"auto",flex:"0 0 130px" }}>
+          </select>
+          <select value={fMfr} onChange={e=>{setFMfr(e.target.value);setFModel("");}} style={selStyle}>
+            <option value="">All Manufacturers</option>
+            {filteredMfrs.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fModel} onChange={e=>setFModel(e.target.value)} style={selStyle}>
+            <option value="">All Models</option>
+            {filteredModels.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fDisc} onChange={e=>setFDisc(e.target.value)} style={selStyle}>
+            <option value="">All Systems</option>
+            <optgroup label="Standard">{disciplines.map(d=><option key={d.code} value={d.code}>{d.label}</option>)}</optgroup>
+            <optgroup label="Engine">{engineSystems.map(s=><option key={s.code} value={s.code}>{s.label}</option>)}</optgroup>
+          </select>
+          <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={selStyle}>
             <option value="">All Status</option>
             {["Active","Inactive","Obsolete"].map(s=><option key={s}>{s}</option>)}
-          </Select>
-          {(search||fCat||fDisc||fStatus) && (
-            <Btn small variant="danger" onClick={()=>{setSearch("");setFCat("");setFDisc("");setFStatus("");}}>✕ Clear</Btn>
+          </select>
+          {(search||fCat||fMfr||fModel||fDisc||fStatus)&&(
+            <button onClick={()=>{setSearchInput("");setSearch("");setFCat("");setFMfr("");setFModel("");setFDisc("");setFStatus("");}}
+              style={{ padding:"7px 12px", borderRadius:5, border:"1px solid #fca5a5", background:"#fee2e2", color:T.danger, fontSize:13, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
+              ✕ Clear
+            </button>
           )}
-          <span style={{ marginLeft:"auto",fontSize:13,color:T.muted }}>{filtered.length} results</span>
         </div>
       </Card>
 
-      <div style={{ fontSize:12,color:T.muted,marginBottom:10 }}>👆 Click any row to view full part details</div>
+      {/* Pagination controls */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10, flexWrap:"wrap" }}>
+        <span style={{ fontSize:13, color:T.muted }}>
+          {loading ? "Loading…" : `${total.toLocaleString()} results · Page ${page+1} of ${totalPages||1}`}
+        </span>
+        <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+          <button onClick={()=>setPage(0)} disabled={page===0||loading}
+            style={{ padding:"5px 10px", borderRadius:5, border:`1px solid ${T.border}`, background:page===0?"#f1f5f9":"#fff", cursor:page===0?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>«</button>
+          <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0||loading}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:page===0?"#f1f5f9":"#fff", cursor:page===0?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>‹ Prev</button>
+          <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page>=totalPages-1||loading}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:page>=totalPages-1?"#f1f5f9":"#fff", cursor:page>=totalPages-1?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>Next ›</button>
+          <button onClick={()=>setPage(totalPages-1)} disabled={page>=totalPages-1||loading}
+            style={{ padding:"5px 10px", borderRadius:5, border:`1px solid ${T.border}`, background:page>=totalPages-1?"#f1f5f9":"#fff", cursor:page>=totalPages-1?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>»</button>
+        </div>
+      </div>
+
+      <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>👆 Click any row to view, edit or delete the part</div>
 
       <Card>
         <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
-            <thead>
-              <tr style={{ background:T.header }}>
-                {["","Spare Part Code","Short Description","Cat","Mfr","Model","Disc","Func Group","Part No","Qty","Unit","Location","Min","Max","Status"].map(h=>(
-                  <th key={h} style={{ padding:"9px 10px",textAlign:"left",fontWeight:700,color:"#94a3b8",textTransform:"uppercase",fontSize:10,letterSpacing:0.8,whiteSpace:"nowrap" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length===0
-                ? <tr><td colSpan={15} style={{ textAlign:"center",padding:36,color:T.muted }}>No parts match your search.</td></tr>
-                : filtered.map((r,i)=>{
-                  const cat  = categories.find(x=>x.code===r.cat);
-                  const mdl  = models.find(x=>x.code===r.model);
-                  const sec  = allSections.find(x=>x.code===r.disc);
-                  const dc   = T.disc[r.disc]||{c:sec?.color||T.muted,b:sec?.bg||T.subtle};
-                  return (
-                    <tr key={r.code}
-                      onClick={()=>setSelectedPart(r)}
-                      style={{ borderBottom:`1px solid ${T.border}`,background:i%2?T.subtle:T.card,cursor:"pointer",transition:"background .1s" }}
-                      onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                      onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
-                      <td style={{ padding:"8px 10px",textAlign:"center" }}>
-                        {r.imageUrl ? <span style={{ fontSize:14 }}>📷</span> : <span style={{ fontSize:11,color:"#d1d5db" }}>—</span>}
-                      </td>
-                      <td style={{ padding:"8px 10px" }}><CodeTag code={r.code}/></td>
-                      <td style={{ padding:"8px 10px",fontWeight:600,color:T.text,whiteSpace:"nowrap",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis" }}>{r.shortDesc}</td>
-                      <td style={{ padding:"8px 10px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
-                      <td style={{ padding:"8px 10px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
-                      <td style={{ padding:"8px 10px",fontSize:12,color:T.muted }}>{mdl?.label||r.model}</td>
-                      <td style={{ padding:"8px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
-                      <td style={{ padding:"8px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
-                      <td style={{ padding:"8px 10px",fontFamily:"monospace",fontSize:11,color:T.muted }}>{r.partNo||"—"}</td>
-                      <td style={{ padding:"8px 10px",textAlign:"center",fontWeight:700 }}>{r.qty}</td>
-                      <td style={{ padding:"8px 10px",color:T.muted,fontSize:11 }}>{r.unit}</td>
-                      <td style={{ padding:"8px 10px",fontFamily:"monospace",fontSize:11,color:T.muted }}>{r.loc||"—"}</td>
-                      <td style={{ padding:"8px 10px",textAlign:"center",fontSize:11,color:T.warn }}>{r.minStock}</td>
-                      <td style={{ padding:"8px 10px",textAlign:"center",fontSize:11,color:T.success }}>{r.maxStock}</td>
-                      <td style={{ padding:"8px 10px" }}><Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill></td>
-                    </tr>
-                  );
-                })
-              }
-            </tbody>
-          </table>
+          {loading
+            ? <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
+            : (
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty","Loc","Status"].map(h=>(
+                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length===0
+                  ? <tr><td colSpan={12} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts found.</td></tr>
+                  : rows.map((r,i)=>{
+                    const cat = categories.find(x=>x.code===r.cat);
+                    const mdl = models.find(x=>x.code===r.model);
+                    const sec = allSections.find(x=>x.code===r.disc);
+                    const dc  = T.disc[r.disc]||{c:sec?.color||T.muted, b:sec?.bg||T.subtle};
+                    return (
+                      <tr key={r.code}
+                        onClick={()=>setSelectedPart(r)}
+                        style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}>
+                          {r.imageUrl ? <span title="Has image">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}
+                        </td>
+                        <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
+                        <td style={{ padding:"7px 10px", fontWeight:600, color:T.text, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.shortDesc}</td>
+                        <td style={{ padding:"7px 10px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
+                        <td style={{ padding:"7px 10px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
+                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted, whiteSpace:"nowrap" }}>{mdl?.label||r.model}</td>
+                        <td style={{ padding:"7px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
+                        <td style={{ padding:"7px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
+                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.partNo||"—"}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}>{r.qty}</td>
+                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.loc||"—"}</td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
+                        </td>
+                      </tr>
+                    );
+                  })
+                }
+              </tbody>
+            </table>
+          )}
         </div>
       </Card>
+
+      {/* Bottom pagination */}
+      <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:14 }}>
+        {Array.from({length:Math.min(7,totalPages)},(_,i)=>{
+          let p = i;
+          if(totalPages>7){
+            if(page<4) p=i;
+            else if(page>totalPages-4) p=totalPages-7+i;
+            else p=page-3+i;
+          }
+          return (
+            <button key={p} onClick={()=>setPage(p)} disabled={loading}
+              style={{ width:32,height:32,borderRadius:5,border:`1px solid ${p===page?T.accent:T.border}`,background:p===page?T.accent:"#fff",color:p===page?"#fff":T.text,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:p===page?700:400 }}>
+              {p+1}
+            </button>
+          );
+        })}
+      </div>
 
       <CodeLegend items={[
         ...categories.map(c=>({code:c.code,label:c.label})),
         ...disciplines.map(d=>({code:d.code,label:d.label})),
-        {code:"Qty",label:"Quantity on Hand"},{code:"Min",label:"Minimum Stock Level"},
-        {code:"Max",label:"Maximum Stock Level"},{code:"OEM",label:"Original Equipment Manufacturer"},
+        {code:"Qty",label:"Quantity"},{code:"Loc",label:"Storage Location"},
       ]} />
 
-      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)} onDeleted={()=>setSelectedPart(null)}/>}
+      {selectedPart && (
+        <PartDetailModal
+          part={selectedPart}
+          data={data}
+          onClose={()=>setSelectedPart(null)}
+          onUpdated={(updated)=>{
+            setSelectedPart(prev => ({ ...prev, ...updated }));
+            setRows(r => r.map(p => p.code===selectedPart.code ? { ...p, ...updated } : p));
+          }}
+          onDeleted={()=>{
+            setSelectedPart(null);
+            setRows(r=>r.filter(p=>p.code!==selectedPart.code));
+            setTotal(t=>t-1);
+          }}
+        />
+      )}
     </div>
   );
+}
 }
 
 // ─── ADMINISTRATION HUB ───────────────────────────────────────
