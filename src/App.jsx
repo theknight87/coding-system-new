@@ -2685,9 +2685,13 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   // complete data regardless of which page opened it.
   useEffect(() => {
     if (!dbReady) return; // local mode already has the full object
-    // Heuristic: if partNo is undefined (not even empty string), this came
-    // from the lightweight tree query and needs a full fetch.
-    if (part.partNo !== undefined) return;
+    // The Hierarchy Tree passes a lightweight part object (code, short_desc,
+    // cat, mfr, model, disc, fg, image_url, status only — no part_no, qty,
+    // location, etc). It's explicitly flagged with _isLightweight so we know
+    // to fetch the full record here, regardless of default values mapPart()
+    // fills in (e.g. partNo defaults to '' even when the column wasn't
+    // fetched at all, so checking `=== undefined` doesn't work).
+    if (!part._isLightweight) return;
     let cancelled = false;
     setLoadingFull(true);
     db.fetchParts({ search: part.code }, 0, 5).then(({ data: rows }) => {
@@ -3010,7 +3014,7 @@ function HierarchyTreePage({ data }) {
               <Node key={fg.code} label={fg.label} pill={fg.code} pillColor="#6d28d9" pillBg="#f5f3ff" nodeKey={fgKey} depth={5} count={fgParts.length}>
                 {fgParts.slice(0, 100).map(p=>(
                   <div key={p.code}
-                    onClick={()=>setSelectedPart(p)}
+                    onClick={()=>setSelectedPart({ ...p, _isLightweight: true })}
                     style={{ marginLeft:90,padding:"5px 10px",borderRadius:5,marginBottom:3,background:"#f8fafc",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:`1px solid transparent`,transition:"all .15s" }}
                     onMouseEnter={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor=T.accent;}}
                     onMouseLeave={e=>{e.currentTarget.style.background="#f8fafc";e.currentTarget.style.borderColor="transparent";}}>
