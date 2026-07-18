@@ -2669,30 +2669,58 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   if (!part) return null;
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
 
-  const [mode,      setMode]      = useState('view'); // 'view' | 'edit' | 'confirm-delete'
-  const [form,      setForm]      = useState({ ...part });
-  const [saving,    setSaving]    = useState(false);
-  const [toast,     setToast]     = useState(null);
-  const [imgUrl,    setImgUrl]    = useState(part.imageUrl || null);
+  const [mode,        setMode]        = useState('view'); // 'view' | 'edit' | 'confirm-delete'
+  const [fullPart,     setFullPart]    = useState(part);   // full record once fetched
+  const [loadingFull,  setLoadingFull] = useState(false);
+  const [form,        setForm]        = useState({ ...part });
+  const [saving,      setSaving]      = useState(false);
+  const [toast,       setToast]       = useState(null);
+  const [imgUrl,      setImgUrl]      = useState(part.imageUrl || null);
 
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
-  const cat  = categories.find(c => c.code === part.cat);
-  const mfr  = manufacturers.find(m => m.code === part.mfr);
-  const mdl  = models.find(m => m.code === part.model);
-  const isEng = part.cat === "EN";
+  // The Hierarchy Tree passes a lightweight part object (code, short_desc,
+  // cat, mfr, model, disc, fg, image_url, status only — no part_no, qty,
+  // location, etc). Fetch the full record here so the modal always shows
+  // complete data regardless of which page opened it.
+  useEffect(() => {
+    if (!dbReady) return; // local mode already has the full object
+    // Heuristic: if partNo is undefined (not even empty string), this came
+    // from the lightweight tree query and needs a full fetch.
+    if (part.partNo !== undefined) return;
+    let cancelled = false;
+    setLoadingFull(true);
+    db.fetchParts({ search: part.code }, 0, 5).then(({ data: rows }) => {
+      if (cancelled) return;
+      const match = (rows || []).find(r => r.code === part.code);
+      if (match) {
+        const full = mapPart(match);
+        setFullPart(full);
+        setForm(full);
+        setImgUrl(full.imageUrl || null);
+      }
+    }).finally(() => { if (!cancelled) setLoadingFull(false); });
+    return () => { cancelled = true; };
+  }, [part.code, dbReady]);
+
+  const partView = fullPart; // use this everywhere below instead of raw `part`
+
+  const cat  = categories.find(c => c.code === partView.cat);
+  const mfr  = manufacturers.find(m => m.code === partView.mfr);
+  const mdl  = models.find(m => m.code === partView.model);
+  const isEng = partView.cat === "EN";
   const disc = isEng
-    ? engineSystems.find(s => s.code === part.disc)
-    : disciplines.find(d => d.code === part.disc);
-  const fg   = funcGroups.find(f => f.code === part.fg);
+    ? engineSystems.find(s => s.code === partView.disc)
+    : disciplines.find(d => d.code === partView.disc);
+  const fg   = funcGroups.find(f => f.code === partView.fg);
 
   const segments = [
-    { seg:part.cat,   label:"Category",              val:cat?.label,  color:cat?.color||T.accent, bg:cat?.bg||T.accentLight },
-    { seg:part.mfr,   label:"Manufacturer",           val:mfr?.label,  color:"#b45309", bg:"#fef3c7" },
-    { seg:part.model, label:"Model",                  val:mdl?.label,  color:"#047857", bg:"#d1fae5" },
-    { seg:part.disc,  label:isEng?"Engine System":"Discipline", val:disc?.label, color:disc?.color||"#374151", bg:disc?.bg||"#f3f4f6" },
-    { seg:part.fg,    label:"Functional Group",       val:fg?.label,   color:"#6d28d9", bg:"#f5f3ff" },
-    { seg:part.code.split("-").pop(), label:"Sequence", val:`Item #${parseInt(part.code.split("-").pop())}`, color:"#475569", bg:"#f1f5f9" },
+    { seg:partView.cat,   label:"Category",              val:cat?.label,  color:cat?.color||T.accent, bg:cat?.bg||T.accentLight },
+    { seg:partView.mfr,   label:"Manufacturer",           val:mfr?.label,  color:"#b45309", bg:"#fef3c7" },
+    { seg:partView.model, label:"Model",                  val:mdl?.label,  color:"#047857", bg:"#d1fae5" },
+    { seg:partView.disc,  label:isEng?"Engine System":"Discipline", val:disc?.label, color:disc?.color||"#374151", bg:disc?.bg||"#f3f4f6" },
+    { seg:partView.fg,    label:"Functional Group",       val:fg?.label,   color:"#6d28d9", bg:"#f5f3ff" },
+    { seg:partView.code.split("-").pop(), label:"Sequence", val:`Item #${parseInt(partView.code.split("-").pop())}`, color:"#475569", bg:"#f1f5f9" },
   ];
 
   const handleSave = async () => {
@@ -2735,8 +2763,8 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         {/* Header */}
         <div style={{ padding:"18px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"flex-start",justifyContent:"space-between",position:"sticky",top:0,background:T.card,zIndex:1 }}>
           <div>
-            <div style={{ marginBottom:6 }}><CodeTag code={part.code}/></div>
-            <div style={{ fontWeight:800,fontSize:16,color:T.text }}>{part.shortDesc}</div>
+            <div style={{ marginBottom:6 }}><CodeTag code={partView.code}/></div>
+            <div style={{ fontWeight:800,fontSize:16,color:T.text }}>{partView.shortDesc}</div>
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
             {mode==='view' && <>
@@ -2752,8 +2780,8 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           <div style={{ padding:24 }}>
             <div style={{ background:T.dangerBg,borderRadius:8,padding:20,marginBottom:20,border:`1px solid #fca5a5` }}>
               <div style={{ fontWeight:800,fontSize:16,color:T.danger,marginBottom:8 }}>⚠️ Delete this spare part?</div>
-              <div style={{ fontFamily:"monospace",fontWeight:700,color:T.danger,fontSize:14,marginBottom:6 }}>{part.code}</div>
-              <div style={{ fontSize:13,color:T.text }}>{part.shortDesc}</div>
+              <div style={{ fontFamily:"monospace",fontWeight:700,color:T.danger,fontSize:14,marginBottom:6 }}>{partView.code}</div>
+              <div style={{ fontSize:13,color:T.text }}>{partView.shortDesc}</div>
             </div>
             <p style={{ fontSize:13,color:T.muted,marginBottom:20 }}>This will soft-delete the record. It will no longer appear in any page but is recoverable from the database.</p>
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
@@ -2766,10 +2794,13 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         {/* VIEW MODE */}
         {mode==='view' && (
           <div style={{ padding:"20px 24px" }}>
+            {loadingFull && (
+              <div style={{ textAlign:"center", padding:"10px 0", color:T.muted, fontSize:12 }}>⏳ Loading full part details…</div>
+            )}
             {/* Image */}
             <div style={{ marginBottom:20,textAlign:"center" }}>
-              {part.imageUrl
-                ? <img src={part.imageUrl} alt={part.shortDesc} style={{ maxWidth:"100%",maxHeight:280,borderRadius:10,border:`1px solid ${T.border}`,objectFit:"contain",background:"#f8fafc" }} onError={e=>e.target.style.display="none"}/>
+              {partView.imageUrl
+                ? <img src={partView.imageUrl} alt={partView.shortDesc} style={{ maxWidth:"100%",maxHeight:280,borderRadius:10,border:`1px solid ${T.border}`,objectFit:"contain",background:"#f8fafc" }} onError={e=>e.target.style.display="none"}/>
                 : <div style={{ padding:"28px 0",background:T.subtle,borderRadius:10,border:`1px dashed ${T.border}` }}>
                     <div style={{ fontSize:32,marginBottom:4 }}>📷</div>
                     <div style={{ fontSize:12,color:T.muted }}>No image — click Edit to add one</div>
@@ -2789,16 +2820,16 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
             {/* Details grid */}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20 }}>
               {[
-                {label:"Short Description", val:part.shortDesc},
-                {label:"Long Description",  val:part.longDesc},
-                {label:"Part Number",       val:part.partNo||"—"},
-                {label:"OEM Part Number",   val:part.oemPart||"—"},
-                {label:"Quantity",          val:`${part.qty} ${part.unit}`},
-                {label:"Location",          val:part.loc||"—"},
-                {label:"Min Stock",         val:part.minStock??0},
-                {label:"Max Stock",         val:part.maxStock??0},
-                {label:"Status",            val:part.status||"Active"},
-                {label:"Remarks",           val:part.remarks||"—"},
+                {label:"Short Description", val:partView.shortDesc},
+                {label:"Long Description",  val:partView.longDesc||"—"},
+                {label:"Part Number",       val:partView.partNo||"—"},
+                {label:"OEM Part Number",   val:partView.oemPart||"—"},
+                {label:"Quantity",          val:`${partView.qty??0} ${partView.unit||"EA"}`},
+                {label:"Location",          val:partView.loc||"—"},
+                {label:"Min Stock",         val:partView.minStock??0},
+                {label:"Max Stock",         val:partView.maxStock??0},
+                {label:"Status",            val:partView.status||"Active"},
+                {label:"Remarks",           val:partView.remarks||"—"},
               ].map(f=>(
                 <div key={f.label} style={{ background:T.subtle,borderRadius:6,padding:"9px 12px" }}>
                   <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>{f.label}</div>
