@@ -269,34 +269,14 @@ export async function softDeleteFuncGroup(code) {
 }
 
 // ─── SPARE PARTS ──────────────────────────────────────────────
-export async function fetchPartsCount(filters = {}) {
-  let q = supabase.from('spare_parts').select('*', { count: 'exact', head: true }).is('deleted_at', null);
+export async function fetchParts(filters = {}) {
+  let q = supabase.from('spare_parts').select('*').is('deleted_at', null)
+    .order('created_at', { ascending: false });
   if (filters.cat)    q = q.eq('cat', filters.cat);
   if (filters.disc)   q = q.eq('disc', filters.disc);
   if (filters.status) q = q.eq('status', filters.status);
-  if (filters.mfr)    q = q.eq('mfr', filters.mfr);
-  if (filters.model)  q = q.eq('model', filters.model);
   if (filters.search) {
-    q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%`);
-  }
-  const { count, error } = await q;
-  return { count: count ?? 0, error };
-}
-
-export async function fetchParts(filters = {}, page = 0, pageSize = 100) {
-  let q = supabase
-    .from('spare_parts')
-    .select('code,short_desc,long_desc,cat,mfr,model,disc,fg,part_no,oem_part,qty,unit,location,min_stock,max_stock,remarks,status,image_url,datasheet_url,created_at')
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .range(page * pageSize, (page + 1) * pageSize - 1);
-  if (filters.cat)    q = q.eq('cat', filters.cat);
-  if (filters.disc)   q = q.eq('disc', filters.disc);
-  if (filters.status) q = q.eq('status', filters.status);
-  if (filters.mfr)    q = q.eq('mfr', filters.mfr);
-  if (filters.model)  q = q.eq('model', filters.model);
-  if (filters.search) {
-    q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%,oem_part.ilike.%${filters.search}%,location.ilike.%${filters.search}%`);
+    q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,long_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%,oem_part.ilike.%${filters.search}%,location.ilike.%${filters.search}%`);
   }
   return q;
 }
