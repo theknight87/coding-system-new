@@ -61,13 +61,11 @@ export const fetchManufacturers = () =>
 
 export async function insertManufacturer(row) {
   const userId = await uid();
-  // Check for existing (including soft-deleted) to give clear error
   const { data: existing } = await supabase.from('manufacturers').select('code,deleted_at').eq('code', row.code).single();
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Manufacturer code "${row.code}" already exists` } };
   }
   if (existing && existing.deleted_at) {
-    // Restore soft-deleted record
     const { data, error } = await supabase
       .from('manufacturers').update({ ...row, deleted_at: null, updated_by: userId })
       .eq('code', row.code).select('code,label,cat_codes').single();
@@ -146,7 +144,6 @@ export const fetchDisciplines = () =>
   supabase.from('disciplines').select('code,label,description,color,bg').is('deleted_at', null).order('code');
 
 export async function insertDiscipline(row) {
-  // row must have: { code, label, description, color, bg }
   const userId = await uid();
   const { data: existing } = await supabase.from('disciplines').select('code,deleted_at').eq('code', row.code).single();
   if (existing && !existing.deleted_at) {
@@ -269,6 +266,11 @@ export async function softDeleteFuncGroup(code) {
 }
 
 // ─── SPARE PARTS ──────────────────────────────────────────────
+
+// NEW: Fetch only codes for fast statistics and hierarchy building
+export const fetchAllPartCodes = () =>
+  supabase.from('spare_parts').select('code').is('deleted_at', null);
+
 export async function fetchPartsCount(filters = {}) {
   let q = supabase.from('spare_parts').select('*', { count: 'exact', head: true }).is('deleted_at', null);
   if (filters.cat)    q = q.eq('cat', filters.cat);
@@ -308,7 +310,6 @@ export async function insertPart(row) {
     return { data: null, error: { message: `Part code "${row.code}" already exists` } };
   }
   if (existing && existing.deleted_at) {
-    // Restore + update
     const { data, error } = await supabase
       .from('spare_parts').update({ ...row, deleted_at: null, updated_by: userId })
       .eq('code', row.code).select('*').single();
