@@ -159,10 +159,11 @@ function useDb(initData) {
     dbReadyRef.current = true;
     setDbReady(true);
     setLoading(true);
+    // Load only master data — parts loaded on-demand with pagination in MasterTablePage
     Promise.all([
       db.fetchCategories(), db.fetchManufacturers(), db.fetchModels(),
-      db.fetchDisciplines(), db.fetchEngineSystems(), db.fetchFuncGroups(), db.fetchParts(),
-    ]).then(([cats, mfrs, mdls, discs, engs, fgs, parts]) => {
+      db.fetchDisciplines(), db.fetchEngineSystems(), db.fetchFuncGroups(),
+    ]).then(([cats, mfrs, mdls, discs, engs, fgs]) => {
       setState(prev => ({
         ...prev,
         categories:    cats.data?.map(mapCat)   ?? prev.categories,
@@ -171,7 +172,7 @@ function useDb(initData) {
         disciplines:   discs.data?.map(mapDisc)  ?? prev.disciplines,
         engineSystems: engs.data?.map(mapEng)    ?? prev.engineSystems,
         funcGroups:    fgs.data?.map(mapFg)      ?? prev.funcGroups,
-        parts:         parts.data?.map(mapPart)  ?? prev.parts,
+        parts:         [],  // empty — MasterTablePage fetches its own pages
       }));
     }).finally(() => setLoading(false));
   }, []);
@@ -358,6 +359,8 @@ function useDb(initData) {
     },
 
     // SPARE PARTS
+    // NOTE: parts are NOT kept in global state when dbReady (too many rows).
+    // MasterTablePage and CodeGeneratorPage fetch/paginate directly via db.js.
     savePart: async (row, editingCode) => {
       if (!dbReadyRef.current) {
         setState(prev => {
@@ -379,7 +382,7 @@ function useDb(initData) {
       const res = editingCode
         ? await db.updatePart(editingCode, dbRow)
         : await db.insertPart(dbRow);
-      if (!res.error) await reload('parts', db.fetchParts, mapPart);
+      // No global reload — caller (MasterTablePage) refreshes its own page
       return res;
     },
     deletePart: async (code) => {
@@ -388,7 +391,7 @@ function useDb(initData) {
         return { error: null };
       }
       const res = await db.softDeletePart(code);
-      if (!res.error) await reload('parts', db.fetchParts, mapPart);
+      // No global reload — caller removes the row from its own local list
       return res;
     },
 
@@ -1032,14 +1035,35 @@ function CrudPage({ title, sub, items, setItems, fields, renderRow, emptyMsg, le
 // ═══════════════════════════════════════════════════════════════
 
 function Dashboard({ data }) {
-  const { categories, manufacturers, models, disciplines, funcGroups, parts } = data;
+  const { categories, manufacturers, models, disciplines, funcGroups, dbReady } = data;
 
-  const catCounts = categories.map(c => ({
-    ...c,
-    count: parts.filter(p => p.cat === c.code).length,
-  }));
+  const [totalParts,   setTotalParts]   = useState(0);
+  const [catCounts,    setCatCounts]    = useState(categories.map(c=>({...c,count:0})));
+  const [recentParts,  setRecentParts]  = useState([]);
+  const [loadingStats, setLoadingStats] = useState(false);
 
-  const recentParts = [...parts].slice(-6).reverse();
+  useEffect(() => {
+    if (!dbReady) {
+      // local mode — derive from in-memory INIT_PARTS
+      const parts = data.parts || [];
+      setTotalParts(parts.length);
+      setCatCounts(categories.map(c => ({ ...c, count: parts.filter(p=>p.cat===c.code).length })));
+      setRecentParts([...parts].slice(-6).reverse());
+      return;
+    }
+    setLoadingStats(true);
+    Promise.all([
+      db.fetchPartsCount({}),
+      ...categories.map(c => db.fetchPartsCount({ cat: c.code })),
+      db.fetchParts({}, 0, 6),
+    ]).then(([totalRes, ...rest]) => {
+      const catResults = rest.slice(0, categories.length);
+      const recentRes  = rest[categories.length];
+      setTotalParts(totalRes.count || 0);
+      setCatCounts(categories.map((c,i) => ({ ...c, count: catResults[i]?.count || 0 })));
+      setRecentParts((recentRes.data || []).map(mapPart));
+    }).finally(()=>setLoadingStats(false));
+  }, [dbReady, categories]);
 
   return (
     <div>
@@ -1047,7 +1071,7 @@ function Dashboard({ data }) {
 
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 12, marginBottom: 24 }}>
-        <StatCard label="Total Parts" value={parts.length} color={T.accent} icon="🔩" />
+        <StatCard label="Total Parts" value={loadingStats?"…":totalParts.toLocaleString()} color={T.accent} icon="🔩" />
         <StatCard label="Categories" value={categories.length} color="#047857" icon="📦" />
         <StatCard label="Manufacturers" value={manufacturers.length} color="#b45309" icon="🏭" />
         <StatCard label="Models" value={models.length} color="#7c3aed" icon="📐" />
@@ -1076,10 +1100,10 @@ function Dashboard({ data }) {
             <div key={c.code} style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{c.icon} {c.label}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: c.color }}>{c.count}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: c.color }}>{loadingStats?"…":c.count}</span>
               </div>
               <div style={{ background: "#e2e8f0", borderRadius: 4, height: 6 }}>
-                <div style={{ background: c.color, height: 6, borderRadius: 4, width: `${parts.length ? (c.count / parts.length) * 100 : 0}%`, transition: "width .5s" }} />
+                <div style={{ background: c.color, height: 6, borderRadius: 4, width: `${totalParts ? (c.count / totalParts) * 100 : 0}%`, transition: "width .5s" }} />
               </div>
             </div>
           ))}
@@ -1121,16 +1145,20 @@ function Dashboard({ data }) {
       {/* Recent Codes */}
       <Card>
         <SectionHeader>Recent Spare Parts</SectionHeader>
-        <Table
-          cols={[
-            { key:"code", label:"Code", render: r => <CodeTag code={r.code} /> },
-            { key:"shortDesc", label:"Short Description", style:{fontWeight:600,color:T.text} },
-            { key:"cat", label:"Category", render: r => { const c = categories.find(x=>x.code===r.cat); return <Pill color={c?.color} bg={c?.bg}>{r.cat}</Pill>; } },
-            { key:"disc", label:"Discipline", render: r => { const d = T.disc[r.disc]||{c:T.muted,b:T.subtle}; return <Pill color={d.c} bg={d.b}>{r.disc}</Pill>; } },
-            { key:"status", label:"Status", render: r => <Pill color={T.success} bg={T.successBg} mono={false}>{r.status}</Pill> },
-          ]}
-          rows={recentParts}
-        />
+        {loadingStats ? (
+          <div style={{ textAlign:"center", padding:24, color:T.muted }}>Loading…</div>
+        ) : (
+          <Table
+            cols={[
+              { key:"code", label:"Code", render: r => <CodeTag code={r.code} /> },
+              { key:"shortDesc", label:"Short Description", style:{fontWeight:600,color:T.text} },
+              { key:"cat", label:"Category", render: r => { const c = categories.find(x=>x.code===r.cat); return <Pill color={c?.color} bg={c?.bg}>{r.cat}</Pill>; } },
+              { key:"disc", label:"Discipline", render: r => { const d = T.disc[r.disc]||{c:T.muted,b:T.subtle}; return <Pill color={d.c} bg={d.b}>{r.disc}</Pill>; } },
+              { key:"status", label:"Status", render: r => <Pill color={T.success} bg={T.successBg} mono={false}>{r.status}</Pill> },
+            ]}
+            rows={recentParts}
+          />
+        )}
       </Card>
 
       <CodeLegend items={[
@@ -2336,15 +2364,28 @@ function CodeGeneratorPage({ data }) {
 
   const canGenerate = step.cat && step.mfr && step.model && step.disc && step.fg;
 
-  // Auto sequence
-  const autoSeq = useMemo(() => {
-    if (!canGenerate) return "0001";
+  // Auto sequence — queries DB directly since local `parts` state is no longer preloaded
+  const [autoSeq,     setAutoSeq]     = useState("0001");
+  const [seqLoading,  setSeqLoading]  = useState(false);
+  const [codeExists,  setCodeExists]  = useState(false);
+
+  useEffect(() => {
+    if (!canGenerate) { setAutoSeq("0001"); setCodeExists(false); return; }
     const prefix = `${step.cat}-${step.mfr}-${step.model}-${step.disc}-${step.fg}-`;
-    const existing = parts.filter(p => p.code.startsWith(prefix));
-    const nums = existing.map(p => parseInt(p.code.split("-").pop() || "0"));
-    const max = nums.length ? Math.max(...nums) : 0;
-    return String(max + 1).padStart(4, "0");
-  }, [canGenerate, step, parts]);
+    if (!dbReady) {
+      // local mode — use in-memory parts array
+      const existing = (data.parts||[]).filter(p => p.code.startsWith(prefix));
+      const nums = existing.map(p => parseInt(p.code.split("-").pop() || "0"));
+      setAutoSeq(String((nums.length?Math.max(...nums):0) + 1).padStart(4, "0"));
+      return;
+    }
+    setSeqLoading(true);
+    db.fetchParts({ search: prefix }, 0, 200).then(({ data: rows }) => {
+      const matching = (rows||[]).filter(r => r.code.startsWith(prefix));
+      const nums = matching.map(r => parseInt(r.code.split("-").pop() || "0"));
+      setAutoSeq(String((nums.length?Math.max(...nums):0) + 1).padStart(4, "0"));
+    }).finally(()=>setSeqLoading(false));
+  }, [canGenerate, step.cat, step.mfr, step.model, step.disc, step.fg, dbReady]);
 
   const seqNum = seqMode === "auto"
     ? autoSeq
@@ -2352,8 +2393,20 @@ function CodeGeneratorPage({ data }) {
 
   const generatedCode = canGenerate ? `${step.cat}-${step.mfr}-${step.model}-${step.disc}-${step.fg}-${seqNum}` : null;
 
-  // Check if code already exists
-  const codeExists = generatedCode && parts.some(p => p.code === generatedCode);
+  // Check DB for exact code existence whenever generatedCode changes
+  useEffect(() => {
+    if (!generatedCode) { setCodeExists(false); return; }
+    if (!dbReady) {
+      setCodeExists((data.parts||[]).some(p => p.code === generatedCode));
+      return;
+    }
+    let cancelled = false;
+    db.fetchParts({ search: generatedCode }, 0, 5).then(({ data: rows }) => {
+      if (cancelled) return;
+      setCodeExists((rows||[]).some(r => r.code === generatedCode));
+    });
+    return () => { cancelled = true; };
+  }, [generatedCode, dbReady]);
 
   const cat   = categories.find(c=>c.code===step.cat);
   const mfr   = manufacturers.find(m=>m.code===step.mfr);
@@ -2512,13 +2565,18 @@ function CodeGeneratorPage({ data }) {
                     {generatedCode}
                   </span>
                 </div>
-                <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
+                {seqLoading
+                  ? <div style={{textAlign:"center",color:T.muted,fontSize:12,marginBottom:10}}>⏳ Checking sequence…</div>
+                  : codeExists
+                    ? <div style={{textAlign:"center",color:T.danger,fontWeight:700,fontSize:13,marginBottom:10}}>⚠️ This code already exists</div>
+                    : <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
+                }
                 {saved
                   ? <div style={{display:"flex",gap:8}}>
                       <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>✅ Saved!</div>
                       <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>＋ New Code</Btn>
                     </div>
-                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving}>
+                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists||seqLoading}>
                       {saving?"Saving…":"💾 Save to Master Table"}
                     </Btn>
                 }
@@ -2607,7 +2665,7 @@ function CodeGeneratorPage({ data }) {
 // PART DETAIL MODAL — View + Edit + Delete
 // ═══════════════════════════════════════════════════════════════
 
-function PartDetailModal({ part, data, onClose, onDeleted }) {
+function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   if (!part) return null;
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
 
@@ -2651,6 +2709,7 @@ function PartDetailModal({ part, data, onClose, onDeleted }) {
     setSaving(false);
     if (error) { flash(`Error: ${error.message}`, 'err'); return; }
     flash('Part updated successfully');
+    if (onUpdated) onUpdated({ ...form, imageUrl:imgUrl });
     setMode('view');
   };
 
@@ -2809,41 +2868,74 @@ function PartDetailModal({ part, data, onClose, onDeleted }) {
 
 
 function HierarchyTreePage({ data }) {
-  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts } = data;
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, dbReady } = data;
   const [expanded,     setExpanded]     = useState({ ROOT:true });
   const [selectedPart, setSelectedPart] = useState(null);
+  // Lazy-loaded caches — populated on demand as the user expands nodes
+  const [fgPartsCache, setFgPartsCache] = useState({}); // key: "cat-mfr-model-sec-fg" → array of parts
+  const [fgLoading,    setFgLoading]    = useState({}); // key → bool
+  const [countCache,   setCountCache]   = useState({}); // key: any node key → count
+  const [rootCount,    setRootCount]    = useState(0);
+
   const toggle = k => setExpanded(e=>({...e,[k]:!e[k]}));
 
+  // Fetch total count once on mount
+  useEffect(() => {
+    if (!dbReady) return;
+    db.fetchPartsCount({}).then(({count}) => setRootCount(count||0));
+  }, [dbReady]);
+
+  // Fetch a count for a given filter combo (cached)
+  const getCount = useCallback((key, filters) => {
+    if (!dbReady) return 0;
+    if (countCache[key] !== undefined) return countCache[key];
+    db.fetchPartsCount(filters).then(({count}) => {
+      setCountCache(prev => ({ ...prev, [key]: count||0 }));
+    });
+    return undefined; // triggers "…" while loading
+  }, [dbReady, countCache]);
+
+  // Fetch parts for a specific functional-group node (lazy, only when expanded)
+  const loadFgParts = useCallback((key, filters) => {
+    if (fgPartsCache[key] || fgLoading[key]) return;
+    setFgLoading(prev => ({ ...prev, [key]: true }));
+    db.fetchParts(filters, 0, 100).then(({ data: rows }) => {
+      setFgPartsCache(prev => ({ ...prev, [key]: (rows||[]).map(mapPart) }));
+      setFgLoading(prev => ({ ...prev, [key]: false }));
+    });
+  }, [fgPartsCache, fgLoading]);
+
   const expandAll = () => {
+    // Only expand the structural levels (cat → mfr → model → section)
+    // Functional-group parts still load lazily when that specific node opens
     const keys = {ROOT:true};
     categories.forEach(cat=>{
       keys[cat.code]=true;
       manufacturers.filter(m=>(m.catCodes||[]).includes(cat.code)).forEach(mfr=>{
         keys[`${cat.code}-${mfr.code}`]=true;
-        models.filter(m=>m.mfrCode===mfr.code).forEach(mod=>{
-          const modKey = `${cat.code}-${mfr.code}-${mod.code}`;
-          keys[modKey]=true;
-          const sections = cat.code === "EN" ? engineSystems : disciplines;
-          sections.forEach(s=>{ keys[`${modKey}-${s.code}`]=true; });
-        });
       });
     });
     setExpanded(keys);
   };
 
-  const Node = ({label,pill,pillColor,pillBg,nodeKey,depth=0,count,children,alwaysExpandable=false,tag}) => {
+  const Node = ({label,pill,pillColor,pillBg,nodeKey,depth=0,count,children,alwaysExpandable=false,tag,onExpand}) => {
     const isOpen = expanded[nodeKey];
     const hasKids = alwaysExpandable || (children && (Array.isArray(children) ? children.filter(Boolean).length > 0 : true));
+    const handleClick = () => {
+      if (!hasKids) return;
+      if (!isOpen && onExpand) onExpand();
+      toggle(nodeKey);
+    };
     return (
       <div style={{marginLeft:depth*18}}>
-        <div onClick={()=>hasKids&&toggle(nodeKey)} style={{ display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:5,cursor:hasKids?"pointer":"default",marginBottom:2,background:isOpen&&hasKids?"#eff6ff":"transparent",transition:"background .1s" }}>
+        <div onClick={handleClick} style={{ display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:5,cursor:hasKids?"pointer":"default",marginBottom:2,background:isOpen&&hasKids?"#eff6ff":"transparent",transition:"background .1s" }}>
           <span style={{ fontSize:11,color:"#94a3b8",width:14,flexShrink:0 }}>{hasKids?(isOpen?"▼":"▶"):"—"}</span>
           {pill&&<Pill color={pillColor} bg={pillBg} size={11}>{pill}</Pill>}
           <span style={{ fontSize:13,fontWeight:depth<3?700:400,color:depth===0?T.accent:T.text }}>{label}</span>
           {tag&&<span style={{ fontSize:10,background:"#fef3c7",color:"#92400e",padding:"1px 6px",borderRadius:3,fontWeight:700 }}>{tag}</span>}
           {count!==undefined&&(
             <span style={{ fontSize:11,color:count>0?T.accent:T.muted,marginLeft:4,fontWeight:count>0?700:400 }}>
-              ({count > 0 ? count+" parts" : "empty"})
+              {count===null ? "…" : count > 0 ? `(${count} parts)` : "(empty)"}
             </span>
           )}
         </div>
@@ -2852,33 +2944,31 @@ function HierarchyTreePage({ data }) {
     );
   };
 
-  // Render discipline/section level — shared logic
+  // Section level — shows functional groups; parts load lazily per FG on click
   const renderSectionLevel = (cat, mfr, mod, sections, isEngine) => {
     return sections.map(sec=>{
       const secKey = `${cat.code}-${mfr.code}-${mod.code}-${sec.code}`;
-      const partsInSec = parts.filter(p=>p.cat===cat.code&&p.mfr===mfr.code&&p.model===mod.code&&p.disc===sec.code);
-      const usedFGs = funcGroups.filter(fg=>
-        parts.some(p=>p.cat===cat.code&&p.mfr===mfr.code&&p.model===mod.code&&p.disc===sec.code&&p.fg===fg.code)
-      );
+      const secCount = getCount(secKey, { cat:cat.code, mfr:mfr.code, model:mod.code, disc:sec.code });
       return (
         <Node
-          key={sec.code}
-          label={sec.label}
-          pill={sec.code}
-          pillColor={sec.color}
-          pillBg={sec.bg}
-          nodeKey={secKey}
-          depth={4}
-          count={partsInSec.length}
-          alwaysExpandable={true}
+          key={sec.code} label={sec.label} pill={sec.code} pillColor={sec.color} pillBg={sec.bg}
+          nodeKey={secKey} depth={4} count={secCount===undefined?null:secCount} alwaysExpandable={true}
           tag={isEngine ? "Engine System" : null}
         >
-          {usedFGs.map(fg=>{
-            const fgParts = parts.filter(p=>p.cat===cat.code&&p.mfr===mfr.code&&p.model===mod.code&&p.disc===sec.code&&p.fg===fg.code);
+          {funcGroups.map(fg=>{
             const fgKey = `${secKey}-${fg.code}`;
+            const fgCount = getCount(fgKey, { cat:cat.code, mfr:mfr.code, model:mod.code, disc:sec.code, fg:fg.code }); // not filtered by fg in db.js yet, see note below
+            if (fgCount === 0) return null; // hide empty FG nodes to reduce clutter
+            const cachedParts = fgPartsCache[fgKey];
+            const loadingFg   = fgLoading[fgKey];
             return (
-              <Node key={fg.code} label={fg.label} pill={fg.code} pillColor="#6d28d9" pillBg="#f5f3ff" nodeKey={fgKey} depth={5} count={fgParts.length}>
-                {fgParts.map(p=>(
+              <Node
+                key={fg.code} label={fg.label} pill={fg.code} pillColor="#6d28d9" pillBg="#f5f3ff"
+                nodeKey={fgKey} depth={5} count={fgCount===undefined?null:fgCount}
+                onExpand={()=>loadFgParts(fgKey, { cat:cat.code, mfr:mfr.code, model:mod.code, disc:sec.code, fg:fg.code })}
+              >
+                {loadingFg && <div style={{marginLeft:90,fontSize:12,color:T.muted,padding:"4px 0"}}>⏳ Loading parts…</div>}
+                {cachedParts && cachedParts.map(p=>(
                   <div key={p.code}
                     onClick={()=>setSelectedPart(p)}
                     style={{ marginLeft:90,padding:"5px 10px",borderRadius:5,marginBottom:3,background:"#f8fafc",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:`1px solid transparent`,transition:"all .15s" }}
@@ -2894,12 +2984,6 @@ function HierarchyTreePage({ data }) {
               </Node>
             );
           })}
-          {usedFGs.length===0&&(
-            <div style={{ marginLeft:72,padding:"5px 10px",borderRadius:4,marginBottom:2,background:"#f8fafc",border:`1px dashed ${T.border}`,display:"flex",alignItems:"center",gap:8 }}>
-              <span style={{ fontSize:11,color:"#94a3b8" }}>—</span>
-              <span style={{ fontSize:12,color:"#94a3b8",fontStyle:"italic" }}>No parts coded yet</span>
-            </div>
-          )}
         </Node>
       );
     });
@@ -2907,9 +2991,8 @@ function HierarchyTreePage({ data }) {
 
   return (
     <div>
-      <PageHeader title="Hierarchy Tree" sub="Full expandable classification tree — Engines use dedicated system sections" />
+      <PageHeader title="Hierarchy Tree" sub="Full expandable classification tree — parts load on demand for fast browsing" />
 
-      {/* Legend box for Engine Systems */}
       <Card style={{ marginBottom:16,borderLeft:"4px solid #b45309",background:"#fffbeb" }}>
         <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:10 }}>
           <span style={{ fontSize:16 }}>🔧</span>
@@ -2931,23 +3014,31 @@ function HierarchyTreePage({ data }) {
       <Card>
         <div style={{ display:"flex",gap:10,marginBottom:16 }}>
           <Btn small variant="secondary" onClick={()=>setExpanded({ROOT:true})}>Collapse All</Btn>
-          <Btn small onClick={expandAll}>Expand All</Btn>
+          <Btn small onClick={expandAll}>Expand Categories & Manufacturers</Btn>
         </div>
-        <Node label="Engineering Spare Parts" nodeKey="ROOT" depth={0} count={parts.length}>
+        <Node label="Engineering Spare Parts" nodeKey="ROOT" depth={0} count={dbReady ? rootCount : (data.parts||[]).length}>
           {categories.map(cat=>{
             const isEngine = cat.code === "EN";
-            const catMfrs = manufacturers.filter(m=>(m.catCodes||[]).includes(cat.code));
+            const catMfrs  = manufacturers.filter(m=>(m.catCodes||[]).includes(cat.code));
+            const catKey   = cat.code;
+            const catCount = getCount(catKey, { cat: cat.code });
             return (
-              <Node key={cat.code} label={cat.label} pill={cat.code} pillColor={cat.color} pillBg={cat.bg} nodeKey={cat.code} depth={1} count={parts.filter(p=>p.cat===cat.code).length}>
+              <Node key={cat.code} label={cat.label} pill={cat.code} pillColor={cat.color} pillBg={cat.bg}
+                nodeKey={catKey} depth={1} count={catCount===undefined?null:catCount}>
                 {catMfrs.map(mfr=>{
                   const mfrModels = models.filter(m=>m.mfrCode===mfr.code);
+                  const mfrKey    = `${cat.code}-${mfr.code}`;
+                  const mfrCount  = getCount(mfrKey, { cat:cat.code, mfr:mfr.code });
                   return (
-                    <Node key={mfr.code} label={mfr.label} pill={mfr.code} pillColor="#b45309" pillBg="#fef3c7" nodeKey={`${cat.code}-${mfr.code}`} depth={2} count={parts.filter(p=>p.cat===cat.code&&p.mfr===mfr.code).length}>
+                    <Node key={mfr.code} label={mfr.label} pill={mfr.code} pillColor="#b45309" pillBg="#fef3c7"
+                      nodeKey={mfrKey} depth={2} count={mfrCount===undefined?null:mfrCount}>
                       {mfrModels.map(mod=>{
-                        const modPartsCount = parts.filter(p=>p.model===mod.code).length;
+                        const modKey   = `${cat.code}-${mfr.code}-${mod.code}`;
+                        const modCount = getCount(modKey, { cat:cat.code, mfr:mfr.code, model:mod.code });
                         const sections = isEngine ? engineSystems : disciplines;
                         return (
-                          <Node key={mod.code} label={mod.label} pill={mod.code} pillColor="#047857" pillBg="#d1fae5" nodeKey={`${cat.code}-${mfr.code}-${mod.code}`} depth={3} count={modPartsCount} alwaysExpandable={true}>
+                          <Node key={mod.code} label={mod.label} pill={mod.code} pillColor="#047857" pillBg="#d1fae5"
+                            nodeKey={modKey} depth={3} count={modCount===undefined?null:modCount} alwaysExpandable={true}>
                             {renderSectionLevel(cat, mfr, mod, sections, isEngine)}
                           </Node>
                         );
@@ -2966,117 +3057,237 @@ function HierarchyTreePage({ data }) {
         ...engineSystems.map(s=>({code:s.code,label:s.label+" (Engine System)"})),
         ...disciplines.map(d=>({code:d.code,label:d.label+" (Other Categories)"})),
       ]} />
-      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)} onDeleted={()=>setSelectedPart(null)}/>}
+      {selectedPart && (
+        <PartDetailModal
+          part={selectedPart} data={data}
+          onClose={()=>setSelectedPart(null)}
+          onUpdated={(updated)=>setSelectedPart(prev=>({...prev,...updated}))}
+          onDeleted={()=>setSelectedPart(null)}
+        />
+      )}
     </div>
   );
 }
 
 // ─── MASTER TABLE ─────────────────────────────────────────────
+const PAGE_SIZE = 50;
+
 function MasterTablePage({ data }) {
-  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, parts, ops } = data;
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
   const allSections = [...disciplines, ...engineSystems];
-  const [search,       setSearch]       = useState("");
-  const [fCat,         setFCat]         = useState("");
-  const [fDisc,        setFDisc]        = useState("");
-  const [fStatus,      setFStatus]      = useState("");
+
+  // Filters
+  const [search,   setSearch]   = useState("");
+  const [fCat,     setFCat]     = useState("");
+  const [fMfr,     setFMfr]     = useState("");
+  const [fModel,   setFModel]   = useState("");
+  const [fDisc,    setFDisc]    = useState("");
+  const [fStatus,  setFStatus]  = useState("");
+
+  // Pagination
+  const [page,       setPage]       = useState(0);
+  const [total,      setTotal]      = useState(0);
+  const [rows,       setRows]       = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [searchInput,setSearchInput]= useState("");
+
+  // Part detail modal
   const [selectedPart, setSelectedPart] = useState(null);
 
-  const filtered = useMemo(() => parts.filter(p => {
-    const q = search.toLowerCase();
-    const ms = !q || [p.code,p.shortDesc,p.longDesc,p.partNo,p.oemPart,p.loc].some(v=>(v||"").toLowerCase().includes(q));
-    return ms && (!fCat||p.cat===fCat) && (!fDisc||p.disc===fDisc) && (!fStatus||p.status===fStatus);
-  }), [parts,search,fCat,fDisc,fStatus]);
+  const filters = useMemo(()=>({
+    search: search||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
+    model: fModel||undefined, disc: fDisc||undefined, status: fStatus||undefined,
+  }),[search, fCat, fMfr, fModel, fDisc, fStatus]);
+
+  // Debounce search
+  useEffect(()=>{
+    const t = setTimeout(()=>setSearch(searchInput), 400);
+    return ()=>clearTimeout(t);
+  },[searchInput]);
+
+  // Reset page on filter change
+  useEffect(()=>{ setPage(0); },[filters]);
+
+  // Fetch from DB when dbReady, else use INIT_PARTS
+  useEffect(()=>{
+    if (!dbReady) {
+      // local mode — use INIT_PARTS from data
+      setRows(data.parts || []);
+      setTotal((data.parts||[]).length);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      db.fetchPartsCount(filters),
+      db.fetchParts(filters, page, PAGE_SIZE),
+    ]).then(([countRes, dataRes]) => {
+      setTotal(countRes.count ?? 0);
+      setRows((dataRes.data ?? []).map(mapPart));
+    }).finally(()=>setLoading(false));
+  },[filters, page, dbReady]);
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const filteredMfrs  = manufacturers.filter(m => !fCat  || (m.catCodes||[]).includes(fCat));
+  const filteredModels= models.filter(m => !fMfr || m.mfrCode === fMfr);
+
+  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
 
   return (
     <div>
-      <PageHeader title="Master Spare Parts Table" sub={`Complete coded parts inventory — ${parts.length} total records`} />
-      <Card style={{ marginBottom:20 }}>
-        <div style={{ display:"flex",gap:12,flexWrap:"wrap",alignItems:"center" }}>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search code, description, part no, location…" style={{ maxWidth:320,width:"auto",flex:"1 1 220px" }} />
-          <Select value={fCat} onChange={e=>setFCat(e.target.value)} style={{ width:"auto",flex:"0 0 160px" }}>
+      <PageHeader title="Master Spare Parts Table" sub={`${total.toLocaleString()} total coded parts`} />
+
+      {/* Filters */}
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <input
+            value={searchInput}
+            onChange={e=>setSearchInput(e.target.value)}
+            placeholder="🔍 Code, description, part no…"
+            style={{ ...selStyle, minWidth:220, flex:"1 1 200px" }}
+          />
+          <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
             <option value="">All Categories</option>
             {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
-          </Select>
-          <Select value={fDisc} onChange={e=>setFDisc(e.target.value)} style={{ width:"auto",flex:"0 0 180px" }}>
-            <option value="">All Disciplines / Systems</option>
-            <optgroup label="Standard Disciplines">
-              {disciplines.map(d=><option key={d.code} value={d.code}>{d.label}</option>)}
-            </optgroup>
-            <optgroup label="Engine System Sections">
-              {engineSystems.map(s=><option key={s.code} value={s.code}>{s.label}</option>)}
-            </optgroup>
-          </Select>
-          <Select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={{ width:"auto",flex:"0 0 130px" }}>
+          </select>
+          <select value={fMfr} onChange={e=>{setFMfr(e.target.value);setFModel("");}} style={selStyle}>
+            <option value="">All Manufacturers</option>
+            {filteredMfrs.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fModel} onChange={e=>setFModel(e.target.value)} style={selStyle}>
+            <option value="">All Models</option>
+            {filteredModels.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fDisc} onChange={e=>setFDisc(e.target.value)} style={selStyle}>
+            <option value="">All Systems</option>
+            <optgroup label="Standard">{disciplines.map(d=><option key={d.code} value={d.code}>{d.label}</option>)}</optgroup>
+            <optgroup label="Engine">{engineSystems.map(s=><option key={s.code} value={s.code}>{s.label}</option>)}</optgroup>
+          </select>
+          <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={selStyle}>
             <option value="">All Status</option>
             {["Active","Inactive","Obsolete"].map(s=><option key={s}>{s}</option>)}
-          </Select>
-          {(search||fCat||fDisc||fStatus) && (
-            <Btn small variant="danger" onClick={()=>{setSearch("");setFCat("");setFDisc("");setFStatus("");}}>✕ Clear</Btn>
+          </select>
+          {(search||fCat||fMfr||fModel||fDisc||fStatus)&&(
+            <button onClick={()=>{setSearchInput("");setSearch("");setFCat("");setFMfr("");setFModel("");setFDisc("");setFStatus("");}}
+              style={{ padding:"7px 12px", borderRadius:5, border:"1px solid #fca5a5", background:"#fee2e2", color:T.danger, fontSize:13, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
+              ✕ Clear
+            </button>
           )}
-          <span style={{ marginLeft:"auto",fontSize:13,color:T.muted }}>{filtered.length} results</span>
         </div>
       </Card>
 
-      <div style={{ fontSize:12,color:T.muted,marginBottom:10 }}>👆 Click any row to view full part details</div>
+      {/* Pagination controls */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10, flexWrap:"wrap" }}>
+        <span style={{ fontSize:13, color:T.muted }}>
+          {loading ? "Loading…" : `${total.toLocaleString()} results · Page ${page+1} of ${totalPages||1}`}
+        </span>
+        <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+          <button onClick={()=>setPage(0)} disabled={page===0||loading}
+            style={{ padding:"5px 10px", borderRadius:5, border:`1px solid ${T.border}`, background:page===0?"#f1f5f9":"#fff", cursor:page===0?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>«</button>
+          <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0||loading}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:page===0?"#f1f5f9":"#fff", cursor:page===0?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>‹ Prev</button>
+          <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page>=totalPages-1||loading}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:page>=totalPages-1?"#f1f5f9":"#fff", cursor:page>=totalPages-1?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>Next ›</button>
+          <button onClick={()=>setPage(totalPages-1)} disabled={page>=totalPages-1||loading}
+            style={{ padding:"5px 10px", borderRadius:5, border:`1px solid ${T.border}`, background:page>=totalPages-1?"#f1f5f9":"#fff", cursor:page>=totalPages-1?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>»</button>
+        </div>
+      </div>
+
+      <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>👆 Click any row to view, edit or delete the part</div>
 
       <Card>
         <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
-            <thead>
-              <tr style={{ background:T.header }}>
-                {["","Spare Part Code","Short Description","Cat","Mfr","Model","Disc","Func Group","Part No","Qty","Unit","Location","Min","Max","Status"].map(h=>(
-                  <th key={h} style={{ padding:"9px 10px",textAlign:"left",fontWeight:700,color:"#94a3b8",textTransform:"uppercase",fontSize:10,letterSpacing:0.8,whiteSpace:"nowrap" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length===0
-                ? <tr><td colSpan={15} style={{ textAlign:"center",padding:36,color:T.muted }}>No parts match your search.</td></tr>
-                : filtered.map((r,i)=>{
-                  const cat  = categories.find(x=>x.code===r.cat);
-                  const mdl  = models.find(x=>x.code===r.model);
-                  const sec  = allSections.find(x=>x.code===r.disc);
-                  const dc   = T.disc[r.disc]||{c:sec?.color||T.muted,b:sec?.bg||T.subtle};
-                  return (
-                    <tr key={r.code}
-                      onClick={()=>setSelectedPart(r)}
-                      style={{ borderBottom:`1px solid ${T.border}`,background:i%2?T.subtle:T.card,cursor:"pointer",transition:"background .1s" }}
-                      onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                      onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
-                      <td style={{ padding:"8px 10px",textAlign:"center" }}>
-                        {r.imageUrl ? <span style={{ fontSize:14 }}>📷</span> : <span style={{ fontSize:11,color:"#d1d5db" }}>—</span>}
-                      </td>
-                      <td style={{ padding:"8px 10px" }}><CodeTag code={r.code}/></td>
-                      <td style={{ padding:"8px 10px",fontWeight:600,color:T.text,whiteSpace:"nowrap",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis" }}>{r.shortDesc}</td>
-                      <td style={{ padding:"8px 10px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
-                      <td style={{ padding:"8px 10px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
-                      <td style={{ padding:"8px 10px",fontSize:12,color:T.muted }}>{mdl?.label||r.model}</td>
-                      <td style={{ padding:"8px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
-                      <td style={{ padding:"8px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
-                      <td style={{ padding:"8px 10px",fontFamily:"monospace",fontSize:11,color:T.muted }}>{r.partNo||"—"}</td>
-                      <td style={{ padding:"8px 10px",textAlign:"center",fontWeight:700 }}>{r.qty}</td>
-                      <td style={{ padding:"8px 10px",color:T.muted,fontSize:11 }}>{r.unit}</td>
-                      <td style={{ padding:"8px 10px",fontFamily:"monospace",fontSize:11,color:T.muted }}>{r.loc||"—"}</td>
-                      <td style={{ padding:"8px 10px",textAlign:"center",fontSize:11,color:T.warn }}>{r.minStock}</td>
-                      <td style={{ padding:"8px 10px",textAlign:"center",fontSize:11,color:T.success }}>{r.maxStock}</td>
-                      <td style={{ padding:"8px 10px" }}><Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill></td>
-                    </tr>
-                  );
-                })
-              }
-            </tbody>
-          </table>
+          {loading
+            ? <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
+            : (
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty","Loc","Status"].map(h=>(
+                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length===0
+                  ? <tr><td colSpan={12} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts found.</td></tr>
+                  : rows.map((r,i)=>{
+                    const cat = categories.find(x=>x.code===r.cat);
+                    const mdl = models.find(x=>x.code===r.model);
+                    const sec = allSections.find(x=>x.code===r.disc);
+                    const dc  = T.disc[r.disc]||{c:sec?.color||T.muted, b:sec?.bg||T.subtle};
+                    return (
+                      <tr key={r.code}
+                        onClick={()=>setSelectedPart(r)}
+                        style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}>
+                          {r.imageUrl ? <span title="Has image">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}
+                        </td>
+                        <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
+                        <td style={{ padding:"7px 10px", fontWeight:600, color:T.text, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.shortDesc}</td>
+                        <td style={{ padding:"7px 10px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
+                        <td style={{ padding:"7px 10px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
+                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted, whiteSpace:"nowrap" }}>{mdl?.label||r.model}</td>
+                        <td style={{ padding:"7px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
+                        <td style={{ padding:"7px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
+                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.partNo||"—"}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}>{r.qty}</td>
+                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.loc||"—"}</td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
+                        </td>
+                      </tr>
+                    );
+                  })
+                }
+              </tbody>
+            </table>
+          )}
         </div>
       </Card>
+
+      {/* Bottom pagination */}
+      <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:14 }}>
+        {Array.from({length:Math.min(7,totalPages)},(_,i)=>{
+          let p = i;
+          if(totalPages>7){
+            if(page<4) p=i;
+            else if(page>totalPages-4) p=totalPages-7+i;
+            else p=page-3+i;
+          }
+          return (
+            <button key={p} onClick={()=>setPage(p)} disabled={loading}
+              style={{ width:32,height:32,borderRadius:5,border:`1px solid ${p===page?T.accent:T.border}`,background:p===page?T.accent:"#fff",color:p===page?"#fff":T.text,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:p===page?700:400 }}>
+              {p+1}
+            </button>
+          );
+        })}
+      </div>
 
       <CodeLegend items={[
         ...categories.map(c=>({code:c.code,label:c.label})),
         ...disciplines.map(d=>({code:d.code,label:d.label})),
-        {code:"Qty",label:"Quantity on Hand"},{code:"Min",label:"Minimum Stock Level"},
-        {code:"Max",label:"Maximum Stock Level"},{code:"OEM",label:"Original Equipment Manufacturer"},
+        {code:"Qty",label:"Quantity"},{code:"Loc",label:"Storage Location"},
       ]} />
 
-      {selectedPart && <PartDetailModal part={selectedPart} data={data} onClose={()=>setSelectedPart(null)} onDeleted={()=>setSelectedPart(null)}/>}
+      {selectedPart && (
+        <PartDetailModal
+          part={selectedPart}
+          data={data}
+          onClose={()=>setSelectedPart(null)}
+          onUpdated={(updated)=>{
+            setSelectedPart(prev => ({ ...prev, ...updated }));
+            setRows(r => r.map(p => p.code===selectedPart.code ? { ...p, ...updated } : p));
+          }}
+          onDeleted={()=>{
+            setSelectedPart(null);
+            setRows(r=>r.filter(p=>p.code!==selectedPart.code));
+            setTotal(t=>t-1);
+          }}
+        />
+      )}
     </div>
   );
 }
