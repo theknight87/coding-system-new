@@ -83,12 +83,25 @@ function LoginPage() {
   };
 
   return (
-    <div style={{ minHeight:'100vh', background:'#0c1526', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:"'Inter','Segoe UI',system-ui,sans-serif" }}>
-      <div style={{ background:'#0f172a', border:'1px solid #1e2d45', borderRadius:12, padding:40, width:380, boxShadow:'0 20px 60px rgba(0,0,0,0.5)' }}>
+    <div style={{
+      minHeight:'100vh', background:'#0c1526', display:'flex', alignItems:'center', justifyContent:'center',
+      fontFamily:"'Inter','Segoe UI',system-ui,sans-serif", position:'relative', overflow:'hidden',
+    }}>
+      {/* Background logo watermark */}
+      <img
+        src="/logo.png"
+        alt=""
+        style={{
+          position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+          width:'640px', maxWidth:'80vw', opacity:0.06, filter:'grayscale(1) brightness(2)',
+          pointerEvents:'none', userSelect:'none',
+        }}
+      />
+      <div style={{ background:'#0f172a', border:'1px solid #1e2d45', borderRadius:12, padding:40, width:380, boxShadow:'0 20px 60px rgba(0,0,0,0.5)', position:'relative', zIndex:1 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:32 }}>
-          <div style={{ width:36, height:36, background:'#2563eb', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>⚙</div>
+          <img src="/logo.png" alt="CarGas" style={{ width:40, height:40, objectFit:'contain', flexShrink:0 }}/>
           <div>
-            <div style={{ color:'#f1f5f9', fontWeight:800, fontSize:14 }}>SP Coding System</div>
+            <div style={{ color:'#f1f5f9', fontWeight:800, fontSize:14 }}>CarGas Coding System</div>
             <div style={{ color:'#475569', fontSize:11 }}>Engineering Master Data</div>
           </div>
         </div>
@@ -1067,7 +1080,7 @@ function Dashboard({ data }) {
 
   return (
     <div>
-      <PageHeader title="Dashboard" sub="Engineering Spare Parts Master Coding System — Overview" />
+      <PageHeader title="Dashboard" sub="CarGas Coding System — Overview" />
 
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 12, marginBottom: 24 }}>
@@ -3499,10 +3512,10 @@ function AppShell() {
       {/* ── SIDEBAR ── */}
       <div style={{ width:collapsed?52:228,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden" }}>
         <div style={{ padding:"16px 14px",borderBottom:`1px solid ${T.sidebarBorder}`,display:"flex",alignItems:"center",gap:10,minHeight:60 }}>
-          <div style={{ width:28,height:28,background:T.accent,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0 }}>⚙</div>
+          <img src="/logo.png" alt="CarGas" style={{ width:28,height:28,objectFit:"contain",flexShrink:0 }}/>
           {!collapsed&&(
             <div>
-              <div style={{ color:"#f1f5f9",fontWeight:800,fontSize:12,lineHeight:1.2 }}>SP Coding System</div>
+              <div style={{ color:"#f1f5f9",fontWeight:800,fontSize:12,lineHeight:1.2 }}>CarGas Coding System</div>
               <div style={{ color:"#475569",fontSize:10 }}>Master Data v3.0</div>
             </div>
           )}
@@ -3533,7 +3546,7 @@ function AppShell() {
         <div style={{ background:T.card,borderBottom:`1px solid ${T.border}`,padding:"11px 28px",display:"flex",alignItems:"center",gap:16,flexShrink:0 }}>
           <div>
             <div style={{ fontWeight:700,fontSize:14,color:T.text }}>{NAV.find(n=>n.id===effectivePage)?.label}</div>
-            <div style={{ fontSize:11,color:T.muted }}>Engineering Spare Parts Master Coding System</div>
+            <div style={{ fontSize:11,color:T.muted }}>CarGas Coding System — Engineering Spare Parts Master Coding</div>
           </div>
           <div style={{ marginLeft:"auto",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
             {dbReady
