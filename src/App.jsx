@@ -93,19 +93,19 @@ function LoginPage() {
         alt=""
         style={{
           position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
-          width:'640px', maxWidth:'80vw', opacity:0.06, filter:'grayscale(1) brightness(2)',
+          width:'760px', maxWidth:'85vw', opacity:0.07, filter:'grayscale(1) brightness(2)',
           pointerEvents:'none', userSelect:'none',
         }}
       />
-      <div style={{ background:'#0f172a', border:'1px solid #1e2d45', borderRadius:12, padding:40, width:380, boxShadow:'0 20px 60px rgba(0,0,0,0.5)', position:'relative', zIndex:1 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:32 }}>
-          <img src="/logo.png" alt="CarGas" style={{ width:40, height:40, objectFit:'contain', flexShrink:0 }}/>
-          <div>
-            <div style={{ color:'#f1f5f9', fontWeight:800, fontSize:14 }}>CarGas Coding System</div>
-            <div style={{ color:'#475569', fontSize:11 }}>Engineering Master Data</div>
+      <div style={{ background:'#0f172a', border:'1px solid #1e2d45', borderRadius:14, padding:'44px 40px', width:420, boxShadow:'0 24px 70px rgba(0,0,0,0.55)', position:'relative', zIndex:1 }}>
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14, marginBottom:34 }}>
+          <img src="/logo.png" alt="CarGas" style={{ width:96, height:96, objectFit:'contain', flexShrink:0, filter:'drop-shadow(0 6px 16px rgba(0,0,0,0.35))' }}/>
+          <div style={{ textAlign:'center' }}>
+            <div style={{ color:'#f8fafc', fontWeight:800, fontSize:24, letterSpacing:0.3, lineHeight:1.25 }}>CarGas Coding System</div>
+            <div style={{ color:'#64748b', fontSize:13, marginTop:4, fontWeight:500, letterSpacing:0.4, textTransform:'uppercase' }}>Engineering Master Data</div>
           </div>
         </div>
-        <div style={{ color:'#94a3b8', fontSize:13, marginBottom:24 }}>Sign in to your account</div>
+        <div style={{ color:'#94a3b8', fontSize:13, marginBottom:24, textAlign:'center' }}>Sign in to your account</div>
         {error && (
           <div style={{ background:'#fee2e2', color:'#dc2626', border:'1px solid #fca5a5', borderRadius:6, padding:'10px 14px', fontSize:13, marginBottom:16, fontWeight:600 }}>
             ⚠️ {error}
