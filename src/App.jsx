@@ -1740,31 +1740,61 @@ function ModelsPage({ data }) {
   const openEdit = (m) => { setForm({...m}); setEditingCode(m.code); setShowForm(true); };
   const closeForm= () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
 
-  const handleSave = () => {
-    const code = form.code.trim().toUpperCase();
-    if(!code||!form.label.trim()||!form.mfrCode) return flash("All fields are required","err");
-    if(code.length<2||code.length>5) return flash("Model code must be 2–5 characters","err");
-    const record = { code, label:form.label.trim(), mfrCode:form.mfrCode };
-    if(editingCode===null){
-      if(models.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
-      setModels(p=>[...p,record]);
-      flash(`Model "${code} — ${record.label}" added`);
+  const handleSave = async () => {
+  const code = form.code.trim().toUpperCase();
+
+  if(!code || !form.label.trim() || !form.mfrCode)
+    return flash("All fields are required","err");
+
+  if(code.length < 2 || code.length > 5)
+    return flash("Model code must be 2–5 characters","err");
+
+  try {
+    setSaving(true);
+
+    const record = {
+      code,
+      label: form.label.trim(),
+      mfrCode: form.mfrCode
+    };
+
+    if(editingCode === null){
+      await ops.saveModel(record);
+      flash(`Model "${code}" added`);
     } else {
-      if(code!==editingCode && models.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
-      setModels(p=>p.map(m=>m.code===editingCode?record:m));
+      await ops.saveModel(record);
       flash(`Model "${code}" updated`);
     }
+
     closeForm();
-  };
+  } catch(err){
+    flash(err.message || "Failed to save model","err");
+  } finally {
+    setSaving(false);
+  }
+};
 
-  const handleDelete = (model) => {
-    const used = parts.filter(p=>p.model===model.code).length;
-    if(used>0) return flash(`Cannot delete "${model.code}" — ${used} part(s) use it.`,"err");
-    setModels(p=>p.filter(m=>m.code!==model.code));
+  const handleDelete = async (model) => {
+  const used = parts.filter(
+    p => p.model === model.code
+  ).length;
+
+  if(used > 0)
+    return flash(
+      `Cannot delete "${model.code}" — ${used} part(s) use it.`,
+      "err"
+    );
+
+  try {
+    await ops.deleteModel(model.code);
+
     setDeleteTarget(null);
-    flash(`Model "${model.code}" deleted`);
-  };
 
+    flash(`Model "${model.code}" deleted`);
+  } catch(err){
+    flash(err.message || "Delete failed","err");
+  }
+};
   const fStyle = { display:"flex",flexDirection:"column",gap:4 };
   const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
 
