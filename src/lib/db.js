@@ -32,7 +32,7 @@ export async function insertCategory(row) {
   const { data, error } = await supabase
     .from('categories')
     .upsert({ ...row, created_by: userId }, { onConflict: 'code' })
-    .select('code,label,icon,color,bg').single();
+    .select('code,label,icon,color,bg').maybeSingle()
   if (!error) await audit('CREATE', 'categories', data.code, null, data);
   return { data, error };
 }
@@ -41,7 +41,7 @@ export async function updateCategory(code, updates) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('categories').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,icon,color,bg').single();
+    .eq('code', code).select('code,label,icon,color,bg').maybeSingle()
   if (!error) await audit('UPDATE', 'categories', code, null, updates);
   return { data, error };
 }
@@ -50,7 +50,7 @@ export async function softDeleteCategory(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('categories').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'categories', code, data, null);
   return { data, error };
 }
@@ -62,7 +62,7 @@ export const fetchManufacturers = () =>
 export async function insertManufacturer(row) {
   const userId = await uid();
   // Check for existing (including soft-deleted) to give clear error
-  const { data: existing } = await supabase.from('manufacturers').select('code,deleted_at').eq('code', row.code).single();
+  const { data: existing } = await supabase.from('manufacturers').select('code,deleted_at').eq('code', row.code).maybeSingle()
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Manufacturer code "${row.code}" already exists` } };
   }
@@ -70,13 +70,13 @@ export async function insertManufacturer(row) {
     // Restore soft-deleted record
     const { data, error } = await supabase
       .from('manufacturers').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('code,label,cat_codes').single();
+      .eq('code', row.code).select('code,label,cat_codes').maybeSingle()
     if (!error) await audit('CREATE', 'manufacturers', data.code, null, data);
     return { data, error };
   }
   const { data, error } = await supabase
     .from('manufacturers').insert({ ...row, created_by: userId })
-    .select('code,label,cat_codes').single();
+    .select('code,label,cat_codes').maybeSingle()
   if (!error) await audit('CREATE', 'manufacturers', data.code, null, data);
   return { data, error };
 }
@@ -85,7 +85,7 @@ export async function updateManufacturer(code, updates) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('manufacturers').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,cat_codes').single();
+    .eq('code', code).select('code,label,cat_codes').maybeSingle()
   if (!error) await audit('UPDATE', 'manufacturers', code, null, updates);
   return { data, error };
 }
@@ -94,7 +94,7 @@ export async function softDeleteManufacturer(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('manufacturers').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'manufacturers', code, data, null);
   return { data, error };
 }
@@ -148,20 +148,20 @@ export const fetchDisciplines = () =>
 export async function insertDiscipline(row) {
   // row must have: { code, label, description, color, bg }
   const userId = await uid();
-  const { data: existing } = await supabase.from('disciplines').select('code,deleted_at').eq('code', row.code).single();
+  const { data: existing } = await supabase.from('disciplines').select('code,deleted_at').eq('code', row.code).maybeSingle()
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Discipline code "${row.code}" already exists` } };
   }
   if (existing && existing.deleted_at) {
     const { data, error } = await supabase
       .from('disciplines').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('code,label,description,color,bg').single();
+      .eq('code', row.code).select('code,label,description,color,bg').maybeSingle()
     if (!error) await audit('CREATE', 'disciplines', data.code, null, data);
     return { data, error };
   }
   const { data, error } = await supabase
     .from('disciplines').insert({ ...row, created_by: userId })
-    .select('code,label,description,color,bg').single();
+    .select('code,label,description,color,bg').maybeSingle()
   if (!error) await audit('CREATE', 'disciplines', data.code, null, data);
   return { data, error };
 }
@@ -170,7 +170,7 @@ export async function updateDiscipline(code, updates) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('disciplines').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,description,color,bg').single();
+    .eq('code', code).select('code,label,description,color,bg').maybeSingle()
   if (!error) await audit('UPDATE', 'disciplines', code, null, updates);
   return { data, error };
 }
@@ -179,7 +179,7 @@ export async function softDeleteDiscipline(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('disciplines').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'disciplines', code, data, null);
   return { data, error };
 }
@@ -190,20 +190,20 @@ export const fetchEngineSystems = () =>
 
 export async function insertEngineSystem(row) {
   const userId = await uid();
-  const { data: existing } = await supabase.from('engine_systems').select('code,deleted_at').eq('code', row.code).single();
+  const { data: existing } = await supabase.from('engine_systems').select('code,deleted_at').eq('code', row.code).maybeSingle()
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Engine system code "${row.code}" already exists` } };
   }
   if (existing && existing.deleted_at) {
     const { data, error } = await supabase
       .from('engine_systems').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('code,label,color,bg').single();
+      .eq('code', row.code).select('code,label,color,bg').maybeSingle()
     if (!error) await audit('CREATE', 'engine_systems', data.code, null, data);
     return { data, error };
   }
   const { data, error } = await supabase
     .from('engine_systems').insert({ ...row, created_by: userId })
-    .select('code,label,color,bg').single();
+    .select('code,label,color,bg').maybeSingle()
   if (!error) await audit('CREATE', 'engine_systems', data.code, null, data);
   return { data, error };
 }
@@ -212,7 +212,7 @@ export async function updateEngineSystem(code, updates) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('engine_systems').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,color,bg').single();
+    .eq('code', code).select('code,label,color,bg').maybeSingle()
   if (!error) await audit('UPDATE', 'engine_systems', code, null, updates);
   return { data, error };
 }
@@ -221,7 +221,7 @@ export async function softDeleteEngineSystem(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('engine_systems').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'engine_systems', code, data, null);
   return { data, error };
 }
@@ -232,20 +232,20 @@ export const fetchFuncGroups = () =>
 
 export async function insertFuncGroup(row) {
   const userId = await uid();
-  const { data: existing } = await supabase.from('functional_groups').select('code,deleted_at').eq('code', row.code).single();
+  const { data: existing } = await supabase.from('functional_groups').select('code,deleted_at').eq('code', row.code).maybeSingle()
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Functional group code "${row.code}" already exists` } };
   }
   if (existing && existing.deleted_at) {
     const { data, error } = await supabase
       .from('functional_groups').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('code,label,disc').single();
+      .eq('code', row.code).select('code,label,disc').maybeSingle()
     if (!error) await audit('CREATE', 'functional_groups', data.code, null, data);
     return { data, error };
   }
   const { data, error } = await supabase
     .from('functional_groups').insert({ ...row, created_by: userId })
-    .select('code,label,disc').single();
+    .select('code,label,disc').maybeSingle()
   if (!error) await audit('CREATE', 'functional_groups', data.code, null, data);
   return { data, error };
 }
@@ -254,7 +254,7 @@ export async function updateFuncGroup(code, updates) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('functional_groups').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,disc').single();
+    .eq('code', code).select('code,label,disc').maybeSingle()
   if (!error) await audit('UPDATE', 'functional_groups', code, null, updates);
   return { data, error };
 }
@@ -263,7 +263,7 @@ export async function softDeleteFuncGroup(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('functional_groups').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'functional_groups', code, data, null);
   return { data, error };
 }
@@ -315,7 +315,7 @@ export async function fetchTreeParts(page = 0, pageSize = 1000) {
 
 export async function insertPart(row) {
   const userId = await uid();
-  const { data: existing } = await supabase.from('spare_parts').select('code,deleted_at').eq('code', row.code).single();
+  const { data: existing } = await supabase.from('spare_parts').select('code,deleted_at').eq('code', row.code).maybeSingle()
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Part code "${row.code}" already exists` } };
   }
@@ -323,23 +323,23 @@ export async function insertPart(row) {
     // Restore + update
     const { data, error } = await supabase
       .from('spare_parts').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('*').single();
+      .eq('code', row.code).select('*').maybeSingle()
     if (!error) await audit('CREATE', 'spare_parts', data.code, null, data);
     return { data, error };
   }
   const { data, error } = await supabase
     .from('spare_parts').insert({ ...row, created_by: userId, updated_by: userId })
-    .select('*').single();
+    .select('*').maybeSingle()
   if (!error) await audit('CREATE', 'spare_parts', data.code, null, data);
   return { data, error };
 }
 
 export async function updatePart(code, updates) {
   const userId = await uid();
-  const { data: oldData } = await supabase.from('spare_parts').select('*').eq('code', code).single();
+  const { data: oldData } = await supabase.from('spare_parts').select('*').eq('code', code).maybeSingle()
   const { data, error } = await supabase
     .from('spare_parts').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('*').single();
+    .eq('code', code).select('*').maybeSingle()
   if (!error) await audit('UPDATE', 'spare_parts', code, oldData, updates);
   return { data, error };
 }
@@ -348,7 +348,7 @@ export async function softDeletePart(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('spare_parts').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'spare_parts', code, data, null);
   return { data, error };
 }
@@ -383,7 +383,7 @@ export async function fetchAuditLogs({ limit = 200, offset = 0, action, tableNam
 
 // ─── USER PROFILES ────────────────────────────────────────────
 export const fetchUserProfile = (userId) =>
-  supabase.from('user_profiles').select('*').eq('id', userId).single();
+  supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle()
 
 export const fetchAllUsers = () =>
   supabase.from('user_profiles').select('*').order('full_name');
