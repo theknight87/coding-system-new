@@ -3612,6 +3612,7 @@ function AuthGate() {
   // Supabase configured but no session — show login
   if (!session) return <LoginPage />;
 
+  
   // Authenticated
   return <AppShell />;
 }
