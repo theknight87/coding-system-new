@@ -105,20 +105,20 @@ export const fetchModels = () =>
 
 export async function insertModel(row) {
   const userId = await uid();
-  const { data: existing } = await supabase.from('models').select('code,deleted_at').eq('code', row.code).single();
+  const { data: existing } = await supabase.from('models').select('code,deleted_at').eq('code', row.code).maybeSingle();
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Model code "${row.code}" already exists` } };
   }
   if (existing && existing.deleted_at) {
     const { data, error } = await supabase
       .from('models').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('code,label,mfr_code').single();
+      .eq('code', row.code).select('code,label,mfr_code').maybeSingle();
     if (!error) await audit('CREATE', 'models', data.code, null, data);
     return { data, error };
   }
   const { data, error } = await supabase
     .from('models').insert({ ...row, created_by: userId })
-    .select('code,label,mfr_code').single();
+    .select('code,label,mfr_code').maybeSingle();
   if (!error) await audit('CREATE', 'models', data.code, null, data);
   return { data, error };
 }
@@ -127,7 +127,7 @@ export async function updateModel(code, updates) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('models').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,mfr_code').single();
+    .eq('code', code).select('code,label,mfr_code').maybeSingle();
   if (!error) await audit('UPDATE', 'models', code, null, updates);
   return { data, error };
 }
@@ -136,7 +136,7 @@ export async function softDeleteModel(code) {
   const userId = await uid();
   const { data, error } = await supabase
     .from('models').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().single();
+    .eq('code', code).select().maybeSingle();
   if (!error) await audit('DELETE', 'models', code, data, null);
   return { data, error };
 }
