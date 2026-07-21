@@ -93,19 +93,19 @@ function LoginPage() {
         alt=""
         style={{
           position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
-          width:'760px', maxWidth:'85vw', opacity:0.07, filter:'grayscale(1) brightness(2)',
+          width:'640px', maxWidth:'80vw', opacity:0.06, filter:'grayscale(1) brightness(2)',
           pointerEvents:'none', userSelect:'none',
         }}
       />
-      <div style={{ background:'#0f172a', border:'1px solid #1e2d45', borderRadius:14, padding:'44px 40px', width:420, boxShadow:'0 24px 70px rgba(0,0,0,0.55)', position:'relative', zIndex:1 }}>
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14, marginBottom:34 }}>
-          <img src="/logo.png" alt="CarGas" style={{ width:96, height:96, objectFit:'contain', flexShrink:0, filter:'drop-shadow(0 6px 16px rgba(0,0,0,0.35))' }}/>
-          <div style={{ textAlign:'center' }}>
-            <div style={{ color:'#f8fafc', fontWeight:800, fontSize:24, letterSpacing:0.3, lineHeight:1.25 }}>CarGas Coding System</div>
-            <div style={{ color:'#64748b', fontSize:13, marginTop:4, fontWeight:500, letterSpacing:0.4, textTransform:'uppercase' }}>Engineering Master Data</div>
+      <div style={{ background:'#0f172a', border:'1px solid #1e2d45', borderRadius:12, padding:40, width:380, boxShadow:'0 20px 60px rgba(0,0,0,0.5)', position:'relative', zIndex:1 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:32 }}>
+          <img src="/logo.png" alt="CarGas" style={{ width:40, height:40, objectFit:'contain', flexShrink:0 }}/>
+          <div>
+            <div style={{ color:'#f1f5f9', fontWeight:800, fontSize:14 }}>CarGas Coding System</div>
+            <div style={{ color:'#475569', fontSize:11 }}>Engineering Master Data</div>
           </div>
         </div>
-        <div style={{ color:'#94a3b8', fontSize:13, marginBottom:24, textAlign:'center' }}>Sign in to your account</div>
+        <div style={{ color:'#94a3b8', fontSize:13, marginBottom:24 }}>Sign in to your account</div>
         {error && (
           <div style={{ background:'#fee2e2', color:'#dc2626', border:'1px solid #fca5a5', borderRadius:6, padding:'10px 14px', fontSize:13, marginBottom:16, fontWeight:600 }}>
             ⚠️ {error}
@@ -142,12 +142,6 @@ const mapModel = r => ({ code:r.code, label:r.label, mfrCode:r.mfr_code });
 const mapDisc  = r => ({ code:r.code, label:r.label, desc:r.description??r.desc??'', color:r.color, bg:r.bg });
 const mapEng   = r => ({ code:r.code, label:r.label, color:r.color, bg:r.bg });
 const mapFg    = r => ({ code:r.code, label:r.label, disc:r.disc });
-// Module-scope cache for the Hierarchy Tree's lightweight part list.
-// Persists across page navigation within the same browser session so
-// re-opening the Hierarchy Tree after the first load is instant.
-// Cleared automatically on full page reload (fresh data on refresh).
-const treeCache = { data: null };
-
 const mapPart  = r => ({
   code:r.code, shortDesc:r.short_desc, longDesc:r.long_desc,
   cat:r.cat, mfr:r.mfr, model:r.model, disc:r.disc, fg:r.fg,
@@ -2925,23 +2919,17 @@ function HierarchyTreePage({ data }) {
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, dbReady } = data;
   const [expanded,     setExpanded]     = useState({ ROOT:true });
   const [selectedPart, setSelectedPart] = useState(null);
-  const [treeParts,    setTreeParts]    = useState(() => treeCache.data);   // instant if cached
+  const [treeParts,    setTreeParts]    = useState(null);   // null = not loaded yet
   const [loadError,    setLoadError]    = useState(null);
   const [loadingTree,  setLoadingTree]  = useState(false);
-  const [loadedCount,  setLoadedCount]  = useState(treeCache.data ? treeCache.data.length : 0);
 
   const toggle = k => setExpanded(e=>({...e,[k]:!e[k]}));
 
-  // Load all parts (lightweight fields only) for the tree.
-  // First pass: fetch page 0 to learn how many pages exist (via header count),
-  // then fetch all remaining pages in parallel instead of one-by-one — this
-  // is the main speed win, since Supabase round-trip latency dominates the
-  // load time far more than payload size for this lightweight query.
-  // Results are cached at module scope so navigating away and back is instant.
+  // Load ALL parts ONCE, but only the lightweight fields needed for the tree
+  // (code, cat, mfr, model, disc, fg, short_desc, image presence).
+  // This single query replaces hundreds of per-node count queries.
   useEffect(() => {
     if (!dbReady) { setTreeParts(data.parts || []); return; }
-    if (treeCache.data) { setTreeParts(treeCache.data); setLoadedCount(treeCache.data.length); return; }
-
     let cancelled = false;
     setLoadingTree(true);
     setLoadError(null);
@@ -2949,31 +2937,18 @@ function HierarchyTreePage({ data }) {
     (async () => {
       try {
         const PAGE = 1000;
-        const { data: firstPage, error: firstErr, count } = await db.fetchTreePartsWithCount(0, PAGE);
-        if (firstErr) throw firstErr;
-
-        let all = firstPage || [];
-        if (!cancelled) setLoadedCount(all.length);
-
-        const total = count ?? all.length;
-        const totalPages = Math.min(20, Math.ceil(total / PAGE)); // safety cap: 20k parts
-
-        if (totalPages > 1) {
-          const remaining = await Promise.all(
-            Array.from({ length: totalPages - 1 }, (_, i) => db.fetchTreeParts(i + 1, PAGE))
-          );
-          for (const r of remaining) {
-            if (r.error) throw r.error;
-            all = all.concat(r.data || []);
-          }
+        let all = [];
+        let page = 0;
+        // Pull pages of lightweight rows until exhausted (safety cap 20 pages = 20k parts)
+        while (page < 20) {
+          const { data: rows, error } = await db.fetchTreeParts(page, PAGE);
+          if (error) throw error;
+          if (!rows || rows.length === 0) break;
+          all = all.concat(rows);
+          if (rows.length < PAGE) break;
+          page++;
         }
-
-        if (!cancelled) {
-          const mapped = all.map(mapPart);
-          treeCache.data = mapped; // cache for instant re-visits this session
-          setTreeParts(mapped);
-          setLoadedCount(mapped.length);
-        }
+        if (!cancelled) setTreeParts(all.map(mapPart));
       } catch (e) {
         if (!cancelled) setLoadError(e.message || "Failed to load hierarchy data");
       } finally {
@@ -3535,13 +3510,13 @@ function AppShell() {
     <div style={{ display:"flex",height:"100vh",fontFamily:"'Inter','Segoe UI',system-ui,sans-serif",background:T.bg,overflow:"hidden" }}>
 
       {/* ── SIDEBAR ── */}
-      <div style={{ width:collapsed?60:264,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden" }}>
-        <div style={{ padding:"20px 16px",borderBottom:`1px solid ${T.sidebarBorder}`,display:"flex",alignItems:"center",gap:12,minHeight:78 }}>
-          <img src="/logo.png" alt="CarGas" style={{ width:44,height:44,objectFit:"contain",flexShrink:0 }}/>
+      <div style={{ width:collapsed?52:228,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden" }}>
+        <div style={{ padding:"16px 14px",borderBottom:`1px solid ${T.sidebarBorder}`,display:"flex",alignItems:"center",gap:10,minHeight:60 }}>
+          <img src="/logo.png" alt="CarGas" style={{ width:28,height:28,objectFit:"contain",flexShrink:0 }}/>
           {!collapsed&&(
             <div>
-              <div style={{ color:"#f8fafc",fontWeight:800,fontSize:15,lineHeight:1.25,letterSpacing:0.2 }}>CarGas Coding System</div>
-              <div style={{ color:"#64748b",fontSize:10.5,marginTop:2,fontWeight:500 }}>Master Data v3.0</div>
+              <div style={{ color:"#f1f5f9",fontWeight:800,fontSize:12,lineHeight:1.2 }}>CarGas Coding System</div>
+              <div style={{ color:"#475569",fontSize:10 }}>Master Data v3.0</div>
             </div>
           )}
         </div>
