@@ -106,41 +106,45 @@ export const fetchModels = () =>
 export async function insertModel(row) {
   const userId = await uid();
   const { data: existing } = await supabase.from('models').select('code,deleted_at').eq('code', row.code).maybeSingle();
+  
   if (existing && !existing.deleted_at) {
     return { data: null, error: { message: `Model code "${row.code}" already exists` } };
   }
+  
   if (existing && existing.deleted_at) {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('models').update({ ...row, deleted_at: null, updated_by: userId })
-      .eq('code', row.code).select('code,label,mfr_code').maybeSingle();
-    if (!error) await audit('CREATE', 'models', data.code, null, data);
-    return { data, error };
+      .eq('code', row.code);
+    if (!error) await audit('CREATE', 'models', row.code, null, row);
+    return { data: row, error };
   }
-  const { data, error } = await supabase
-    .from('models').insert({ ...row, created_by: userId })
-    .select('code,label,mfr_code').maybeSingle();
-  if (!error) await audit('CREATE', 'models', data.code, null, data);
-  return { data, error };
+  
+  const { error } = await supabase
+    .from('models').insert({ ...row, created_by: userId });
+    
+  if (!error) await audit('CREATE', 'models', row.code, null, row);
+  return { data: row, error };
 }
 
 export async function updateModel(code, updates) {
   const userId = await uid();
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('models').update({ ...updates, updated_by: userId })
-    .eq('code', code).select('code,label,mfr_code').maybeSingle();
+    .eq('code', code);
+    
   if (!error) await audit('UPDATE', 'models', code, null, updates);
-  return { data, error };
+  return { data: updates, error };
 }
 
 export async function softDeleteModel(code) {
   const userId = await uid();
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('models').update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq('code', code).select().maybeSingle();
-  if (!error) await audit('DELETE', 'models', code, data, null);
-  return { data, error };
+    .eq('code', code);
+    
+  if (!error) await audit('DELETE', 'models', code, { deleted: true }, null);
+  return { data: null, error };
 }
-
 // ─── DISCIPLINES ──────────────────────────────────────────────
 export const fetchDisciplines = () =>
   supabase.from('disciplines').select('code,label,description,color,bg').is('deleted_at', null).order('code');
