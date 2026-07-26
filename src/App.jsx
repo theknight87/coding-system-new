@@ -132,6 +132,7 @@ function LoginPage() {
   );
 }
 
+
 // ═══════════════════════════════════════════════════════════════
 // DATA MAPPERS — convert Supabase row → app shape
 // ═══════════════════════════════════════════════════════════════
@@ -226,6 +227,9 @@ function useDb(initData) {
         setState(prev => ({ ...prev, categories: prev.categories.filter(c => c.code !== code) }));
         return { error: null };
       }
+      // Cascade: remove every spare part still filed under this category first,
+      // so nothing is orphaned in Supabase after the category disappears.
+      await db.deletePartsByFilter({ cat: code });
       const res = await db.softDeleteCategory(code);
       if (!res.error) await reload('categories', db.fetchCategories, mapCat);
       return res;
@@ -254,6 +258,8 @@ function useDb(initData) {
         setState(prev => ({ ...prev, manufacturers: prev.manufacturers.filter(m => m.code !== code) }));
         return { error: null };
       }
+      // Cascade: remove every spare part still filed under this manufacturer first.
+      await db.deletePartsByFilter({ mfr: code });
       const res = await db.softDeleteManufacturer(code);
       if (!res.error) await reload('manufacturers', db.fetchManufacturers, mapMfr);
       return res;
@@ -282,6 +288,10 @@ function useDb(initData) {
         setState(prev => ({ ...prev, models: prev.models.filter(m => m.code !== code) }));
         return { error: null };
       }
+      // Cascade: remove every spare part still filed under this model first,
+      // so the Hierarchy Tree and Master Table never show orphaned parts
+      // for a model that no longer exists.
+      await db.deletePartsByFilter({ model: code });
       const res = await db.softDeleteModel(code);
       if (!res.error) await reload('models', db.fetchModels, mapModel);
       return res;
@@ -310,6 +320,8 @@ function useDb(initData) {
         setState(prev => ({ ...prev, disciplines: prev.disciplines.filter(d => d.code !== code) }));
         return { error: null };
       }
+      // Cascade: remove every spare part still filed under this discipline first.
+      await db.deletePartsByFilter({ disc: code });
       const res = await db.softDeleteDiscipline(code);
       if (!res.error) await reload('disciplines', db.fetchDisciplines, mapDisc);
       return res;
@@ -338,6 +350,8 @@ function useDb(initData) {
         setState(prev => ({ ...prev, engineSystems: prev.engineSystems.filter(s => s.code !== code) }));
         return { error: null };
       }
+      // Cascade: remove every spare part still filed under this engine system first.
+      await db.deletePartsByFilter({ disc: code });
       const res = await db.softDeleteEngineSystem(code);
       if (!res.error) await reload('engineSystems', db.fetchEngineSystems, mapEng);
       return res;
@@ -366,6 +380,8 @@ function useDb(initData) {
         setState(prev => ({ ...prev, funcGroups: prev.funcGroups.filter(f => f.code !== code) }));
         return { error: null };
       }
+      // Cascade: remove every spare part still filed under this functional group first.
+      await db.deletePartsByFilter({ fg: code });
       const res = await db.softDeleteFuncGroup(code);
       if (!res.error) await reload('funcGroups', db.fetchFuncGroups, mapFg);
       return res;
@@ -588,6 +604,178 @@ function UsersPage() {
               <Btn variant="secondary" onClick={()=>setShowModal(false)}>Cancel</Btn>
               <Btn onClick={handleInvite}>Send Invitation</Btn>
             </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TRASH PAGE (admin only)
+// Shows every soft-deleted row across all tables, with Restore
+// and Permanently Delete actions, plus a bulk Empty Trash action.
+// ═══════════════════════════════════════════════════════════════
+
+function TrashPage() {
+  const [groups,       setGroups]       = useState([]);   // [{ table, label, data, error }]
+  const [loading,      setLoading]      = useState(true);
+  const [filterTable,  setFilterTable]  = useState('');
+  const [toast,        setToast]        = useState(null);
+  const [confirmPurge, setConfirmPurge] = useState(null);  // { table, code, label } | null
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
+  const [busyCode,     setBusyCode]     = useState(null);  // code currently being restored/purged
+
+  const flash = (t, type='ok') => { setToast({text:t,type}); setTimeout(()=>setToast(null),3200); };
+
+  const reload = () => {
+    setLoading(true);
+    return db.fetchAllTrash(100).then(res => { setGroups(res); setLoading(false); });
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const rows = useMemo(() => {
+    const all = [];
+    for (const g of groups) {
+      if (filterTable && g.table !== filterTable) continue;
+      for (const r of g.data) all.push({ ...r, __table: g.table, __label: g.label });
+    }
+    return all.sort((a,b) => new Date(b.deleted_at) - new Date(a.deleted_at));
+  }, [groups, filterTable]);
+
+  const totalCount = groups.reduce((sum, g) => sum + g.data.length, 0);
+
+  const rowTitle = (r) => r.short_desc || r.label || r.code;
+
+  const handleRestore = async (r) => {
+    setBusyCode(r.code);
+    const { error } = await db.restoreRecord(r.__table, r.code);
+    setBusyCode(null);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`\"${r.code}\" restored`);
+    reload();
+  };
+
+  const handlePurge = async (r) => {
+    setBusyCode(r.code);
+    const { error } = await db.hardDeleteRecord(r.__table, r.code);
+    setBusyCode(null);
+    setConfirmPurge(null);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`\"${r.code}\" permanently deleted`);
+    reload();
+  };
+
+  const handleEmptyTrash = async () => {
+    const { count, errors } = await db.emptyTrash(filterTable || null);
+    setConfirmEmpty(false);
+    if (errors) return flash(`Some deletions failed — see console`, 'err');
+    flash(`Permanently deleted ${count} record(s)`);
+    reload();
+  };
+
+
+  return (
+    <div>
+      <Toast msg={toast}/>
+      <PageHeader title="Trash" sub="Soft-deleted records — restore them or permanently remove them. Admin only."/>
+
+      <Card style={{ marginBottom:20 }}>
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center' }}>
+          <Select value={filterTable} onChange={e=>setFilterTable(e.target.value)} style={{ width:'auto', minWidth:200 }}>
+            <option value="">All Tables ({totalCount})</option>
+            {groups.map(g => (
+              <option key={g.table} value={g.table}>{g.label} ({g.data.length})</option>
+            ))}
+          </Select>
+          <span style={{ fontSize:13, color:T.muted }}>{rows.length} item{rows.length===1?'':'s'} shown</span>
+          <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+            <Btn small variant="secondary" onClick={reload}>↻ Refresh</Btn>
+            {rows.length > 0 && (
+              <Btn small variant="danger" onClick={()=>setConfirmEmpty(true)}>🗑 Empty Trash</Btn>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        {loading ? (
+          <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading trash…</div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  {['Deleted At','Table','Code','Description','Actions'].map(h=>(
+                    <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0
+                  ? <tr><td colSpan={5} style={{ textAlign:'center', padding:36, color:T.muted }}>Trash is empty.</td></tr>
+                  : rows.map((r, i) => (
+                    <tr key={`${r.__table}-${r.code}`} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                      <td style={{ padding:'8px 12px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(r.deleted_at).toLocaleString()}</td>
+                      <td style={{ padding:'8px 12px' }}>
+                        <span style={{ background:T.subtle, color:T.text, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{r.__label}</span>
+                      </td>
+                      <td style={{ padding:'8px 12px', fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code}</td>
+                      <td style={{ padding:'8px 12px', color:T.muted, maxWidth:320, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{rowTitle(r)}</td>
+                      <td style={{ padding:'8px 12px' }}>
+                        <div style={{ display:'flex', gap:6 }}>
+                          <Btn small variant="success" onClick={()=>handleRestore(r)} disabled={busyCode===r.code}>
+                            {busyCode===r.code ? '…' : '↩ Restore'}
+                          </Btn>
+                          <Btn small variant="danger" onClick={()=>setConfirmPurge(r)} disabled={busyCode===r.code}>
+                            🗑 Purge
+                          </Btn>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                }
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* PURGE ONE — confirm modal */}
+      {confirmPurge && (
+        <Modal title="Permanently Delete" onClose={()=>setConfirmPurge(null)}>
+          <div style={{ padding:14, background:T.dangerBg, borderRadius:8, marginBottom:16 }}>
+            <div style={{ fontWeight:800, color:T.danger }}>{confirmPurge.code}</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{confirmPurge.__label} — {rowTitle(confirmPurge)}</div>
+          </div>
+          <p style={{ fontSize:13, color:T.text, marginBottom:16, lineHeight:1.6 }}>
+            <strong style={{ color:T.danger }}>This cannot be undone.</strong> The record will be permanently removed from the database.
+          </p>
+          <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+            <Btn variant="secondary" onClick={()=>setConfirmPurge(null)}>Cancel</Btn>
+            <Btn variant="danger" onClick={()=>handlePurge(confirmPurge)} disabled={busyCode===confirmPurge.code}>
+              {busyCode===confirmPurge.code ? 'Deleting…' : '🗑 Delete Permanently'}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* EMPTY TRASH — confirm modal */}
+      {confirmEmpty && (
+        <Modal title="Empty Trash" onClose={()=>setConfirmEmpty(false)}>
+          <div style={{ padding:14, background:T.dangerBg, borderRadius:8, marginBottom:16 }}>
+            <div style={{ fontWeight:800, color:T.danger }}>
+              {filterTable ? `Empty trash for ${groups.find(g=>g.table===filterTable)?.label}` : 'Empty ALL trash'}
+            </div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{rows.length} record(s) will be permanently deleted</div>
+          </div>
+          <p style={{ fontSize:13, color:T.text, marginBottom:16, lineHeight:1.6 }}>
+            <strong style={{ color:T.danger }}>This cannot be undone.</strong> All soft-deleted records {filterTable ? 'in this table' : 'across every table'} will be permanently removed.
+          </p>
+          <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+            <Btn variant="secondary" onClick={()=>setConfirmEmpty(false)}>Cancel</Btn>
+            <Btn variant="danger" onClick={handleEmptyTrash}>🗑 Empty Trash</Btn>
           </div>
         </Modal>
       )}
@@ -848,8 +1036,8 @@ const PageHeader = ({ title, sub }) => (
   </div>
 );
 
-const Btn = ({ children, onClick, variant = "primary", small = false, style: s = {} }) => {
-  const base = { border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontFamily: "inherit", transition: "opacity .15s", ...s };
+const Btn = ({ children, onClick, variant = "primary", small = false, disabled = false, style: s = {} }) => {
+  const base = { border: "none", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", fontWeight: 700, fontFamily: "inherit", transition: "opacity .15s", opacity: disabled ? 0.6 : 1, ...s };
   const size = small ? { padding: "5px 12px", fontSize: 12 } : { padding: "9px 18px", fontSize: 14 };
   const vars = {
     primary:  { background: T.accent,   color: "#fff" },
@@ -858,7 +1046,7 @@ const Btn = ({ children, onClick, variant = "primary", small = false, style: s =
     success:  { background: T.successBg,color: T.success },
     ghost:    { background: "transparent", color: T.muted },
   };
-  return <button onClick={onClick} style={{ ...base, ...size, ...vars[variant] }}>{children}</button>;
+  return <button onClick={onClick} disabled={disabled} style={{ ...base, ...size, ...vars[variant] }}>{children}</button>;
 };
 
 const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength }) => (
@@ -1287,6 +1475,7 @@ function CategoriesPage({ data }) {
   const [toast,       setToast]       = useState(null);
   const [search,      setSearch]      = useState("");
   const [saving,      setSaving]      = useState(false);
+  const [deleteCount, setDeleteCount] = useState(null); // live spare-part count for deleteTarget
 
   const flash = (text, type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
@@ -1295,6 +1484,26 @@ function CategoriesPage({ data }) {
     const q = search.toLowerCase();
     return categories.filter(c=> c.code.toLowerCase().includes(q) || c.label.toLowerCase().includes(q));
   },[categories, search]);
+
+  // Live count of spare parts under whichever category is pending deletion.
+  useEffect(() => {
+    if (!deleteTarget) { setDeleteCount(null); return; }
+    let cancelled = false;
+    db.fetchPartsCount({ cat: deleteTarget.code }).then(({ count }) => {
+      if (!cancelled) setDeleteCount(count ?? 0);
+    });
+    return () => { cancelled = true; };
+  }, [deleteTarget]);
+
+  // Live per-category spare-part counts for the "N parts" badges shown on
+  // every card/row. Replaces reading the always-empty local `parts` array.
+  const [catCounts, setCatCounts] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(categories.map(c => db.fetchPartsCount({ cat: c.code }).then(({ count }) => [c.code, count ?? 0])))
+      .then(pairs => { if (!cancelled) setCatCounts(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [categories]);
 
   const openAdd  = () => { setForm(EMPTY); setEditingCode(null); setShowForm(true); };
   const openEdit = (cat) => { setForm({...cat}); setEditingCode(cat.code); setShowForm(true); };
@@ -1315,12 +1524,12 @@ function CategoriesPage({ data }) {
   };
 
   const handleDelete = async (cat) => {
-    const usedCount = parts.filter(p => p.cat === cat.code).length;
-    if (usedCount > 0) return flash(`Cannot delete "${cat.code}" — ${usedCount} part(s) use it.`,"err");
+    setSaving(true);
     const { error } = await ops.deleteCategory(cat.code);
+    setSaving(false);
     if (error) return flash(`Error: ${error.message}`,"err");
     setDeleteTarget(null);
-    flash(`Category "${cat.code}" deleted`);
+    flash(`Category "${cat.code}" and its spare parts were deleted`);
   };
 
   const setColor = (preset) => setForm(f=>({...f, color: preset.color, bg: preset.bg}));
@@ -1346,7 +1555,7 @@ function CategoriesPage({ data }) {
       {/* Cards grid */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:14, marginBottom:28 }}>
         {filtered.map(cat => {
-          const partCount = parts.filter(p=>p.cat===cat.code).length;
+          const partCount = catCounts[cat.code] ?? 0;
           return (
             <Card key={cat.code} style={{ borderLeft:`5px solid ${cat.color}`, position:"relative" }}>
               <div style={{ display:"flex",alignItems:"flex-start",gap:14 }}>
@@ -1400,7 +1609,7 @@ function CategoriesPage({ data }) {
           </thead>
           <tbody>
             {filtered.map((cat,i)=>{
-              const pc = parts.filter(p=>p.cat===cat.code).length;
+              const pc = catCounts[cat.code] ?? 0;
               return (
                 <tr key={cat.code} style={{ borderBottom:`1px solid ${T.border}`,background:i%2?T.subtle:T.card }}>
                   <td style={{ padding:"8px 12px" }}><Pill color={cat.color} bg={cat.bg}>{cat.code}</Pill></td>
@@ -1517,20 +1726,23 @@ function CategoriesPage({ data }) {
               <span style={{ fontSize:28 }}>{deleteTarget.icon}</span>
               <div>
                 <div style={{ fontWeight:800,fontSize:15,color:T.danger }}>{deleteTarget.code} — {deleteTarget.label}</div>
-                <div style={{ fontSize:12,color:T.muted,marginTop:2 }}>{parts.filter(p=>p.cat===deleteTarget.code).length} parts use this category</div>
+                <div style={{ fontSize:12,color:T.muted,marginTop:2 }}>
+                  {deleteCount===null ? "Checking spare parts…" : `${deleteCount} spare part(s) use this category`}
+                </div>
               </div>
             </div>
             <p style={{ fontSize:13,color:T.text,lineHeight:1.6 }}>
-              Are you sure you want to permanently delete this category?{" "}
-              {parts.filter(p=>p.cat===deleteTarget.code).length > 0
-                ? <strong style={{ color:T.danger }}>This category still has coded parts — you must remove those first.</strong>
-                : "This action cannot be undone."
+              {deleteCount>0
+                ? <><strong style={{ color:T.danger }}>This will also permanently delete all {deleteCount} spare part(s)</strong> filed under this category. This action cannot be undone.</>
+                : "Are you sure you want to permanently delete this category? This action cannot be undone."
               }
             </p>
           </div>
           <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete Category</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
+              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete Category + ${deleteCount} Part(s)` : "🗑 Delete Category"}
+            </Btn>
           </div>
         </Modal>
       )}
@@ -1551,12 +1763,32 @@ function ManufacturersPage({ data }) {
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleteCount, setDeleteCount] = useState(null);
 
   const flash = (text, type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
   const filtered = useMemo(()=>{
     const q = search.toLowerCase();
     return !q ? manufacturers : manufacturers.filter(m=> m.code.toLowerCase().includes(q)||m.label.toLowerCase().includes(q));
   },[manufacturers,search]);
+
+  // Live count of spare parts under whichever manufacturer is pending deletion.
+  useEffect(() => {
+    if (!deleteTarget) { setDeleteCount(null); return; }
+    let cancelled = false;
+    db.fetchPartsCount({ mfr: deleteTarget.code }).then(({ count }) => {
+      if (!cancelled) setDeleteCount(count ?? 0);
+    });
+    return () => { cancelled = true; };
+  }, [deleteTarget]);
+
+  // Live per-manufacturer spare-part counts for the "N parts" badges.
+  const [mfrCounts, setMfrCounts] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(manufacturers.map(m => db.fetchPartsCount({ mfr: m.code }).then(({ count }) => [m.code, count ?? 0])))
+      .then(pairs => { if (!cancelled) setMfrCounts(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [manufacturers]);
 
   const openAdd  = (catCode="") => { setForm({...EMPTY,catCode}); setEditingCode(null); setShowForm(true); };
   const openEdit = (m)  => { setForm({...m, catCode:(m.catCodes||[])[0]||""}); setEditingCode(m.code); setShowForm(true); };
@@ -1578,12 +1810,12 @@ function ManufacturersPage({ data }) {
   };
 
   const handleDelete = async (mfr) => {
-    const used = parts.filter(p=>p.mfr===mfr.code).length;
-    if(used>0) return flash(`Cannot delete "${mfr.code}" — ${used} part(s) use it. Remove those parts first.`,"err");
+    setSaving(true);
     const { error } = await ops.deleteManufacturer(mfr.code);
+    setSaving(false);
     if(error) return flash(`Error: ${error.message}`,"err");
     setDeleteTarget(null);
-    flash(`Manufacturer "${mfr.code}" deleted`);
+    flash(`Manufacturer "${mfr.code}" and its spare parts were deleted`);
   };
 
   const fStyle = { display:"flex",flexDirection:"column",gap:4 };
@@ -1622,7 +1854,7 @@ function ManufacturersPage({ data }) {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12,marginBottom:8}}>
               {catItems.map(mfr=>{
-                const pc = parts.filter(p=>p.mfr===mfr.code).length;
+                const pc = mfrCounts[mfr.code] ?? 0;
                 return (
                   <Card key={mfr.code} style={{borderLeft:`4px solid ${cat.color}`}}>
                     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
@@ -1698,17 +1930,21 @@ function ManufacturersPage({ data }) {
           <div style={{marginBottom:20}}>
             <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:14}}>
               <div style={{fontWeight:800,fontSize:15,color:T.danger}}>{deleteTarget.code} — {deleteTarget.label}</div>
-              <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.mfr===deleteTarget.code).length} parts use this manufacturer</div>
+              <div style={{fontSize:12,color:T.muted,marginTop:4}}>
+                {deleteCount===null ? "Checking spare parts…" : `${deleteCount} spare part(s) use this manufacturer`}
+              </div>
             </div>
             <p style={{fontSize:13,color:T.text,lineHeight:1.6}}>
-              {parts.filter(p=>p.mfr===deleteTarget.code).length>0
-                ?<strong style={{color:T.danger}}>This manufacturer still has coded parts — remove those first.</strong>
+              {deleteCount>0
+                ?<><strong style={{color:T.danger}}>This will also permanently delete all {deleteCount} spare part(s)</strong> filed under this manufacturer. This action cannot be undone.</>
                 :"Are you sure? This action cannot be undone."}
             </p>
           </div>
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
+              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete Manufacturer + ${deleteCount} Part(s)` : "🗑 Delete"}
+            </Btn>
           </div>
         </Modal>
       )}
@@ -1727,6 +1963,7 @@ function ModelsPage({ data }) {
   const [editingCode, setEditingCode] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteCount, setDeleteCount] = useState(null); // live spare-part count for deleteTarget
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState("");
 
@@ -1736,65 +1973,55 @@ function ModelsPage({ data }) {
     return !q ? models : models.filter(m=>m.code.toLowerCase().includes(q)||m.label.toLowerCase().includes(q)||m.mfrCode.toLowerCase().includes(q));
   },[models,search]);
 
+  // Fetch the real, live count of spare parts for whichever model is
+  // pending deletion (the old code read this from a permanently-empty
+  // local `parts` array and always showed 0).
+  useEffect(() => {
+    if (!deleteTarget) { setDeleteCount(null); return; }
+    let cancelled = false;
+    db.fetchPartsCount({ model: deleteTarget.code }).then(({ count }) => {
+      if (!cancelled) setDeleteCount(count ?? 0);
+    });
+    return () => { cancelled = true; };
+  }, [deleteTarget]);
+
+  // Live per-model spare-part counts for the "N parts" badges.
+  const [modelCounts, setModelCounts] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(models.map(m => db.fetchPartsCount({ model: m.code }).then(({ count }) => [m.code, count ?? 0])))
+      .then(pairs => { if (!cancelled) setModelCounts(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [models]);
+
   const openAdd  = (mfrCode="") => { setForm({...EMPTY,mfrCode}); setEditingCode(null); setShowForm(true); };
   const openEdit = (m) => { setForm({...m}); setEditingCode(m.code); setShowForm(true); };
   const closeForm= () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
 
   const handleSave = async () => {
-  const code = form.code.trim().toUpperCase();
-
-  if(!code || !form.label.trim() || !form.mfrCode)
-    return flash("All fields are required","err");
-
-  if(code.length < 2 || code.length > 5)
-    return flash("Model code must be 2–5 characters","err");
-
-  try {
+    const code = form.code.trim().toUpperCase();
+    if(!code||!form.label.trim()||!form.mfrCode) return flash("All fields are required","err");
+    if(code.length<2||code.length>5) return flash("Model code must be 2–5 characters","err");
+    if(editingCode===null && models.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
+    if(editingCode!==null && code!==editingCode && models.find(m=>m.code===code)) return flash(`Code "${code}" already exists`,"err");
     setSaving(true);
-
-    const record = {
-      code,
-      label: form.label.trim(),
-      mfrCode: form.mfrCode
-    };
-
-    if(editingCode === null){
-      await ops.saveModel(record);
-      flash(`Model "${code}" added`);
-    } else {
-      await ops.saveModel(record);
-      flash(`Model "${code}" updated`);
-    }
-
-    closeForm();
-  } catch(err){
-    flash(err.message || "Failed to save model","err");
-  } finally {
+    const record = { code, label:form.label.trim(), mfrCode:form.mfrCode };
+    const { error } = await ops.saveModel(record, editingCode);
     setSaving(false);
-  }
-};
+    if(error) return flash(`Error: ${error.message}`,"err");
+    flash(editingCode ? `Model "${code}" updated` : `Model "${code} — ${record.label}" added`);
+    closeForm();
+  };
 
   const handleDelete = async (model) => {
-  const used = parts.filter(
-    p => p.model === model.code
-  ).length;
-
-  if(used > 0)
-    return flash(
-      `Cannot delete "${model.code}" — ${used} part(s) use it.`,
-      "err"
-    );
-
-  try {
-    await ops.deleteModel(model.code);
-
+    setSaving(true);
+    const { error } = await ops.deleteModel(model.code);
+    setSaving(false);
+    if(error) return flash(`Error: ${error.message}`,"err");
     setDeleteTarget(null);
+    flash(`Model "${model.code}" and its spare parts were deleted`);
+  };
 
-    flash(`Model "${model.code}" deleted`);
-  } catch(err){
-    flash(err.message || "Delete failed","err");
-  }
-};
   const fStyle = { display:"flex",flexDirection:"column",gap:4 };
   const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
 
@@ -1830,7 +2057,7 @@ function ModelsPage({ data }) {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
               {mfrModels.map(model=>{
-                const pc=parts.filter(p=>p.model===model.code).length;
+                const pc = modelCounts[model.code] ?? 0;
                 return (
                   <Card key={model.code} style={{borderLeft:`4px solid ${color}`}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -1910,17 +2137,21 @@ function ModelsPage({ data }) {
           <div style={{marginBottom:20}}>
             <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:14}}>
               <div style={{fontWeight:800,fontSize:15,color:T.danger}}>{deleteTarget.code} — {deleteTarget.label}</div>
-              <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.model===deleteTarget.code).length} parts use this model</div>
+              <div style={{fontSize:12,color:T.muted,marginTop:4}}>
+                {deleteCount===null ? "Checking spare parts…" : `${deleteCount} spare part(s) use this model`}
+              </div>
             </div>
             <p style={{fontSize:13,color:T.text,lineHeight:1.6}}>
-              {parts.filter(p=>p.model===deleteTarget.code).length>0
-                ?<strong style={{color:T.danger}}>This model still has coded parts — remove those first.</strong>
+              {deleteCount>0
+                ?<><strong style={{color:T.danger}}>This will also permanently delete all {deleteCount} spare part(s)</strong> filed under this model. This action cannot be undone.</>
                 :"Are you sure? This action cannot be undone."}
             </p>
           </div>
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
+              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete Model + ${deleteCount} Part(s)` : "🗑 Delete"}
+            </Btn>
           </div>
         </Modal>
       )}
@@ -1951,6 +2182,24 @@ function DisciplinesPage({ data }) {
   const [toast, setToast] = useState(null);
   const flash = (text,type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
+  const [delDCount, setDelDCount] = useState(null);
+  const [delECount, setDelECount] = useState(null);
+
+  // Live counts for whichever discipline / engine system is pending deletion.
+  useEffect(() => {
+    if (!delD) { setDelDCount(null); return; }
+    let cancelled = false;
+    db.fetchPartsCount({ disc: delD.code }).then(({ count }) => { if (!cancelled) setDelDCount(count ?? 0); });
+    return () => { cancelled = true; };
+  }, [delD]);
+
+  useEffect(() => {
+    if (!delE) { setDelECount(null); return; }
+    let cancelled = false;
+    db.fetchPartsCount({ disc: delE.code }).then(({ count }) => { if (!cancelled) setDelECount(count ?? 0); });
+    return () => { cancelled = true; };
+  }, [delE]);
+
   const fStyle = { display:"flex",flexDirection:"column",gap:4 };
   const lStyle = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8 };
 
@@ -1967,11 +2216,9 @@ function DisciplinesPage({ data }) {
     setShowD(false); setEditD(null); setFormD(EMPTY_D);
   };
   const deleteD = async (d) => {
-    const used=parts.filter(p=>p.disc===d.code).length;
-    if(used>0) return flash(`Cannot delete — ${used} part(s) use this discipline`,"err");
     const { error } = await ops.deleteDiscipline(d.code);
     if(error) return flash(`Error: ${error.message}`,"err");
-    setDelD(null); flash(`Discipline "${d.code}" deleted`);
+    setDelD(null); flash(`Discipline "${d.code}" and its spare parts were deleted`);
   };
 
   // Save engine system
@@ -1987,11 +2234,9 @@ function DisciplinesPage({ data }) {
     setShowE(false); setEditE(null); setFormE(EMPTY_E);
   };
   const deleteE = async (s) => {
-    const used=parts.filter(p=>p.disc===s.code).length;
-    if(used>0) return flash(`Cannot delete — ${used} part(s) use this system`,"err");
     const { error } = await ops.deleteEngineSystem(s.code);
     if(error) return flash(`Error: ${error.message}`,"err");
-    setDelE(null); flash(`Engine System "${s.code}" deleted`);
+    setDelE(null); flash(`Engine System "${s.code}" and its spare parts were deleted`);
   };
 
   const ColorPicker = ({value, bg: bgVal, onChange}) => (
@@ -2169,16 +2414,18 @@ function DisciplinesPage({ data }) {
       {delD&&(<Modal title="Delete Discipline" onClose={()=>setDelD(null)}>
         <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:16}}>
           <div style={{fontWeight:800,color:T.danger}}>{delD.code} — {delD.label}</div>
-          <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.disc===delD.code).length} parts use this</div>
+          <div style={{fontSize:12,color:T.muted,marginTop:4}}>
+            {delDCount===null ? "Checking spare parts…" : `${delDCount} spare part(s) use this discipline`}
+          </div>
         </div>
         <p style={{fontSize:13,color:T.text,marginBottom:16,lineHeight:1.6}}>
-          {parts.filter(p=>p.disc===delD.code).length>0
-            ?<strong style={{color:T.danger}}>Remove all parts in this discipline first.</strong>
+          {delDCount>0
+            ?<><strong style={{color:T.danger}}>This will also permanently delete all {delDCount} spare part(s)</strong> filed under this discipline.</>
             :"This action cannot be undone."}
         </p>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="secondary" onClick={()=>setDelD(null)}>Cancel</Btn>
-          <Btn variant="danger" onClick={()=>deleteD(delD)}>🗑 Delete</Btn>
+          <Btn variant="danger" onClick={()=>deleteD(delD)}>{delDCount>0 ? `🗑 Delete + ${delDCount} Part(s)` : "🗑 Delete"}</Btn>
         </div>
       </Modal>)}
 
@@ -2186,16 +2433,18 @@ function DisciplinesPage({ data }) {
       {delE&&(<Modal title="Delete Engine System" onClose={()=>setDelE(null)}>
         <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:16}}>
           <div style={{fontWeight:800,color:T.danger}}>{delE.code} — {delE.label}</div>
-          <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.disc===delE.code).length} parts use this</div>
+          <div style={{fontSize:12,color:T.muted,marginTop:4}}>
+            {delECount===null ? "Checking spare parts…" : `${delECount} spare part(s) use this system`}
+          </div>
         </div>
         <p style={{fontSize:13,color:T.text,marginBottom:16,lineHeight:1.6}}>
-          {parts.filter(p=>p.disc===delE.code).length>0
-            ?<strong style={{color:T.danger}}>Remove all parts in this system first.</strong>
+          {delECount>0
+            ?<><strong style={{color:T.danger}}>This will also permanently delete all {delECount} spare part(s)</strong> filed under this system.</>
             :"This action cannot be undone."}
         </p>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="secondary" onClick={()=>setDelE(null)}>Cancel</Btn>
-          <Btn variant="danger" onClick={()=>deleteE(delE)}>🗑 Delete</Btn>
+          <Btn variant="danger" onClick={()=>deleteE(delE)}>{delECount>0 ? `🗑 Delete + ${delECount} Part(s)` : "🗑 Delete"}</Btn>
         </div>
       </Modal>)}
 
@@ -2225,6 +2474,23 @@ function FunctionalGroupsPage({ data }) {
     return !q ? funcGroups : funcGroups.filter(f=>f.code.toLowerCase().includes(q)||f.label.toLowerCase().includes(q));
   },[funcGroups,search]);
 
+  const [deleteCount, setDeleteCount] = useState(null);
+  useEffect(() => {
+    if (!deleteTarget) { setDeleteCount(null); return; }
+    let cancelled = false;
+    db.fetchPartsCount({ fg: deleteTarget.code }).then(({ count }) => { if (!cancelled) setDeleteCount(count ?? 0); });
+    return () => { cancelled = true; };
+  }, [deleteTarget]);
+
+  // Live per-functional-group spare-part counts for the "N parts" badges.
+  const [fgCounts, setFgCounts] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(funcGroups.map(f => db.fetchPartsCount({ fg: f.code }).then(({ count }) => [f.code, count ?? 0])))
+      .then(pairs => { if (!cancelled) setFgCounts(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [funcGroups]);
+
   const openAdd  = (disc="ME") => { setForm({...EMPTY,disc}); setEditingCode(null); setShowForm(true); };
   const openEdit = (fg) => { setForm({...fg}); setEditingCode(fg.code); setShowForm(true); };
   const closeForm= () => { setShowForm(false); setEditingCode(null); setForm(EMPTY); };
@@ -2244,11 +2510,11 @@ function FunctionalGroupsPage({ data }) {
   };
 
   const handleDelete = async (fg) => {
-    const used=parts.filter(p=>p.fg===fg.code).length;
-    if(used>0) return flash(`Cannot delete "${fg.code}" — ${used} part(s) use it.`,"err");
+    setSaving(true);
     const { error } = await ops.deleteFuncGroup(fg.code);
+    setSaving(false);
     if(error) return flash(`Error: ${error.message}`,"err");
-    setDeleteTarget(null); flash(`"${fg.code}" deleted`);
+    setDeleteTarget(null); flash(`"${fg.code}" and its spare parts were deleted`);
   };
 
   const fStyle = { display:"flex",flexDirection:"column",gap:4 };
@@ -2283,7 +2549,7 @@ function FunctionalGroupsPage({ data }) {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
               {items.map(fg=>{
-                const pc=parts.filter(p=>p.fg===fg.code).length;
+                const pc = fgCounts[fg.code] ?? 0;
                 return (
                   <Card key={fg.code} style={{borderLeft:`3px solid ${disc.color}`,padding:14}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
@@ -2359,16 +2625,20 @@ function FunctionalGroupsPage({ data }) {
         <Modal title="Delete Functional Group" onClose={()=>setDeleteTarget(null)}>
           <div style={{padding:14,background:T.dangerBg,borderRadius:8,marginBottom:16}}>
             <div style={{fontWeight:800,color:T.danger}}>{deleteTarget.code} — {deleteTarget.label}</div>
-            <div style={{fontSize:12,color:T.muted,marginTop:4}}>{parts.filter(p=>p.fg===deleteTarget.code).length} parts use this group</div>
+            <div style={{fontSize:12,color:T.muted,marginTop:4}}>
+              {deleteCount===null ? "Checking spare parts…" : `${deleteCount} spare part(s) use this group`}
+            </div>
           </div>
           <p style={{fontSize:13,color:T.text,marginBottom:16,lineHeight:1.6}}>
-            {parts.filter(p=>p.fg===deleteTarget.code).length>0
-              ?<strong style={{color:T.danger}}>Remove all parts in this group first.</strong>
+            {deleteCount>0
+              ?<><strong style={{color:T.danger}}>This will also permanently delete all {deleteCount} spare part(s)</strong> filed under this group.</>
               :"Are you sure? This action cannot be undone."}
           </p>
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)}>🗑 Delete</Btn>
+            <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
+              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete + ${deleteCount} Part(s)` : "🗑 Delete"}
+            </Btn>
           </div>
         </Modal>
       )}
@@ -3476,6 +3746,7 @@ const NAV = [
   { id:"admin",         label:"Administration",      icon:"🔑", group:"System",      adminOnly:true  },
   { id:"auditlog",      label:"Audit Log",           icon:"📜", group:"System",      adminOnly:true  },
   { id:"users",         label:"User Management",     icon:"👥", group:"System",      adminOnly:true  },
+  { id:"trash",         label:"Trash",                icon:"🗑️", group:"System",      adminOnly:true  },
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -3531,6 +3802,7 @@ function AppShell() {
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
+    trash:         <TrashPage />,
   };
 
   const roleColor = { admin:'#1d4ed8', department_user:'#047857' };
@@ -3642,7 +3914,6 @@ function AuthGate() {
   // Supabase configured but no session — show login
   if (!session) return <LoginPage />;
 
-  
   // Authenticated
   return <AppShell />;
 }
