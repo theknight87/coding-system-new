@@ -280,6 +280,7 @@ export async function fetchPartsCount(filters = {}) {
   if (filters.status) q = q.eq('status', filters.status);
   if (filters.mfr)    q = q.eq('mfr', filters.mfr);
   if (filters.model)  q = q.eq('model', filters.model);
+  if (filters.fg)     q = q.eq('fg', filters.fg);
   if (filters.search) {
     q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%`);
   }
@@ -355,6 +356,113 @@ export async function softDeletePart(code) {
     .eq('code', code).select().maybeSingle()
   if (!error) await audit('DELETE', 'spare_parts', code, data, null);
   return { data, error };
+}
+
+// Soft-delete every spare_parts row matching a filter (e.g. { model: 'X' }
+// or { cat: 'Y' } or { mfr: 'Z' }). Used to cascade-delete a parent record's
+// spare parts when the parent (category/manufacturer/model/discipline/
+// functional group) itself is deleted, so nothing is left orphaned.
+export async function deletePartsByFilter(filters = {}) {
+  const userId = await uid();
+  let q = supabase.from('spare_parts')
+    .update({ deleted_at: new Date().toISOString(), updated_by: userId })
+    .is('deleted_at', null);
+  if (filters.cat)   q = q.eq('cat', filters.cat);
+  if (filters.mfr)   q = q.eq('mfr', filters.mfr);
+  if (filters.model) q = q.eq('model', filters.model);
+  if (filters.disc)  q = q.eq('disc', filters.disc);
+  if (filters.fg)    q = q.eq('fg', filters.fg);
+  const { data, error } = await q.select('code');
+  if (!error && data?.length) {
+    for (const row of data) {
+      await audit('DELETE', 'spare_parts', row.code, null, { cascaded_from: filters });
+    }
+  }
+  return { data, error };
+}
+
+// ─── TRASH / RECYCLE BIN ──────────────────────────────────────
+// Every soft-deletable table, with the columns needed to show a
+// meaningful row in the Trash page and the label used in the UI.
+export const TRASH_TABLES = [
+  { table: 'categories',         label: 'Main Categories',   selectCols: 'code,label,icon,color,bg,deleted_at' },
+  { table: 'manufacturers',      label: 'Manufacturers',     selectCols: 'code,label,cat_codes,deleted_at' },
+  { table: 'models',             label: 'Equipment Models',  selectCols: 'code,label,mfr_code,deleted_at' },
+  { table: 'disciplines',        label: 'Disciplines',       selectCols: 'code,label,description,color,bg,deleted_at' },
+  { table: 'engine_systems',     label: 'Engine Systems',    selectCols: 'code,label,color,bg,deleted_at' },
+  { table: 'functional_groups',  label: 'Functional Groups', selectCols: 'code,label,disc,deleted_at' },
+  { table: 'spare_parts',        label: 'Spare Parts',       selectCols: 'code,short_desc,cat,mfr,model,disc,fg,deleted_at' },
+];
+
+// Fetch every soft-deleted row from a single table (admin only — enforced
+// by the trash_select RLS policy from migration 009).
+export async function fetchTrash(table, limit = 200) {
+  const meta = TRASH_TABLES.find(t => t.table === table);
+  const cols = meta ? meta.selectCols : '*';
+  return supabase
+    .from(table)
+    .select(cols)
+    .not('deleted_at', 'is', null)
+    .order('deleted_at', { ascending: false })
+    .limit(limit);
+}
+
+// Fetch soft-deleted rows from every table at once, for the Trash overview.
+export async function fetchAllTrash(limitPerTable = 100) {
+  const results = await Promise.all(
+    TRASH_TABLES.map(({ table }) => fetchTrash(table, limitPerTable))
+  );
+  return TRASH_TABLES.map(({ table, label }, i) => ({
+    table, label,
+    data: results[i].data ?? [],
+    error: results[i].error ?? null,
+  }));
+}
+
+// Restore a soft-deleted row (set deleted_at back to NULL).
+export async function restoreRecord(table, code) {
+  const userId = await uid();
+  const { data, error } = await supabase
+    .from(table)
+    .update({ deleted_at: null, updated_by: userId })
+    .eq('code', code)
+    .select()
+    .maybeSingle();
+  if (!error && data) await audit('RESTORE', table, code, null, data);
+  return { data, error };
+}
+
+// Permanently delete a soft-deleted row. Requires the row to already
+// have deleted_at set — enforced by the hard_delete RLS policy from
+// migration 009, so this can never accidentally purge a live record.
+export async function hardDeleteRecord(table, code) {
+  const { data, error } = await supabase
+    .from(table)
+    .delete()
+    .eq('code', code)
+    .not('deleted_at', 'is', null)
+    .select()
+    .maybeSingle();
+  if (!error) await audit('PURGE', table, code, data, null);
+  return { data, error };
+}
+
+// Permanently empty the trash for one table (or all tables if omitted).
+export async function emptyTrash(table = null) {
+  const tables = table ? [table] : TRASH_TABLES.map(t => t.table);
+  let totalDeleted = 0;
+  const errors = [];
+  for (const t of tables) {
+    const { data, error } = await supabase
+      .from(t)
+      .delete()
+      .not('deleted_at', 'is', null)
+      .select('code');
+    if (error) errors.push({ table: t, error });
+    else totalDeleted += (data?.length ?? 0);
+  }
+  if (totalDeleted > 0) await audit('PURGE_ALL', table ?? 'all_tables', 'bulk', null, { count: totalDeleted });
+  return { count: totalDeleted, errors: errors.length ? errors : null };
 }
 
 // ─── STORAGE ──────────────────────────────────────────────────
