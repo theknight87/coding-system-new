@@ -74,6 +74,209 @@ function StockMovementModal({ partCode, ops, onClose, onSaved }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// RECORD MOVEMENT MODAL — the real ledger (stock_transactions, via
+// migrations 011/012/014). Reusable: pass `part` to lock it to one
+// part (Part Detail, Master Table row action), or omit it to show a
+// server-side, debounced part picker (Stock Movements page header).
+// ═══════════════════════════════════════════════════════════════
+
+const TXN_LABELS = {
+  receipt: 'Receipt', issue: 'Issue', return_to_store: 'Return',
+  transfer_in: 'Transfer In', transfer_out: 'Transfer Out',
+  adjustment_in: 'Adjustment +', adjustment_out: 'Adjustment −', scrap: 'Scrap',
+  opening_balance: 'Opening Balance',
+};
+const TXN_NEEDS_FROM = ['issue', 'transfer_in', 'transfer_out', 'adjustment_out', 'scrap'];
+const TXN_NEEDS_TO   = ['receipt', 'return_to_store', 'transfer_in', 'transfer_out', 'adjustment_in'];
+
+function RecordMovementModal({ part, onClose, onSaved }) {
+  const { isAdmin, isDeptUser } = useAuth();
+  const canPost = isAdmin || isDeptUser; // this app's two roles both have stock_transactions_insert rights
+
+  const [selectedPart, setSelectedPart] = useState(part || null);
+  const [pickerInput,  setPickerInput]  = useState('');
+  const [pickerQuery,  setPickerQuery]  = useState('');
+  const [pickerResults, setPickerResults] = useState([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+
+  const [txnType,     setTxnType]     = useState('receipt');
+  const [quantity,    setQuantity]    = useState('');
+  const [locationFrom,setLocationFrom]= useState('');
+  const [locationTo,  setLocationTo]  = useState('');
+  const [referenceNo, setReferenceNo] = useState('');
+  const [unitCost,    setUnitCost]    = useState('');
+  const [notes,       setNotes]       = useState('');
+  const [occurredAt,  setOccurredAt]  = useState(() => {
+    const d = new Date(); d.setSeconds(0,0);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); // local time for datetime-local input
+    return d.toISOString().slice(0,16);
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  // Debounced server-side part search (same pattern as Master Parts Table).
+  useEffect(() => {
+    const t = setTimeout(() => setPickerQuery(pickerInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [pickerInput]);
+
+  useEffect(() => {
+    if (selectedPart || !pickerQuery) { setPickerResults([]); return; }
+    let cancelled = false;
+    setPickerLoading(true);
+    db.fetchParts({ search: pickerQuery }, 0, 8).then(({ data }) => {
+      if (!cancelled) setPickerResults((data || []).map(mapPart));
+    }).finally(() => { if (!cancelled) setPickerLoading(false); });
+    return () => { cancelled = true; };
+  }, [pickerQuery, selectedPart]);
+
+  const qtyNum = Number(quantity) || 0;
+  const isInbound = db.TXN_TYPES_INBOUND.includes(txnType);
+  const delta = isInbound ? qtyNum : -qtyNum;
+  const currentQty = selectedPart?.qtyOnHand ?? 0;
+  const resultQty = currentQty + delta;
+  const goesNegative = qtyNum > 0 && resultQty < 0;
+
+  const handleSubmit = async () => {
+    if (!selectedPart) return setError('Select a part.');
+    if (!qtyNum || qtyNum <= 0) return setError('Quantity must be greater than zero.');
+    if (TXN_NEEDS_FROM.includes(txnType) && !locationFrom.trim()) return setError('Location From is required for this movement type.');
+    if (TXN_NEEDS_TO.includes(txnType) && !locationTo.trim()) return setError('Location To is required for this movement type.');
+    setSaving(true); setError('');
+    const { data, error: err } = await db.insertStockTransaction({
+      partId: selectedPart.id, txnType, quantity: qtyNum,
+      locationFrom: TXN_NEEDS_FROM.includes(txnType) ? locationFrom.trim() : null,
+      locationTo: TXN_NEEDS_TO.includes(txnType) ? locationTo.trim() : null,
+      referenceNo: referenceNo.trim(), unitCost, notes: notes.trim(),
+      occurredAt: occurredAt ? new Date(occurredAt).toISOString() : new Date().toISOString(),
+    });
+    setSaving(false);
+    if (err) { setError(err.message); return; }
+    onSaved && onSaved({ txn: data, part: selectedPart, newBalance: resultQty });
+    onClose();
+  };
+
+  const typeBtn = (t) => (
+    <button key={t} type="button" onClick={()=>setTxnType(t)}
+      style={{
+        padding:"7px 12px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit",
+        border:`1.5px solid ${txnType===t?T.accent:T.border}`,
+        background:txnType===t?T.accentLight:"#fff", color:txnType===t?T.accent:T.text,
+      }}>
+      {TXN_LABELS[t]}
+    </button>
+  );
+
+  return (
+    <Modal title="Record Stock Movement" onClose={onClose} maxWidth={640}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
+
+        {/* Part picker */}
+        <div>
+          <label style={sLabel}>Part</label>
+          {selectedPart ? (
+            <div style={{ display:"flex", alignItems:"center", gap:10, background:T.subtle, borderRadius:6, padding:"8px 12px" }}>
+              <CodeTag code={selectedPart.code}/>
+              <span style={{ fontSize:13, color:T.text, flex:1 }}>{selectedPart.shortDesc}</span>
+              <span style={{ fontSize:12 }}>On hand: <StockQtyDisplay qty={selectedPart.qtyOnHand} unit={selectedPart.unit} stockSource={selectedPart.stockSource} small/></span>
+              {!part && <Btn small variant="ghost" onClick={()=>{setSelectedPart(null); setPickerInput(''); }}>Change</Btn>}
+            </div>
+          ) : (
+            <div style={{ position:"relative" }}>
+              <Input value={pickerInput} onChange={e=>setPickerInput(e.target.value)} placeholder="Search by code, description or manufacturer part no…"/>
+              {pickerInput && (
+                <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:`1px solid ${T.border}`, borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.12)", zIndex:10, maxHeight:220, overflowY:"auto", marginTop:4 }}>
+                  {pickerLoading ? (
+                    <div style={{ padding:"10px 12px", fontSize:12, color:T.muted }}>Searching…</div>
+                  ) : pickerResults.length === 0 ? (
+                    <div style={{ padding:"10px 12px", fontSize:12, color:T.muted }}>No matching parts.</div>
+                  ) : pickerResults.map(p => (
+                    <div key={p.id} onClick={()=>{setSelectedPart(p); setPickerInput('');}}
+                      style={{ padding:"8px 12px", cursor:"pointer", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 }}
+                      onMouseEnter={e=>e.currentTarget.style.background=T.subtle}
+                      onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                      <CodeTag code={p.code}/>
+                      <span style={{ fontSize:12, color:T.text, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.shortDesc}</span>
+                      <StockQtyDisplay qty={p.qtyOnHand} unit={p.unit} stockSource={p.stockSource} small/>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Movement type — segmented control, grouped */}
+        <div>
+          <label style={sLabel}>Movement Type</label>
+          <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:5 }}>Everyday</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+            {db.TXN_TYPES_EVERYDAY.map(typeBtn)}
+          </div>
+          <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:5 }}>Corrective</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {db.TXN_TYPES_CORRECTIVE.map(typeBtn)}
+          </div>
+        </div>
+
+        {/* Quantity + live balance preview */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <div>
+            <label style={sLabel}>Quantity</label>
+            <Input type="number" value={quantity} onChange={e=>setQuantity(e.target.value)} placeholder="0"/>
+          </div>
+          <div>
+            <label style={sLabel}>Occurred At</label>
+            <Input type="datetime-local" value={occurredAt} onChange={e=>setOccurredAt(e.target.value)}/>
+          </div>
+        </div>
+        {selectedPart && qtyNum > 0 && (
+          <div style={{ fontSize:12, color:T.muted, background:T.subtle, borderRadius:6, padding:"8px 12px" }}>
+            On hand {currentQty} → <strong style={{ color:T.text }}>{resultQty}</strong> after this {TXN_LABELS[txnType].toLowerCase()}
+          </div>
+        )}
+        {goesNegative && (
+          <div style={{ fontSize:12, color:"#92400e", background:T.warnBg, border:"1px solid #fbbf24", borderRadius:6, padding:"8px 12px", fontWeight:600 }}>
+            ⚠️ This will take the balance below zero ({resultQty}). Allowed, but double-check before posting.
+          </div>
+        )}
+
+        {/* Locations — shown only where the movement type needs them */}
+        {(TXN_NEEDS_FROM.includes(txnType) || TXN_NEEDS_TO.includes(txnType)) && (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            {TXN_NEEDS_FROM.includes(txnType) && (
+              <div><label style={sLabel}>Location From</label><Input value={locationFrom} onChange={e=>setLocationFrom(e.target.value)} placeholder="e.g. WH-A1"/></div>
+            )}
+            {TXN_NEEDS_TO.includes(txnType) && (
+              <div><label style={sLabel}>Location To</label><Input value={locationTo} onChange={e=>setLocationTo(e.target.value)} placeholder="e.g. WH-B2"/></div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <div><label style={sLabel}>Reference No.</label><Input value={referenceNo} onChange={e=>setReferenceNo(e.target.value)} placeholder="PO / WO / delivery note"/></div>
+          <div><label style={sLabel}>Unit Cost (optional)</label><Input type="number" value={unitCost} onChange={e=>setUnitCost(e.target.value)} placeholder="0.00"/></div>
+        </div>
+        <div><label style={sLabel}>Notes</label><Input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional"/></div>
+
+        <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          {canPost && (
+            <Btn onClick={handleSubmit} disabled={saving}>{saving?"Posting…":"💾 Post Movement"}</Btn>
+          )}
+        </div>
+        {!canPost && (
+          <div style={{ fontSize:12, color:T.muted, textAlign:"right" }}>Your account doesn't have permission to post stock movements.</div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // AUTH CONTEXT
 // ═══════════════════════════════════════════════════════════════
 
@@ -1376,9 +1579,9 @@ const CodeLegend = ({ items }) => (
 // CRUD MODAL
 // ═══════════════════════════════════════════════════════════════
 
-const Modal = ({ title, onClose, children }) => (
+const Modal = ({ title, onClose, children, maxWidth = 560 }) => (
   <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center" }}>
-    <div style={{ background:T.card,borderRadius:10,padding:28,minWidth:420,maxWidth:560,width:"90%",boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+    <div style={{ background:T.card,borderRadius:10,padding:28,minWidth:420,maxWidth,width:"90%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
         <h3 style={{ margin:0,fontSize:16,fontWeight:700,color:T.text }}>{title}</h3>
         <button onClick={onClose} style={{ background:"none",border:"none",fontSize:20,cursor:"pointer",color:T.muted }}>✕</button>
@@ -3261,9 +3464,9 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   const [saving,      setSaving]      = useState(false);
   const [toast,       setToast]       = useState(null);
   const [imgUrl,      setImgUrl]      = useState(part.imageUrl || null);
-  const [showMoveModal, setShowMoveModal] = useState(false);
-  const [movements,     setMovements]     = useState([]);
-  const [movLoading,    setMovLoading]    = useState(false);
+  const [showRecordModal, setShowRecordModal] = useState(false);
+  const [movements,       setMovements]       = useState([]);
+  const [movLoading,      setMovLoading]      = useState(false);
 
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
@@ -3282,12 +3485,12 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   }, [part.code, dbReady]);
 
   const loadMovements = useCallback(() => {
-    if (!dbReady) return;
+    if (!dbReady || !fullPart.id) return;
     setMovLoading(true);
-    db.fetchStockMovements({ partCode: part.code }, 0, 5)
-      .then(({ data }) => setMovements((data || []).map(mapMovement)))
+    db.fetchStockTransactions({ partId: fullPart.id }, 0, 5)
+      .then(({ data }) => setMovements(data || []))
       .finally(() => setMovLoading(false));
-  }, [part.code, dbReady]);
+  }, [fullPart.id, dbReady]);
 
   // The Hierarchy Tree passes a lightweight part object (code, short_desc,
   // cat, mfr, model, disc, fg, image_url, status only — no part_no, qty,
@@ -3371,7 +3574,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
             {mode==='view' && <>
-              <Btn small variant="ghost" onClick={()=>setShowMoveModal(true)} style={{ opacity:0.7 }} title="Legacy ledger — no longer affects Quantity on Hand. Use the Stock Count page instead.">📒 Record Movement (legacy)</Btn>
+              <Btn small variant="success" onClick={()=>setShowRecordModal(true)}>📦 Record Movement</Btn>
               <Btn small onClick={()=>setMode('edit')}>✏️ Edit</Btn>
               <Btn small variant="danger" onClick={()=>setMode('confirm-delete')}>🗑 Delete</Btn>
             </>}
@@ -3472,20 +3675,21 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                     <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                       <thead>
                         <tr style={{ background:T.header }}>
-                          {['Date','Type','Qty','Reference'].map(h=>(
+                          {['Date','Type','Qty','Balance','Reference'].map(h=>(
                             <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9, letterSpacing:0.8 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {movements.map((m,i)=>(
-                          <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                            <td style={{ padding:"6px 10px", color:T.muted, whiteSpace:"nowrap" }}>{new Date(m.createdAt).toLocaleDateString()}</td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text }}>{m.transactionType}</td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text }}>
-                              {(m.transactionType==='RECEIPT'||m.transactionType==='RETURN')?'+':(m.transactionType==='TRANSFER'?'±':'−')}{m.quantity}
+                          <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:m.is_void?0.5:1 }}>
+                            <td style={{ padding:"6px 10px", color:T.muted, whiteSpace:"nowrap", textDecoration:m.is_void?"line-through":"none" }}>{new Date(m.occurred_at).toLocaleDateString()}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text, textDecoration:m.is_void?"line-through":"none" }}>{TXN_LABELS[m.txn_type]||m.txn_type}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:m.signed_qty>0?T.success:T.danger }}>
+                              {m.signed_qty>0?'+':''}{m.signed_qty}
                             </td>
-                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.reference||'—'}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text }}>{m.balance_after}</td>
+                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.reference_no||'—'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3552,12 +3756,11 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           </div>
         )}
       </div>
-      {showMoveModal && (
-        <StockMovementModal
-          partCode={partView.code}
-          ops={ops}
-          onClose={()=>setShowMoveModal(false)}
-          onSaved={()=>{ flash('Stock movement recorded'); loadMovements(); loadFullPart(); }}
+      {showRecordModal && (
+        <RecordMovementModal
+          part={partView}
+          onClose={()=>setShowRecordModal(false)}
+          onSaved={({ newBalance })=>{ flash(`Movement recorded — now ${newBalance}`); loadMovements(); loadFullPart(); }}
         />
       )}
     </div>
@@ -3825,6 +4028,9 @@ function MasterTablePage({ data }) {
 
   // Part detail modal
   const [selectedPart, setSelectedPart] = useState(null);
+  const [moveTarget,   setMoveTarget]   = useState(null); // part to record a movement for
+  const [toast,        setToast]        = useState(null);
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
   const filters = useMemo(()=>({
     search: search||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
@@ -3935,14 +4141,14 @@ function MasterTablePage({ data }) {
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
               <thead>
                 <tr style={{ background:T.header }}>
-                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty","Loc","Status"].map(h=>(
+                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty","Loc","Status","Actions"].map(h=>(
                     <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.length===0
-                  ? <tr><td colSpan={12} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts found.</td></tr>
+                  ? <tr><td colSpan={13} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts found.</td></tr>
                   : rows.map((r,i)=>{
                     const cat = categories.find(x=>x.code===r.cat);
                     const mdl = models.find(x=>x.code===r.model);
@@ -3969,6 +4175,9 @@ function MasterTablePage({ data }) {
                         <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.loc||"—"}</td>
                         <td style={{ padding:"7px 10px" }}>
                           <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
+                        </td>
+                        <td style={{ padding:"7px 10px" }} onClick={e=>e.stopPropagation()}>
+                          <Btn small variant="success" onClick={()=>setMoveTarget(r)}>📦 Move</Btn>
                         </td>
                       </tr>
                     );
@@ -4020,6 +4229,20 @@ function MasterTablePage({ data }) {
           }}
         />
       )}
+
+      {moveTarget && (
+        <RecordMovementModal
+          part={moveTarget}
+          onClose={()=>setMoveTarget(null)}
+          onSaved={({ part, newBalance })=>{
+            flash(`Recorded — ${part.code} now ${newBalance}`);
+            // Only the balance is known for certain here — stock_source is
+            // server-managed (post_physical_count only) and isn't guessed client-side.
+            setRows(r => r.map(p => p.id===part.id ? { ...p, qtyOnHand:newBalance } : p));
+          }}
+        />
+      )}
+      <Toast msg={toast}/>
     </div>
   );
 }
@@ -4447,6 +4670,279 @@ function BulkCountImportModal({ onClose, onDone, flash }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// STOCK MOVEMENTS PAGE — server-side paginated view of the real
+// stock_transactions ledger (v_stock_transactions_detail), with
+// filters, summary tiles, admin void, and CSV export.
+// ═══════════════════════════════════════════════════════════════
+
+const TXN_PILL = {
+  opening_balance: { c:"#475569", b:"#f1f5f9" },
+  receipt:         { c:T.success, b:T.successBg },
+  return_to_store: { c:T.success, b:T.successBg },
+  transfer_in:     { c:T.success, b:T.successBg },
+  issue:           { c:T.warn,    b:T.warnBg },
+  transfer_out:    { c:T.warn,    b:T.warnBg },
+  scrap:           { c:"#475569", b:"#f1f5f9" },
+  adjustment_in:   { c:"#475569", b:"#f1f5f9" },
+  adjustment_out:  { c:"#475569", b:"#f1f5f9" },
+};
+
+function StockMovementsPage({ data }) {
+  const { categories, manufacturers, dbReady, navigateTo } = data;
+  const { isAdmin } = useAuth();
+  const PAGE_SIZE = 50;
+
+  const [rows,      setRows]      = useState([]);
+  const [reversals, setReversals] = useState({}); // { [originalId]: reversalRow }
+  const [total,     setTotal]     = useState(0);
+  const [summary,   setSummary]   = useState(null);
+  const [page,      setPage]      = useState(0);
+  const [loading,   setLoading]   = useState(true);
+  const [toast,     setToast]     = useState(null);
+  const [showRecord,setShowRecord]= useState(false);
+  const [voidTarget,setVoidTarget]= useState(null); // row being voided
+  const [voidReason,setVoidReason]= useState('');
+  const [voiding,   setVoiding]   = useState(false);
+
+  const [searchInput, setSearchInput] = useState('');
+  const [search,   setSearch]   = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
+  const [fType,    setFType]    = useState('');
+  const [fCat,     setFCat]     = useState('');
+  const [fMfr,     setFMfr]     = useState('');
+  const [fLoc,     setFLoc]     = useState('');
+
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  useEffect(() => {
+    const t = setTimeout(()=>setSearch(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const filters = useMemo(() => ({
+    search: search || undefined,
+    dateFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+    dateTo: dateTo ? new Date(dateTo + 'T23:59:59').toISOString() : undefined,
+    txnType: fType || undefined, cat: fCat || undefined, mfr: fMfr || undefined,
+    location: fLoc || undefined,
+  }), [search, dateFrom, dateTo, fType, fCat, fMfr, fLoc]);
+
+  useEffect(() => { setPage(0); }, [filters.search, filters.dateFrom, filters.dateTo, filters.txnType, filters.cat, filters.mfr, filters.location]);
+
+  const load = useCallback(() => {
+    if (!dbReady) { setLoading(false); setRows([]); setTotal(0); setSummary(null); return; }
+    setLoading(true);
+    Promise.all([
+      db.fetchStockTransactionsCount(filters),
+      db.fetchStockTransactions(filters, page, PAGE_SIZE),
+      db.fetchStockTransactionsSummary(filters),
+    ]).then(([countRes, rowsRes, summaryRes]) => {
+      setTotal(countRes.count || 0);
+      const list = rowsRes.data || [];
+      setRows(list);
+      setSummary(summaryRes.data);
+      const voidedIds = list.filter(r=>r.is_void).map(r=>r.id);
+      if (voidedIds.length) {
+        db.fetchReversalsFor(voidedIds).then(({ data }) => {
+          const map = {};
+          (data||[]).forEach(r => { if (r.reverses_txn_id) map[r.reverses_txn_id] = r; });
+          setReversals(map);
+        });
+      } else setReversals({});
+    }).finally(()=>setLoading(false));
+  }, [filters.search, filters.dateFrom, filters.dateTo, filters.txnType, filters.cat, filters.mfr, filters.location, page, dbReady]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+
+  const handleVoid = async () => {
+    if (!voidTarget) return;
+    if (!voidReason.trim()) return flash('A reason is required to void a transaction', 'err');
+    setVoiding(true);
+    const { error } = await db.voidStockTransaction(voidTarget.id, voidReason.trim());
+    setVoiding(false);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`Voided ${voidTarget.part_code} transaction — reversing entry posted`);
+    setVoidTarget(null); setVoidReason('');
+    load();
+  };
+
+  const exportCsv = async () => {
+    if (!dbReady) return flash('Requires a live database connection', 'err');
+    flash('Preparing export…');
+    const { data: allRows, error } = await db.fetchStockTransactions(filters, 0, 5000);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    const header = ['Date','Part Code','Description','Type','Quantity','Signed Qty','Balance After','Location From','Location To','Reference','Unit Cost','User','Voided'];
+    const esc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+    const lines = [header.map(esc).join(',')];
+    (allRows||[]).forEach(r => {
+      lines.push([
+        r.occurred_at, r.part_code, r.part_short_desc, r.txn_type, r.quantity, r.signed_qty, r.balance_after,
+        r.location_from, r.location_to, r.reference_no, r.unit_cost, r.user_full_name||r.user_email, r.is_void?'VOID':'',
+      ].map(esc).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `stock-movements-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const renderRow = (r, i, nested=false) => {
+    const pill = TXN_PILL[r.txn_type] || { c:T.muted, b:T.subtle };
+    const dimmed = r.is_void;
+    return (
+      <tr key={r.id} style={{ borderBottom:`1px solid ${T.border}`, background: nested ? "#fafafa" : (i%2?T.subtle:T.card), opacity: dimmed?0.5:1 }}>
+        <td style={{ padding:"7px 10px", color:T.muted, whiteSpace:"nowrap", fontSize:11, textDecoration:dimmed?"line-through":"none", paddingLeft: nested?28:10 }}>
+          {nested && '↳ '}{new Date(r.occurred_at).toLocaleString()}
+        </td>
+        <td style={{ padding:"7px 10px", textDecoration:dimmed?"line-through":"none" }}><CodeTag code={r.part_code}/></td>
+        <td style={{ padding:"7px 10px", fontSize:12, color:T.text, textDecoration:dimmed?"line-through":"none", maxWidth:160, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.part_short_desc}</td>
+        <td style={{ padding:"7px 10px" }}>
+          <span style={{ background:pill.b, color:pill.c, fontWeight:700, fontSize:10, padding:"2px 7px", borderRadius:4, textTransform:"uppercase", letterSpacing:0.3 }}>{TXN_LABELS[r.txn_type]||r.txn_type}</span>
+        </td>
+        <td style={{ padding:"7px 10px", fontWeight:700, color:r.signed_qty>0?T.success:T.danger, textDecoration:dimmed?"line-through":"none" }}>
+          {r.signed_qty>0?'+':''}{r.signed_qty}
+        </td>
+        <td style={{ padding:"7px 10px", fontWeight:700, color:T.text }}>{r.balance_after}</td>
+        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted, fontFamily:"monospace" }}>{r.location_from||r.location_to ? `${r.location_from||'—'} → ${r.location_to||'—'}` : '—'}</td>
+        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{r.reference_no||'—'}</td>
+        <td style={{ padding:"7px 10px", fontSize:11, color:T.text }}>{r.user_full_name||r.user_email||'—'}</td>
+        <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
+          {isAdmin && !r.is_void && !r.reverses_txn_id && (
+            <Btn small variant="danger" onClick={()=>setVoidTarget(r)}>Void</Btn>
+          )}
+          {r.is_void && <span style={{ fontSize:10, color:T.danger, fontWeight:700 }}>VOIDED</span>}
+        </td>
+      </tr>
+    );
+  };
+
+  // Build the render list: a voided row is immediately followed by its
+  // reversal (if we found one), and that reversal is skipped at its own
+  // natural chronological position further up the page to avoid a
+  // duplicate row.
+  const reversalIdsShownNested = new Set(Object.values(reversals).map(r=>r.id));
+  const renderList = [];
+  rows.forEach(r => {
+    if (reversalIdsShownNested.has(r.id)) return; // shown nested elsewhere
+    renderList.push(renderRow(r, renderList.length, false));
+    if (r.is_void && reversals[r.id]) renderList.push(renderRow(reversals[r.id], renderList.length, true));
+  });
+
+  return (
+    <div>
+      <Toast msg={toast}/>
+      <PageHeader title="Stock Movements" sub="Every posted transaction against the real stock ledger, newest first"/>
+      <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:16, gap:8 }}>
+        <Btn variant="secondary" onClick={exportCsv}>⬇ Export CSV</Btn>
+        <Btn onClick={()=>setShowRecord(true)}>📦 Record Movement</Btn>
+      </div>
+
+      {/* Summary tiles */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:16 }}>
+        <StatCard label="Total Received" value={summary?`+${summary.received}`:"…"} color={T.success} icon="📥"/>
+        <StatCard label="Total Issued"   value={summary?`−${summary.issued}`:"…"}   color={T.warn}    icon="📤"/>
+        <StatCard label="Net Change"     value={summary?`${summary.net>=0?'+':''}${summary.net}`:"…"} color={summary&&summary.net<0?T.danger:T.accent} icon="±"/>
+        <StatCard label="Transactions"   value={summary?summary.count.toLocaleString():"…"} color="#7c3aed" icon="🧾"/>
+      </div>
+
+      {/* Filters */}
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Part code or reference…" style={{ ...selStyle, minWidth:200, flex:"1 1 180px" }}/>
+          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={selStyle}/>
+          <span style={{ fontSize:12, color:T.muted }}>to</span>
+          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={selStyle}/>
+          <select value={fType} onChange={e=>setFType(e.target.value)} style={selStyle}>
+            <option value="">All Types</option>
+            {db.ALL_TXN_TYPES.map(t=><option key={t} value={t}>{TXN_LABELS[t]}</option>)}
+          </select>
+          <select value={fCat} onChange={e=>setFCat(e.target.value)} style={selStyle}>
+            <option value="">All Categories</option>
+            {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+          </select>
+          <select value={fMfr} onChange={e=>setFMfr(e.target.value)} style={selStyle}>
+            <option value="">All Manufacturers</option>
+            {manufacturers.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <input value={fLoc} onChange={e=>setFLoc(e.target.value)} placeholder="Location…" style={{ ...selStyle, width:120 }}/>
+          {(search||dateFrom||dateTo||fType||fCat||fMfr||fLoc) && (
+            <button onClick={()=>{setSearchInput('');setSearch('');setDateFrom('');setDateTo('');setFType('');setFCat('');setFMfr('');setFLoc('');}}
+              style={{ padding:"7px 12px", borderRadius:5, border:"1px solid #fca5a5", background:"#fee2e2", color:T.danger, fontSize:13, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
+              ✕ Clear
+            </button>
+          )}
+        </div>
+      </Card>
+
+      <Card>
+        {!dbReady ? (
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
+        ) : loading ? (
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading transactions…</div>
+        ) : (
+          <>
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:T.header }}>
+                    {['Date','Part Code','Description','Type','Qty','Balance After','Location','Reference','User','Actions'].map(h=>(
+                      <th key={h} style={{ padding:"9px 12px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {renderList.length === 0
+                    ? <tr><td colSpan={10} style={{ textAlign:"center", padding:36, color:T.muted }}>No transactions match these filters.</td></tr>
+                    : renderList}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:16, fontSize:13 }}>
+              <span style={{ color:T.muted }}>Page {page+1} of {totalPages} ({total.toLocaleString()} transactions)</span>
+              <div style={{ display:"flex", gap:8 }}>
+                <Btn small variant="secondary" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>← Prev</Btn>
+                <Btn small variant="secondary" disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</Btn>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
+
+      {showRecord && (
+        <RecordMovementModal
+          onClose={()=>setShowRecord(false)}
+          onSaved={({ part, newBalance })=>{ flash(`Recorded — ${part.code} now ${newBalance}`); load(); }}
+        />
+      )}
+
+      {voidTarget && (
+        <Modal title="Void Transaction" onClose={()=>{ if(!voiding){ setVoidTarget(null); setVoidReason(''); } }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ background:T.dangerBg, borderRadius:6, padding:"10px 14px", fontSize:13, color:T.danger }}>
+              Voiding <strong>{TXN_LABELS[voidTarget.txn_type]}</strong> of <strong>{voidTarget.quantity}</strong> for <CodeTag code={voidTarget.part_code}/> posts a reversing entry — history is never edited.
+            </div>
+            <div>
+              <label style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 }}>Reason (required)</label>
+              <Input value={voidReason} onChange={e=>setVoidReason(e.target.value)} placeholder="Why is this being voided?"/>
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+              <Btn variant="secondary" onClick={()=>{setVoidTarget(null);setVoidReason('');}} disabled={voiding}>Cancel</Btn>
+              <Btn variant="danger" onClick={handleVoid} disabled={voiding}>{voiding?"Voiding…":"Void with Reason"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
 
@@ -4463,6 +4959,7 @@ const NAV = [
   { id:"master",        label:"Master Parts Table",  icon:"📊", group:"Inventory",   adminOnly:false },
   { id:"ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   adminOnly:false },
   { id:"stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   adminOnly:false },
+  { id:"movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   adminOnly:false },
   { id:"admin",         label:"Administration",      icon:"🔑", group:"System",      adminOnly:true  },
   { id:"auditlog",      label:"Audit Log",           icon:"📜", group:"System",      adminOnly:true  },
   { id:"users",         label:"User Management",     icon:"👥", group:"System",      adminOnly:true  },
@@ -4522,6 +5019,7 @@ function AppShell() {
     master:        <MasterTablePage data={data} />,
     ledger:        <StockLedgerPage data={data} />,
     stockcount:    <StockCountPage data={data} />,
+    movements:     <StockMovementsPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
