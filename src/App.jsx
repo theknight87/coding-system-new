@@ -4616,6 +4616,7 @@ function AdminPage({ data }) {
       <div style={{ padding:"14px 18px",background:"#0f172a",borderRadius:8,marginBottom:24,color:"#38bdf8",fontFamily:"monospace",fontWeight:700,fontSize:14 }}>
         ⚠️ All changes must preserve the mandatory format: AA – BB – CC – DD – EE – 0001
       </div>
+      <NotificationSettingsCard />
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:16 }}>
         {modules.map(m=>(
           <Card key={m.id} style={{ borderLeft:`4px solid ${m.color}`,cursor:"pointer" }}>
@@ -5844,6 +5845,124 @@ function MasterImportModal({ onClose, onDone, flash }) {
   );
 }
 
+// ─── PUSH NOTIFICATIONS ─────────────────────────────────────────
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+const PUSH_SUPPORTED = typeof window !== 'undefined' &&
+  'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+const IS_STANDALONE = typeof window !== 'undefined' &&
+  (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true);
+const IS_IOS_SAFARI = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
+
+// Permission is NEVER requested automatically — only in response to
+// this card's own "Enable" button, per spec (a reflexive denial from
+// requesting on load is permanent and can't be re-prompted).
+function NotificationSettingsCard() {
+  const [permission, setPermission] = useState(PUSH_SUPPORTED ? Notification.permission : 'unsupported');
+  const [subscribed, setSubscribed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState(null);
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  useEffect(() => {
+    if (!PUSH_SUPPORTED || Notification.permission !== 'granted') return;
+    navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => setSubscribed(!!sub));
+  }, []);
+
+  const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+  const handleEnable = async () => {
+    if (!vapidKey) return flash('Push notifications are not configured yet (missing VAPID key)', 'err');
+    setBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+      if (perm !== 'granted') { setBusy(false); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+      const { error } = await db.savePushSubscription(sub);
+      if (error) { flash(`Error saving subscription: ${error.message}`, 'err'); setBusy(false); return; }
+      setSubscribed(true);
+      flash('Browser notifications enabled');
+    } catch (e) {
+      flash(`Error: ${e.message}`, 'err');
+    }
+    setBusy(false);
+  };
+
+  const handleTest = async () => {
+    const reg = await navigator.serviceWorker.ready;
+    reg.showNotification('⚠️ CarGas Stock Alert (test)', {
+      body: 'This is a test notification — push delivery is working.',
+      icon: '/logo.png',
+    });
+  };
+
+  const handleUnsubscribe = async () => {
+    setBusy(true);
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await db.deletePushSubscriptionByEndpoint(sub.endpoint);
+      await sub.unsubscribe();
+    }
+    setSubscribed(false);
+    setBusy(false);
+    flash('Unsubscribed from browser notifications');
+  };
+
+  if (IS_IOS_SAFARI && !IS_STANDALONE) {
+    return (
+      <Card style={{ marginBottom:16 }}>
+        <SectionHeader>🔔 Enable Browser Notifications</SectionHeader>
+        <div style={{ fontSize:13, color:T.muted }}>
+          On iPhone/iPad, Web Push only works after adding this app to your Home Screen (Share → Add to Home Screen), then opening it from there.
+        </div>
+      </Card>
+    );
+  }
+
+  if (!PUSH_SUPPORTED) {
+    return (
+      <Card style={{ marginBottom:16 }}>
+        <SectionHeader>🔔 Enable Browser Notifications</SectionHeader>
+        <div style={{ fontSize:13, color:T.muted }}>Not supported in this browser.</div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card style={{ marginBottom:16 }}>
+      <SectionHeader>🔔 Enable Browser Notifications</SectionHeader>
+      {permission === 'denied' ? (
+        <div style={{ fontSize:13, color:T.danger }}>
+          Notifications are blocked for this site. Re-enable them from your browser's site settings, then reload this page.
+        </div>
+      ) : subscribed ? (
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ fontSize:13, color:T.success, fontWeight:700 }}>✅ Enabled on this device</span>
+          <Btn small variant="secondary" onClick={handleTest}>Send test notification</Btn>
+          <Btn small variant="danger" onClick={handleUnsubscribe} disabled={busy}>Unsubscribe</Btn>
+        </div>
+      ) : (
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ fontSize:13, color:T.muted }}>Get a browser notification when a part goes out of stock or critical, even when this tab is closed.</span>
+          <Btn small onClick={handleEnable} disabled={busy}>{busy?"Enabling…":"Enable Notifications"}</Btn>
+        </div>
+      )}
+      <Toast msg={toast}/>
+    </Card>
+  );
+}
+
 // ─── STOCK ALERTS PAGE ────────────────────────────────────────
 const ALERTS_PAGE_SIZE = 50;
 
@@ -5984,6 +6103,8 @@ function StockAlertsPage({ data }) {
   return (
     <div>
       <PageHeader title="Stock Alerts" sub={`${total.toLocaleString()} active alert(s)`} />
+
+      <NotificationSettingsCard />
 
       <Card style={{ marginBottom:16 }}>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
