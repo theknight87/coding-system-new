@@ -381,6 +381,49 @@ export async function deletePartsByFilter(filters = {}) {
   return { data, error };
 }
 
+// ─── STOCK MOVEMENTS (LEDGER) ──────────────────────────────────
+// Append-only ledger. spare_parts.qty is a computed running balance
+// maintained entirely by the apply_stock_movement DB trigger — never
+// write to spare_parts.qty directly once this ledger is in use.
+export const STOCK_TRANSACTION_TYPES = ['RECEIPT', 'ISSUE', 'CONSUMPTION', 'RETURN', 'TRANSFER'];
+
+export async function fetchStockMovementsCount(filters = {}) {
+  let q = supabase.from('stock_movements').select('*', { count: 'exact', head: true });
+  if (filters.partCode)        q = q.eq('part_code', filters.partCode);
+  if (filters.transactionType) q = q.eq('transaction_type', filters.transactionType);
+  const { count, error } = await q;
+  return { count: count ?? 0, error };
+}
+
+export async function fetchStockMovements(filters = {}, page = 0, pageSize = 50) {
+  let q = supabase
+    .from('stock_movements')
+    .select('id,part_code,transaction_type,quantity,reference,notes,asset_id,created_at,created_by,user_profiles(email,full_name)')
+    .order('created_at', { ascending: false })
+    .range(page * pageSize, (page + 1) * pageSize - 1);
+  if (filters.partCode)        q = q.eq('part_code', filters.partCode);
+  if (filters.transactionType) q = q.eq('transaction_type', filters.transactionType);
+  return q;
+}
+
+export async function insertStockMovement(row) {
+  const userId = await uid();
+  const { data, error } = await supabase
+    .from('stock_movements')
+    .insert({
+      part_code: row.partCode,
+      transaction_type: row.transactionType,
+      quantity: row.quantity,
+      reference: row.reference || '',
+      notes: row.notes || '',
+      asset_id: row.assetId || null,
+      created_by: userId,
+    })
+    .select('*').maybeSingle();
+  if (!error) await audit('CREATE', 'stock_movements', data.id, null, data);
+  return { data, error };
+}
+
 // ─── TRASH / RECYCLE BIN ──────────────────────────────────────
 // Every soft-deletable table, with the columns needed to show a
 // meaningful row in the Trash page and the label used in the UI.

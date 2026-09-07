@@ -3,6 +3,77 @@ import { supabase } from './lib/supabase.js';
 import * as db from './lib/db.js';
 
 // ═══════════════════════════════════════════════════════════════
+// STOCK MOVEMENT MODAL — records a Receipt / Issue / Consumption /
+// Return / Transfer against a part. Reused by PartDetailModal (part
+// pre-filled) and StockLedgerPage (free-entry part code).
+// ═══════════════════════════════════════════════════════════════
+
+function StockMovementModal({ partCode, ops, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    partCode: partCode || '', transactionType: 'RECEIPT',
+    quantity: '', reference: '', notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  const handleSubmit = async () => {
+    const code = (form.partCode || '').trim().toUpperCase();
+    const qtyNum = Number(form.quantity);
+    if (!code) return setError('Enter a part code.');
+    if (!qtyNum || qtyNum <= 0) return setError('Quantity must be greater than zero.');
+    setSaving(true); setError('');
+    const { error: err } = await ops.saveStockMovement({
+      partCode: code, transactionType: form.transactionType,
+      quantity: qtyNum, reference: form.reference, notes: form.notes,
+    });
+    setSaving(false);
+    if (err) { setError(err.message); return; }
+    onSaved && onSaved();
+    onClose();
+  };
+
+  return (
+    <Modal title="New Stock Transaction" onClose={onClose}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
+        {partCode ? (
+          <div><label style={sLabel}>Part Code</label><CodeTag code={partCode}/></div>
+        ) : (
+          <div>
+            <label style={sLabel}>Part Code</label>
+            <Input value={form.partCode} onChange={e=>setForm(f=>({...f,partCode:e.target.value}))} placeholder="e.g. CP-GA-G04-ME-PST-0133"/>
+          </div>
+        )}
+        <div>
+          <label style={sLabel}>Transaction Type</label>
+          <Select value={form.transactionType} onChange={e=>setForm(f=>({...f,transactionType:e.target.value}))}>
+            {db.STOCK_TRANSACTION_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </Select>
+        </div>
+        <div>
+          <label style={sLabel}>Quantity</label>
+          <Input type="number" value={form.quantity} onChange={e=>setForm(f=>({...f,quantity:e.target.value}))} placeholder="0"/>
+        </div>
+        <div>
+          <label style={sLabel}>Reference</label>
+          <Input value={form.reference} onChange={e=>setForm(f=>({...f,reference:e.target.value}))} placeholder="e.g. PO-1029, WO-455"/>
+        </div>
+        <div>
+          <label style={sLabel}>Notes</label>
+          <Input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional"/>
+        </div>
+        <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleSubmit} disabled={saving}>{saving?"Saving…":"💾 Record Transaction"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // AUTH CONTEXT
 // ═══════════════════════════════════════════════════════════════
 
@@ -150,6 +221,12 @@ const mapPart  = r => ({
   loc:r.location??'', minStock:r.min_stock??0, maxStock:r.max_stock??0,
   remarks:r.remarks??'', status:r.status??'Active',
   imageUrl:r.image_url??null, datasheetUrl:r.datasheet_url??null,
+});
+const mapMovement = r => ({
+  id:r.id, partCode:r.part_code, transactionType:r.transaction_type,
+  quantity:r.quantity, reference:r.reference??'', notes:r.notes??'',
+  assetId:r.asset_id??null, createdAt:r.created_at, createdBy:r.created_by,
+  userEmail:r.user_profiles?.email, userName:r.user_profiles?.full_name,
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -400,10 +477,14 @@ function useDb(initData) {
         });
         return { error: null };
       }
+      // NOTE: qty is intentionally omitted — spare_parts.qty is a computed
+      // running balance maintained by the stock_movements ledger trigger.
+      // New parts start at 0; use ops.saveStockMovement (Receipt) to add
+      // initial stock, and never write qty from the app layer again.
       const dbRow = {
         code:row.code, short_desc:row.shortDesc, long_desc:row.longDesc,
         cat:row.cat, mfr:row.mfr, model:row.model, disc:row.disc, fg:row.fg,
-        part_no:row.partNo, oem_part:row.oemPart, qty:row.qty, unit:row.unit,
+        part_no:row.partNo, oem_part:row.oemPart, unit:row.unit,
         location:row.loc, min_stock:row.minStock, max_stock:row.maxStock,
         remarks:row.remarks, status:row.status,
         image_url:row.imageUrl??null, datasheet_url:row.datasheetUrl??null,
@@ -422,6 +503,26 @@ function useDb(initData) {
       const res = await db.softDeletePart(code);
       // No global reload — caller removes the row from its own local list
       return res;
+    },
+
+    // STOCK MOVEMENTS (LEDGER)
+    // In local/offline mode there is no DB trigger to maintain qty, so we
+    // apply the same delta rules here directly against the in-memory part.
+    saveStockMovement: async (row) => {
+      if (!dbReadyRef.current) {
+        setState(prev => ({
+          ...prev,
+          parts: prev.parts.map(p => {
+            if (p.code !== row.partCode) return p;
+            const delta =
+              (row.transactionType === 'RECEIPT' || row.transactionType === 'RETURN') ? row.quantity :
+              (row.transactionType === 'ISSUE' || row.transactionType === 'CONSUMPTION') ? -row.quantity : 0;
+            return { ...p, qty: Math.max(0, (p.qty||0) + delta) };
+          }),
+        }));
+        return { data: null, error: null };
+      }
+      return db.insertStockMovement(row);
     },
 
   }), [reload]);
@@ -501,6 +602,135 @@ function AuditLogPage() {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STOCK LEDGER PAGE — every Receipt / Issue / Consumption / Return /
+// Transfer, server-side paginated like the Master Parts Table.
+// spare_parts.qty is derived entirely from these rows (see migration
+// 010_stock_movements.sql) — this page is the audit trail for it.
+// ═══════════════════════════════════════════════════════════════
+
+function StockLedgerPage({ data }) {
+  const { ops, dbReady } = data;
+  const PAGE_SIZE = 50;
+
+  const [movements,   setMovements]   = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [page,        setPage]        = useState(0);
+  const [total,       setTotal]       = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [fPart,       setFPart]       = useState('');
+  const [fType,       setFType]       = useState('');
+  const [showModal,   setShowModal]   = useState(false);
+  const [toast,       setToast]       = useState(null);
+
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  // Debounce the part-code search, same pattern as MasterTablePage.
+  useEffect(() => {
+    const t = setTimeout(() => setFPart(searchInput.trim().toUpperCase()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const filters = useMemo(() => ({
+    partCode: fPart || undefined,
+    transactionType: fType || undefined,
+  }), [fPart, fType]);
+
+  useEffect(() => { setPage(0); }, [filters.partCode, filters.transactionType]);
+
+  const load = useCallback(() => {
+    if (!dbReady) { setLoading(false); setMovements([]); setTotal(0); return; }
+    setLoading(true);
+    Promise.all([
+      db.fetchStockMovementsCount(filters),
+      db.fetchStockMovements(filters, page, PAGE_SIZE),
+    ]).then(([countRes, rowsRes]) => {
+      setTotal(countRes.count || 0);
+      setMovements((rowsRes.data || []).map(mapMovement));
+      setLoading(false);
+    });
+  }, [filters.partCode, filters.transactionType, page, dbReady]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const TC = { RECEIPT:'#047857', ISSUE:'#b45309', CONSUMPTION:'#dc2626', RETURN:'#1d4ed8', TRANSFER:'#6d28d9' };
+  const TB = { RECEIPT:'#d1fae5', ISSUE:'#fef3c7', CONSUMPTION:'#fee2e2', RETURN:'#dbeafe', TRANSFER:'#f5f3ff' };
+  const signPrefix = t => (t==='RECEIPT'||t==='RETURN') ? '+' : (t==='TRANSFER' ? '±' : '−');
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <div>
+      <Toast msg={toast}/>
+      <PageHeader title="Stock Ledger" sub="Every Receipt, Issue, Consumption, Return and Transfer — the movements behind each part's quantity on hand"/>
+      <Card style={{ marginBottom:20 }}>
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center' }}>
+          <Input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Filter by part code…" style={{ width:220 }}/>
+          <Select value={fType} onChange={e=>setFType(e.target.value)} style={{ width:'auto', minWidth:160 }}>
+            <option value="">All Types</option>
+            {db.STOCK_TRANSACTION_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </Select>
+          <span style={{ fontSize:13, color:T.muted }}>{total} transaction{total===1?'':'s'}</span>
+          <div style={{ marginLeft:'auto' }}>
+            <Btn onClick={()=>setShowModal(true)}>＋ New Transaction</Btn>
+          </div>
+        </div>
+      </Card>
+      <Card>
+        {!dbReady ? (
+          <div style={{ textAlign:'center', padding:40, color:T.muted }}>🟡 Stock Ledger requires a live database connection.</div>
+        ) : loading ? (
+          <div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading transactions…</div>
+        ) : (
+          <>
+            <div style={{ overflowX:'auto' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:T.header }}>
+                    {['Timestamp','Part Code','Type','Qty','Reference','Notes','User'].map(h=>(
+                      <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {movements.length === 0
+                    ? <tr><td colSpan={7} style={{ textAlign:'center', padding:36, color:T.muted }}>No stock movements yet.</td></tr>
+                    : movements.map((m,i) => (
+                    <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                      <td style={{ padding:'8px 12px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(m.createdAt).toLocaleString()}</td>
+                      <td style={{ padding:'8px 12px' }}><CodeTag code={m.partCode}/></td>
+                      <td style={{ padding:'8px 12px' }}>
+                        <span style={{ background:TB[m.transactionType]??T.subtle, color:TC[m.transactionType]??T.muted, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{m.transactionType}</span>
+                      </td>
+                      <td style={{ padding:'8px 12px', fontWeight:700, color:T.text }}>{signPrefix(m.transactionType)}{m.quantity}</td>
+                      <td style={{ padding:'8px 12px', color:T.muted }}>{m.reference||'—'}</td>
+                      <td style={{ padding:'8px 12px', color:T.muted, maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.notes||'—'}</td>
+                      <td style={{ padding:'8px 12px', color:T.text, fontSize:12 }}>{m.userName || m.userEmail || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:16, fontSize:13 }}>
+              <span style={{ color:T.muted }}>Page {page+1} of {totalPages}</span>
+              <div style={{ display:'flex', gap:8 }}>
+                <Btn small variant="secondary" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>← Prev</Btn>
+                <Btn small variant="secondary" disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</Btn>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
+      {showModal && (
+        <StockMovementModal
+          ops={ops}
+          onClose={()=>setShowModal(false)}
+          onSaved={()=>{ flash('Stock movement recorded'); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -2738,13 +2968,23 @@ function CodeGeneratorPage({ data }) {
     const newPart = {
       code:generatedCode, shortDesc, longDesc,
       cat:step.cat, mfr:step.mfr, model:step.model, disc:step.disc, fg:step.fg,
-      partNo, oemPart, qty:Number(qty)||0, unit, loc, minStock:0, maxStock:0,
+      partNo, oemPart, unit, loc, minStock:0, maxStock:0,
       remarks, status:"Active", imageUrl:imageUrl||null, datasheetUrl:null,
     };
     setSaving(true);
     const { error } = await ops.savePart(newPart, null);
+    if (error) { setSaving(false); flash(`Error: ${error.message}`,"err"); return; }
+    // Quantity on hand is a computed ledger balance, not a typed field —
+    // any starting quantity entered here is recorded as an initial Receipt.
+    const initialQty = Number(qty) || 0;
+    if (initialQty > 0) {
+      const { error: moveErr } = await ops.saveStockMovement({
+        partCode: generatedCode, transactionType: 'RECEIPT', quantity: initialQty,
+        reference: 'Initial stock', notes: 'Recorded on part creation',
+      });
+      if (moveErr) flash(`Part saved, but initial stock movement failed: ${moveErr.message}`, "err");
+    }
     setSaving(false);
-    if (error) { flash(`Error: ${error.message}`,"err"); return; }
     setSaved(true);
     flash(`✅ Code ${generatedCode} saved to Master Table`);
   };
@@ -2851,7 +3091,7 @@ function CodeGeneratorPage({ data }) {
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
                 <div><label style={sLabel}>Part No.</label><Input value={partNo} onChange={e=>setPartNo(e.target.value)} placeholder="e.g. AN-BRG-001"/></div>
                 <div><label style={sLabel}>OEM Part No.</label><Input value={oemPart} onChange={e=>setOemPart(e.target.value)} placeholder="e.g. 1234567"/></div>
-                <div><label style={sLabel}>Qty</label><Input type="number" value={qty} onChange={e=>setQty(e.target.value)} placeholder="0"/></div>
+                <div><label style={sLabel}>Initial Qty (Receipt)</label><Input type="number" value={qty} onChange={e=>setQty(e.target.value)} placeholder="0"/></div>
                 <div>
                   <label style={sLabel}>Unit</label>
                   <Select value={unit} onChange={e=>setUnit(e.target.value)}>
@@ -2989,26 +3229,16 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   const [saving,      setSaving]      = useState(false);
   const [toast,       setToast]       = useState(null);
   const [imgUrl,      setImgUrl]      = useState(part.imageUrl || null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [movements,     setMovements]     = useState([]);
+  const [movLoading,    setMovLoading]    = useState(false);
 
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
-  // The Hierarchy Tree passes a lightweight part object (code, short_desc,
-  // cat, mfr, model, disc, fg, image_url, status only — no part_no, qty,
-  // location, etc). Fetch the full record here so the modal always shows
-  // complete data regardless of which page opened it.
-  useEffect(() => {
-    if (!dbReady) return; // local mode already has the full object
-    // The Hierarchy Tree passes a lightweight part object (code, short_desc,
-    // cat, mfr, model, disc, fg, image_url, status only — no part_no, qty,
-    // location, etc). It's explicitly flagged with _isLightweight so we know
-    // to fetch the full record here, regardless of default values mapPart()
-    // fills in (e.g. partNo defaults to '' even when the column wasn't
-    // fetched at all, so checking `=== undefined` doesn't work).
-    if (!part._isLightweight) return;
-    let cancelled = false;
+  const loadFullPart = useCallback(() => {
+    if (!dbReady) return;
     setLoadingFull(true);
-    db.fetchParts({ search: part.code }, 0, 5).then(({ data: rows }) => {
-      if (cancelled) return;
+    return db.fetchParts({ search: part.code }, 0, 5).then(({ data: rows }) => {
       const match = (rows || []).find(r => r.code === part.code);
       if (match) {
         const full = mapPart(match);
@@ -3016,9 +3246,33 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         setForm(full);
         setImgUrl(full.imageUrl || null);
       }
-    }).finally(() => { if (!cancelled) setLoadingFull(false); });
+    }).finally(() => setLoadingFull(false));
+  }, [part.code, dbReady]);
+
+  const loadMovements = useCallback(() => {
+    if (!dbReady) return;
+    setMovLoading(true);
+    db.fetchStockMovements({ partCode: part.code }, 0, 5)
+      .then(({ data }) => setMovements((data || []).map(mapMovement)))
+      .finally(() => setMovLoading(false));
+  }, [part.code, dbReady]);
+
+  // The Hierarchy Tree passes a lightweight part object (code, short_desc,
+  // cat, mfr, model, disc, fg, image_url, status only — no part_no, qty,
+  // location, etc). It's explicitly flagged with _isLightweight so we know
+  // to fetch the full record here, regardless of default values mapPart()
+  // fills in (e.g. partNo defaults to '' even when the column wasn't
+  // fetched at all, so checking `=== undefined` doesn't work).
+  useEffect(() => {
+    if (!dbReady) return; // local mode already has the full object
+    if (!part._isLightweight) return;
+    let cancelled = false;
+    loadFullPart().then(() => { if (cancelled) return; });
     return () => { cancelled = true; };
   }, [part.code, dbReady]);
+
+  // Recent stock movements for this part (live DB only).
+  useEffect(() => { loadMovements(); }, [loadMovements]);
 
   const partView = fullPart; // use this everywhere below instead of raw `part`
 
@@ -3085,6 +3339,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
             {mode==='view' && <>
+              <Btn small variant="success" onClick={()=>setShowMoveModal(true)}>📒 Record Movement</Btn>
               <Btn small onClick={()=>setMode('edit')}>✏️ Edit</Btn>
               <Btn small variant="danger" onClick={()=>setMode('confirm-delete')}>🗑 Delete</Btn>
             </>}
@@ -3158,6 +3413,41 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 </div>
               ))}
             </div>
+            {/* Recent stock movements */}
+            {dbReady && (
+              <div style={{ marginBottom:20 }}>
+                <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Recent Stock Movements</div>
+                {movLoading ? (
+                  <div style={{ fontSize:12,color:T.muted,padding:"10px 0" }}>Loading…</div>
+                ) : movements.length === 0 ? (
+                  <div style={{ fontSize:12,color:T.muted,background:T.subtle,borderRadius:6,padding:"10px 12px" }}>No movements recorded yet.</div>
+                ) : (
+                  <div style={{ overflowX:"auto" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                      <thead>
+                        <tr style={{ background:T.header }}>
+                          {['Date','Type','Qty','Reference'].map(h=>(
+                            <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9, letterSpacing:0.8 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movements.map((m,i)=>(
+                          <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                            <td style={{ padding:"6px 10px", color:T.muted, whiteSpace:"nowrap" }}>{new Date(m.createdAt).toLocaleDateString()}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text }}>{m.transactionType}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text }}>
+                              {(m.transactionType==='RECEIPT'||m.transactionType==='RETURN')?'+':(m.transactionType==='TRANSFER'?'±':'−')}{m.quantity}
+                            </td>
+                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.reference||'—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{ display:"flex",justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={onClose}>Close</Btn>
             </div>
@@ -3176,7 +3466,12 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 <div><label style={sLabel}>Long Description</label><Input value={form.longDesc||""} onChange={e=>setForm(f=>({...f,longDesc:e.target.value}))}/></div>
                 <div><label style={sLabel}>Part Number</label><Input value={form.partNo||""} onChange={e=>setForm(f=>({...f,partNo:e.target.value}))} placeholder="e.g. AN-BRG-001"/></div>
                 <div><label style={sLabel}>OEM Part Number</label><Input value={form.oemPart||""} onChange={e=>setForm(f=>({...f,oemPart:e.target.value}))} placeholder="e.g. 1234567"/></div>
-                <div><label style={sLabel}>Quantity</label><Input type="number" value={form.qty||0} onChange={e=>setForm(f=>({...f,qty:e.target.value}))}/></div>
+                <div>
+                  <label style={sLabel}>Quantity (computed)</label>
+                  <div style={{ padding:"8px 12px", borderRadius:6, border:`1px solid ${T.border}`, background:T.subtle, fontSize:14, color:T.muted }}>
+                    {form.qty??0} {form.unit||"EA"} — use 📒 Record Movement to adjust
+                  </div>
+                </div>
                 <div><label style={sLabel}>Unit</label>
                   <Select value={form.unit||"EA"} onChange={e=>setForm(f=>({...f,unit:e.target.value}))}>
                     {["EA","SET","KIT","L","KG","M","BOX","ROLL"].map(u=><option key={u}>{u}</option>)}
@@ -3210,6 +3505,14 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           </div>
         )}
       </div>
+      {showMoveModal && (
+        <StockMovementModal
+          partCode={partView.code}
+          ops={ops}
+          onClose={()=>setShowMoveModal(false)}
+          onSaved={()=>{ flash('Stock movement recorded'); loadMovements(); loadFullPart(); }}
+        />
+      )}
     </div>
   );
 }
@@ -3743,6 +4046,7 @@ const NAV = [
   { id:"generator",     label:"Code Generator",      icon:"✨", group:"Tools",       adminOnly:false },
   { id:"tree",          label:"Hierarchy Tree",      icon:"🌳", group:"Tools",       adminOnly:false },
   { id:"master",        label:"Master Parts Table",  icon:"📊", group:"Inventory",   adminOnly:false },
+  { id:"ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   adminOnly:false },
   { id:"admin",         label:"Administration",      icon:"🔑", group:"System",      adminOnly:true  },
   { id:"auditlog",      label:"Audit Log",           icon:"📜", group:"System",      adminOnly:true  },
   { id:"users",         label:"User Management",     icon:"👥", group:"System",      adminOnly:true  },
@@ -3799,6 +4103,7 @@ function AppShell() {
     generator:     <CodeGeneratorPage data={data} />,
     tree:          <HierarchyTreePage data={data} />,
     master:        <MasterTablePage data={data} />,
+    ledger:        <StockLedgerPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
