@@ -780,6 +780,117 @@ export async function deletePushSubscriptionByEndpoint(endpoint) {
 // ─── TRASH / RECYCLE BIN ──────────────────────────────────────
 // Every soft-deletable table, with the columns needed to show a
 // meaningful row in the Trash page and the label used in the UI.
+// ─── ASSET REGISTRY ─────────────────────────────────────────────
+export const ASSET_STATUSES = ['active', 'maintenance', 'down', 'standby', 'decommissioned'];
+
+function applyAssetFilters(q, filters = {}) {
+  if (filters.cat)      q = q.eq('cat', filters.cat);
+  if (filters.mfr)      q = q.eq('mfr', filters.mfr);
+  if (filters.model)    q = q.eq('model', filters.model);
+  if (filters.location) q = q.eq('location', filters.location);
+  if (filters.status)   q = q.eq('status', filters.status);
+  if (filters.search) {
+    q = q.or(`asset_tag.ilike.%${filters.search}%,serial_number.ilike.%${filters.search}%,model_label.ilike.%${filters.search}%`);
+  }
+  return q;
+}
+
+export async function fetchAssetsCount(filters = {}) {
+  let q = supabase.from('v_assets_overview').select('id', { count: 'exact', head: true });
+  q = applyAssetFilters(q, filters);
+  const { count, error } = await q;
+  return { count: count ?? 0, error };
+}
+
+export async function fetchAssets(filters = {}, page = 0, pageSize = 50) {
+  let q = supabase
+    .from('v_assets_overview')
+    .select('*')
+    .order('asset_tag', { ascending: true })
+    .range(page * pageSize, (page + 1) * pageSize - 1);
+  q = applyAssetFilters(q, filters);
+  return q;
+}
+
+export async function fetchAllAssets(filters = {}, maxRows = 20000) {
+  const batchSize = 1000;
+  let all = [];
+  for (let offset = 0; offset < maxRows; offset += batchSize) {
+    let q = supabase.from('v_assets_overview').select('*')
+      .order('asset_tag', { ascending: true })
+      .range(offset, offset + batchSize - 1);
+    q = applyAssetFilters(q, filters);
+    const { data, error } = await q;
+    if (error) return { data: all, error };
+    all = all.concat(data || []);
+    if (!data || data.length < batchSize) break;
+  }
+  return { data: all, error: null };
+}
+
+export async function fetchAssetKpis() {
+  return supabase.from('v_asset_kpis').select('*').maybeSingle();
+}
+
+// Reserves the next asset_tag for a cat+mfr+model combination via the
+// advisory-lock-protected SQL function (migration 020), then inserts.
+// Not perfectly atomic across the two round trips (see that function's
+// own comment), but matches the same soft-race tolerance the existing
+// part-code generator already accepts at this app's scale.
+export async function insertAsset(row) {
+  const userId = await uid();
+  const { data: tag, error: tagErr } = await supabase.rpc('next_asset_tag', {
+    p_cat: row.cat, p_mfr: row.mfr, p_model: row.model,
+  });
+  if (tagErr) return { data: null, error: tagErr };
+  const dbRow = {
+    asset_tag: tag, serial_number: row.serialNumber || null,
+    cat: row.cat, mfr: row.mfr, model: row.model,
+    site: row.site || null, location: row.location || null, sub_location: row.subLocation || null,
+    status: row.status || 'active',
+    commissioned_at: row.commissionedAt || null, warranty_until: row.warrantyUntil || null,
+    pm_interval_hours: row.pmIntervalHours || null, last_pm_hours: row.lastPmHours || null,
+    last_pm_date: row.lastPmDate || null, pm_interval_days: row.pmIntervalDays || null,
+    photo_url: row.photoUrl || null, notes: row.notes || null,
+    created_by: userId, updated_by: userId,
+  };
+  const { data, error } = await supabase.from('assets').insert(dbRow).select('*').maybeSingle();
+  if (!error) await audit('CREATE', 'assets', data.id, null, data);
+  return { data, error };
+}
+
+export async function updateAsset(id, row) {
+  const userId = await uid();
+  const { data: oldData } = await supabase.from('assets').select('*').eq('id', id).maybeSingle();
+  const dbRow = {
+    serial_number: row.serialNumber || null,
+    site: row.site || null, location: row.location || null, sub_location: row.subLocation || null,
+    status: row.status,
+    commissioned_at: row.commissionedAt || null, warranty_until: row.warrantyUntil || null,
+    pm_interval_hours: row.pmIntervalHours || null, last_pm_hours: row.lastPmHours || null,
+    last_pm_date: row.lastPmDate || null, pm_interval_days: row.pmIntervalDays || null,
+    photo_url: row.photoUrl || null, notes: row.notes || null,
+    updated_by: userId,
+  };
+  const { data, error } = await supabase.from('assets').update(dbRow).eq('id', id).select('*').maybeSingle();
+  if (!error) await audit('UPDATE', 'assets', id, oldData, data);
+  return { data, error };
+}
+
+export async function softDeleteAsset(id) {
+  const userId = await uid();
+  const { data, error } = await supabase
+    .from('assets').update({ deleted_at: new Date().toISOString(), updated_by: userId })
+    .eq('id', id).select().maybeSingle();
+  if (!error) await audit('DELETE', 'assets', id, data, null);
+  return { data, error };
+}
+
+// idCol defaults to 'code' when omitted — every table below except
+// `assets` uses a text `code` natural key. `assets` has no `code`
+// column (its natural key is `asset_tag`, PK is a uuid `id`), so it
+// declares idCol explicitly; restore/hardDelete/emptyTrash all read
+// this per-table override via keyColFor() instead of assuming 'code'.
 export const TRASH_TABLES = [
   { table: 'categories',         label: 'Main Categories',   selectCols: 'code,label,icon,color,bg,deleted_at' },
   { table: 'manufacturers',      label: 'Manufacturers',     selectCols: 'code,label,cat_codes,deleted_at' },
@@ -788,7 +899,12 @@ export const TRASH_TABLES = [
   { table: 'engine_systems',     label: 'Engine Systems',    selectCols: 'code,label,color,bg,deleted_at' },
   { table: 'functional_groups',  label: 'Functional Groups', selectCols: 'code,label,disc,deleted_at' },
   { table: 'spare_parts',        label: 'Spare Parts',       selectCols: 'code,short_desc,cat,mfr,model,disc,fg,deleted_at' },
+  { table: 'assets',             label: 'Assets',            selectCols: 'id,asset_tag,serial_number,model,status,deleted_at', idCol: 'id' },
 ];
+
+function keyColFor(table) {
+  return TRASH_TABLES.find(t => t.table === table)?.idCol || 'code';
+}
 
 // Fetch every soft-deleted row from a single table (admin only — enforced
 // by the trash_select RLS policy from migration 009).
@@ -816,30 +932,30 @@ export async function fetchAllTrash(limitPerTable = 100) {
 }
 
 // Restore a soft-deleted row (set deleted_at back to NULL).
-export async function restoreRecord(table, code) {
+export async function restoreRecord(table, key) {
   const userId = await uid();
   const { data, error } = await supabase
     .from(table)
     .update({ deleted_at: null, updated_by: userId })
-    .eq('code', code)
+    .eq(keyColFor(table), key)
     .select()
     .maybeSingle();
-  if (!error && data) await audit('RESTORE', table, code, null, data);
+  if (!error && data) await audit('RESTORE', table, key, null, data);
   return { data, error };
 }
 
 // Permanently delete a soft-deleted row. Requires the row to already
 // have deleted_at set — enforced by the hard_delete RLS policy from
 // migration 009, so this can never accidentally purge a live record.
-export async function hardDeleteRecord(table, code) {
+export async function hardDeleteRecord(table, key) {
   const { data, error } = await supabase
     .from(table)
     .delete()
-    .eq('code', code)
+    .eq(keyColFor(table), key)
     .not('deleted_at', 'is', null)
     .select()
     .maybeSingle();
-  if (!error) await audit('PURGE', table, code, data, null);
+  if (!error) await audit('PURGE', table, key, data, null);
   return { data, error };
 }
 
@@ -853,7 +969,7 @@ export async function emptyTrash(table = null) {
       .from(t)
       .delete()
       .not('deleted_at', 'is', null)
-      .select('code');
+      .select(keyColFor(t));
     if (error) errors.push({ table: t, error });
     else totalDeleted += (data?.length ?? 0);
   }
