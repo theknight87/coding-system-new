@@ -1850,20 +1850,9 @@ function Dashboard({ data }) {
   const [catCounts,    setCatCounts]    = useState(categories.map(c=>({...c,count:0})));
   const [recentParts,  setRecentParts]  = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
-  const [confidencePct, setConfidencePct] = useState(null); // null while loading
   const [partsInStock,  setPartsInStock]  = useState(null); // null while loading
   const [movementsThisMonth, setMovementsThisMonth] = useState(null);
   const alerts = useAlerts();
-
-  useEffect(() => {
-    if (!dbReady) { setConfidencePct(null); return; }
-    db.fetchStockConfidence().then(({ data: rows }) => {
-      const overall = { none:0, estimated:0, counted:0 };
-      (rows||[]).filter(r=>r.cat===null).forEach(r => { overall[r.stock_source] = r.part_count; });
-      const total = overall.none + overall.estimated + overall.counted;
-      setConfidencePct(total ? Math.round((overall.counted/total)*100) : 0);
-    });
-  }, [dbReady]);
 
   useEffect(() => {
     if (!dbReady) { setPartsInStock(null); setMovementsThisMonth(null); return; }
@@ -1912,9 +1901,6 @@ function Dashboard({ data }) {
         <StatCard label="Models" value={models.length} color="#7c3aed" icon="📐" />
         <StatCard label="Functional Groups" value={funcGroups.length} color="#be123c" icon="⚙️" />
         <StatCard label="Disciplines" value={disciplines.length} color="#0e7490" icon="🔬" />
-        <div onClick={()=>navigateTo && navigateTo('stockcount')} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Stock data confidence" value={confidencePct===null?"…":`${confidencePct}% counted`} color="#15803d" icon="🧮" />
-        </div>
         <div onClick={()=>navigateTo && navigateTo('master', { inStock: 'in' })} style={{ cursor: navigateTo?"pointer":"default" }}>
           <StatCard label="Parts in Stock" value={partsInStock===null?"…":partsInStock.toLocaleString()} color="#0891b2" icon="📥" />
         </div>
@@ -6864,7 +6850,6 @@ function AppShell() {
               ? <span style={{ fontSize:11,background:"#dcfce7",color:"#15803d",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟢 {t('liveDb')}</span>
               : <span style={{ fontSize:11,background:"#fef3c7",color:"#b45309",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟡 {t('local')}</span>
             }
-            <span style={{ background:T.header,color:"#38bdf8",fontFamily:"monospace",fontWeight:800,fontSize:12,padding:"4px 12px",borderRadius:5,letterSpacing:1.5 }}>AA-BB-CC-DD-EE-0001</span>
             <AlertBell navigateTo={data.navigateTo} />
             {profile && (
               <span style={{ background:roleBg[profile.role]??T.subtle,color:roleColor[profile.role]??T.muted,fontWeight:700,fontSize:11,padding:"4px 10px",borderRadius:12 }}>
