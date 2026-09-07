@@ -215,9 +215,14 @@ const mapDisc  = r => ({ code:r.code, label:r.label, desc:r.description??r.desc?
 const mapEng   = r => ({ code:r.code, label:r.label, color:r.color, bg:r.bg });
 const mapFg    = r => ({ code:r.code, label:r.label, disc:r.disc });
 const mapPart  = r => ({
-  code:r.code, shortDesc:r.short_desc, longDesc:r.long_desc,
+  id:r.id, code:r.code, shortDesc:r.short_desc, longDesc:r.long_desc,
   cat:r.cat, mfr:r.mfr, model:r.model, disc:r.disc, fg:r.fg,
-  partNo:r.part_no??'', oemPart:r.oem_part??'', qty:r.qty??0, unit:r.unit??'EA',
+  partNo:r.part_no??'', oemPart:r.oem_part??'',
+  // qtyPerAssembly = catalogue BOM figure (spare_parts.qty_per_assembly, ex-"qty").
+  // qtyOnHand = the real running balance from the stock_transactions ledger.
+  qtyPerAssembly:r.qty_per_assembly??0,
+  qtyOnHand:r.qty_on_hand??0, stockSource:r.stock_source??'none', lastCountedAt:r.last_counted_at??null,
+  unit:r.unit??'EA',
   loc:r.location??'', minStock:r.min_stock??0, maxStock:r.max_stock??0,
   remarks:r.remarks??'', status:r.status??'Active',
   imageUrl:r.image_url??null, datasheetUrl:r.datasheet_url??null,
@@ -477,10 +482,10 @@ function useDb(initData) {
         });
         return { error: null };
       }
-      // NOTE: qty is intentionally omitted — spare_parts.qty is a computed
-      // running balance maintained by the stock_movements ledger trigger.
-      // New parts start at 0; use ops.saveStockMovement (Receipt) to add
-      // initial stock, and never write qty from the app layer again.
+      // NOTE: no quantity field is ever sent here. spare_parts.qty_on_hand
+      // (migration 002_opening_balances.sql) is a computed running balance
+      // maintained exclusively by stock_transactions + post_physical_count().
+      // spare_parts.qty_per_assembly is read-only catalogue data in this app.
       const dbRow = {
         code:row.code, short_desc:row.shortDesc, long_desc:row.longDesc,
         cat:row.cat, mfr:row.mfr, model:row.model, disc:row.disc, fg:row.fg,
@@ -666,6 +671,9 @@ function StockLedgerPage({ data }) {
     <div>
       <Toast msg={toast}/>
       <PageHeader title="Stock Ledger" sub="Every Receipt, Issue, Consumption, Return and Transfer — the movements behind each part's quantity on hand"/>
+      <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:7, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#92400e", fontWeight:600 }}>
+        ⚠️ Superseded by the Stock Count page's transaction ledger — entries recorded here no longer affect any part's quantity on hand. Kept for historical reference only.
+      </div>
       <Card style={{ marginBottom:20 }}>
         <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center' }}>
           <Input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Filter by part code…" style={{ width:220 }}/>
@@ -1247,6 +1255,25 @@ const CodeTag = ({ code }) => (
   </span>
 );
 
+// Honesty-in-the-UI primitive: renders a stock quantity so an
+// estimated (seeded, never physically counted) figure can never be
+// mistaken for a real one. Used anywhere qty_on_hand is shown.
+const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false }) => {
+  const size = small ? 12 : 13;
+  if (stockSource === 'estimated') {
+    return (
+      <span title="Estimated starting balance — not yet physically counted" style={{ display:"inline-flex", alignItems:"center", gap:5, cursor:"help" }}>
+        <span style={{ color:T.muted, fontSize:size }}>~{qty}{unit?` ${unit}`:''}</span>
+        <span style={{ fontSize:9, fontWeight:800, color:T.warn, background:T.warnBg, padding:"1px 5px", borderRadius:4, textTransform:"uppercase", letterSpacing:0.4 }}>est.</span>
+      </span>
+    );
+  }
+  if (stockSource === 'counted') {
+    return <span style={{ fontSize:size, color:T.text }}>{qty}{unit?` ${unit}`:''}</span>;
+  }
+  return <span title="No stock data recorded yet" style={{ fontSize:size, color:T.muted, cursor:"help" }}>— {unit}</span>;
+};
+
 const Card = ({ children, style, pad = 20 }) => (
   <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: pad, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", ...style }}>
     {children}
@@ -1466,12 +1493,23 @@ function CrudPage({ title, sub, items, setItems, fields, renderRow, emptyMsg, le
 // ═══════════════════════════════════════════════════════════════
 
 function Dashboard({ data }) {
-  const { categories, manufacturers, models, disciplines, funcGroups, dbReady } = data;
+  const { categories, manufacturers, models, disciplines, funcGroups, dbReady, navigateTo } = data;
 
   const [totalParts,   setTotalParts]   = useState(0);
   const [catCounts,    setCatCounts]    = useState(categories.map(c=>({...c,count:0})));
   const [recentParts,  setRecentParts]  = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [confidencePct, setConfidencePct] = useState(null); // null while loading
+
+  useEffect(() => {
+    if (!dbReady) { setConfidencePct(null); return; }
+    db.fetchStockConfidence().then(({ data: rows }) => {
+      const overall = { none:0, estimated:0, counted:0 };
+      (rows||[]).filter(r=>r.cat===null).forEach(r => { overall[r.stock_source] = r.part_count; });
+      const total = overall.none + overall.estimated + overall.counted;
+      setConfidencePct(total ? Math.round((overall.counted/total)*100) : 0);
+    });
+  }, [dbReady]);
 
   useEffect(() => {
     if (!dbReady) {
@@ -1508,6 +1546,9 @@ function Dashboard({ data }) {
         <StatCard label="Models" value={models.length} color="#7c3aed" icon="📐" />
         <StatCard label="Functional Groups" value={funcGroups.length} color="#be123c" icon="⚙️" />
         <StatCard label="Disciplines" value={disciplines.length} color="#0e7490" icon="🔬" />
+        <div onClick={()=>navigateTo && navigateTo('stockcount')} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="Stock data confidence" value={confidencePct===null?"…":`${confidencePct}% counted`} color="#15803d" icon="🧮" />
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
@@ -2886,7 +2927,6 @@ function CodeGeneratorPage({ data }) {
   const [manualSeq, setManualSeq] = useState("");
   const [partNo,    setPartNo]    = useState("");
   const [oemPart,   setOemPart]   = useState("");
-  const [qty,       setQty]       = useState(0);
   const [unit,      setUnit]      = useState("EA");
   const [loc,       setLoc]       = useState("");
   const [remarks,   setRemarks]   = useState("");
@@ -2973,18 +3013,11 @@ function CodeGeneratorPage({ data }) {
     };
     setSaving(true);
     const { error } = await ops.savePart(newPart, null);
-    if (error) { setSaving(false); flash(`Error: ${error.message}`,"err"); return; }
-    // Quantity on hand is a computed ledger balance, not a typed field —
-    // any starting quantity entered here is recorded as an initial Receipt.
-    const initialQty = Number(qty) || 0;
-    if (initialQty > 0) {
-      const { error: moveErr } = await ops.saveStockMovement({
-        partCode: generatedCode, transactionType: 'RECEIPT', quantity: initialQty,
-        reference: 'Initial stock', notes: 'Recorded on part creation',
-      });
-      if (moveErr) flash(`Part saved, but initial stock movement failed: ${moveErr.message}`, "err");
-    }
     setSaving(false);
+    if (error) { flash(`Error: ${error.message}`,"err"); return; }
+    // Stock on hand starts unset (stock_source='none') — it's seeded by
+    // the opening-balance estimator or confirmed on the Stock Count page,
+    // never typed in here.
     setSaved(true);
     flash(`✅ Code ${generatedCode} saved to Master Table`);
   };
@@ -2992,7 +3025,7 @@ function CodeGeneratorPage({ data }) {
   const resetForm = () => {
     setStep({cat:"",mfr:"",model:"",disc:"",fg:""});
     setSeqMode("auto"); setManualSeq(""); setPartNo(""); setOemPart("");
-    setQty(0); setUnit("EA"); setLoc(""); setRemarks(""); setImageUrl(null); setSaved(false);
+    setUnit("EA"); setLoc(""); setRemarks(""); setImageUrl(null); setSaved(false);
   };
 
   const sStep  = { padding:"10px 16px", borderRadius:6, background:T.subtle, border:`1px solid ${T.border}`, marginBottom:12 };
@@ -3091,7 +3124,6 @@ function CodeGeneratorPage({ data }) {
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
                 <div><label style={sLabel}>Part No.</label><Input value={partNo} onChange={e=>setPartNo(e.target.value)} placeholder="e.g. AN-BRG-001"/></div>
                 <div><label style={sLabel}>OEM Part No.</label><Input value={oemPart} onChange={e=>setOemPart(e.target.value)} placeholder="e.g. 1234567"/></div>
-                <div><label style={sLabel}>Initial Qty (Receipt)</label><Input type="number" value={qty} onChange={e=>setQty(e.target.value)} placeholder="0"/></div>
                 <div>
                   <label style={sLabel}>Unit</label>
                   <Select value={unit} onChange={e=>setUnit(e.target.value)}>
@@ -3299,7 +3331,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
     const dbRow = {
       short_desc:form.shortDesc, long_desc:form.longDesc,
       part_no:form.partNo||'', oem_part:form.oemPart||'',
-      qty:Number(form.qty)||0, unit:form.unit||'EA',
+      unit:form.unit||'EA',
       location:form.loc||'', min_stock:Number(form.minStock)||0,
       max_stock:Number(form.maxStock)||0, remarks:form.remarks||'',
       status:form.status||'Active', image_url:imgUrl||null,
@@ -3339,7 +3371,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
             {mode==='view' && <>
-              <Btn small variant="success" onClick={()=>setShowMoveModal(true)}>📒 Record Movement</Btn>
+              <Btn small variant="ghost" onClick={()=>setShowMoveModal(true)} style={{ opacity:0.7 }} title="Legacy ledger — no longer affects Quantity on Hand. Use the Stock Count page instead.">📒 Record Movement (legacy)</Btn>
               <Btn small onClick={()=>setMode('edit')}>✏️ Edit</Btn>
               <Btn small variant="danger" onClick={()=>setMode('confirm-delete')}>🗑 Delete</Btn>
             </>}
@@ -3389,6 +3421,21 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 </div>
               ))}
             </div>
+            {/* Stock on hand — rendered separately so an estimated figure
+                can never be mistaken for a plain string value */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8 }}>
+              <div style={{ background:T.subtle,borderRadius:6,padding:"9px 12px" }}>
+                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>Quantity on Hand</div>
+                <StockQtyDisplay qty={partView.qtyOnHand} unit={partView.unit} stockSource={partView.stockSource} />
+                {partView.stockSource==='counted' && partView.lastCountedAt && (
+                  <div style={{ fontSize:10, color:T.muted, marginTop:3 }}>Last counted {new Date(partView.lastCountedAt).toLocaleDateString()}</div>
+                )}
+              </div>
+              <div style={{ background:T.subtle,borderRadius:6,padding:"9px 12px" }}>
+                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>Qty per Assembly (catalogue)</div>
+                <div style={{ fontSize:13,fontWeight:600,color:T.text }}>{partView.qtyPerAssembly??0} {partView.unit||"EA"}</div>
+              </div>
+            </div>
             {/* Details grid */}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20 }}>
               {[
@@ -3396,7 +3443,6 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 {label:"Long Description",  val:partView.longDesc||"—"},
                 {label:"Part Number",       val:partView.partNo||"—"},
                 {label:"OEM Part Number",   val:partView.oemPart||"—"},
-                {label:"Quantity",          val:`${partView.qty??0} ${partView.unit||"EA"}`},
                 {label:"Location",          val:partView.loc||"—"},
                 {label:"Min Stock",         val:partView.minStock??0},
                 {label:"Max Stock",         val:partView.maxStock??0},
@@ -3467,9 +3513,10 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 <div><label style={sLabel}>Part Number</label><Input value={form.partNo||""} onChange={e=>setForm(f=>({...f,partNo:e.target.value}))} placeholder="e.g. AN-BRG-001"/></div>
                 <div><label style={sLabel}>OEM Part Number</label><Input value={form.oemPart||""} onChange={e=>setForm(f=>({...f,oemPart:e.target.value}))} placeholder="e.g. 1234567"/></div>
                 <div>
-                  <label style={sLabel}>Quantity (computed)</label>
-                  <div style={{ padding:"8px 12px", borderRadius:6, border:`1px solid ${T.border}`, background:T.subtle, fontSize:14, color:T.muted }}>
-                    {form.qty??0} {form.unit||"EA"} — use 📒 Record Movement to adjust
+                  <label style={sLabel}>Quantity on Hand</label>
+                  <div style={{ padding:"8px 12px", borderRadius:6, border:`1px solid ${T.border}`, background:T.subtle, fontSize:14 }}>
+                    <StockQtyDisplay qty={form.qtyOnHand} unit={form.unit} stockSource={form.stockSource} />
+                    <span style={{ color:T.muted, marginLeft:8 }}>— use the Stock Count page to confirm or correct</span>
                   </div>
                 </div>
                 <div><label style={sLabel}>Unit</label>
@@ -3918,7 +3965,7 @@ function MasterTablePage({ data }) {
                         <td style={{ padding:"7px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
                         <td style={{ padding:"7px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
                         <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.partNo||"—"}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}>{r.qty}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
                         <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.loc||"—"}</td>
                         <td style={{ padding:"7px 10px" }}>
                           <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
@@ -4032,6 +4079,374 @@ function AdminPage({ data }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// STOCK COUNT PAGE — turns seeded estimates into real, physically
+// counted figures via post_physical_count(). Admin/storekeeper
+// facing; this app has only admin/department_user roles, so
+// "storekeeper" maps to department_user (both already have write
+// access to spare_parts).
+// ═══════════════════════════════════════════════════════════════
+
+// Minimal CSV parser — handles quoted fields with embedded commas,
+// good enough for a 3-column part_code,counted_quantity,location file.
+function parseCsv(text) {
+  const rows = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cells = [];
+    let cur = "", inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === ',' && !inQuotes) { cells.push(cur.trim()); cur = ""; continue; }
+      cur += ch;
+    }
+    cells.push(cur.trim());
+    rows.push(cells);
+  }
+  if (rows.length && /^part[_ ]?code$/i.test(rows[0][0] || "")) rows.shift(); // drop header row
+  return rows
+    .filter(r => r[0])
+    .map(r => ({ code: r[0].toUpperCase(), counted: r[1], location: r[2] || "" }));
+}
+
+function StockCountPage({ data }) {
+  const { categories, manufacturers, models, funcGroups, dbReady } = data;
+  const PAGE_SIZE = 50;
+
+  const [confidence,   setConfidence]   = useState(null); // rows from v_stock_confidence
+  const [rows,         setRows]         = useState([]);
+  const [total,        setTotal]        = useState(0);
+  const [page,         setPage]         = useState(0);
+  const [loading,      setLoading]      = useState(true);
+  const [toast,        setToast]        = useState(null);
+  const [counted,      setCounted]      = useState({}); // { [partId]: inputValue }
+  const [savingId,     setSavingId]     = useState(null);
+
+  const [fCat, setFCat] = useState(""); const [fMfr, setFMfr] = useState("");
+  const [fModel, setFModel] = useState(""); const [fFg, setFFg] = useState("");
+  const [fLoc, setFLoc] = useState(""); const [fSource, setFSource] = useState("estimated");
+
+  const [showImport, setShowImport] = useState(false);
+
+  const flash = (text, type="ok") => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const filters = useMemo(() => ({
+    cat: fCat||undefined, mfr: fMfr||undefined, model: fModel||undefined,
+    fg: fFg||undefined, location: fLoc||undefined, stockSource: fSource||undefined,
+  }), [fCat, fMfr, fModel, fFg, fLoc, fSource]);
+
+  useEffect(() => { setPage(0); }, [fCat, fMfr, fModel, fFg, fLoc, fSource]);
+
+  const loadConfidence = () => {
+    if (!dbReady) return;
+    db.fetchStockConfidence().then(({ data: rows }) => setConfidence(rows || []));
+  };
+
+  const load = useCallback(() => {
+    if (!dbReady) { setLoading(false); setRows([]); setTotal(0); return; }
+    setLoading(true);
+    Promise.all([
+      db.fetchPartsCount(filters),
+      db.fetchParts(filters, page, PAGE_SIZE),
+    ]).then(([countRes, dataRes]) => {
+      setTotal(countRes.count || 0);
+      setRows((dataRes.data || []).map(mapPart));
+    }).finally(() => setLoading(false));
+  }, [filters.cat, filters.mfr, filters.model, filters.fg, filters.location, filters.stockSource, page, dbReady]);
+
+  useEffect(() => { loadConfidence(); }, [dbReady]);
+  useEffect(() => { load(); }, [load]);
+
+  // Overall (cat IS NULL) rollup rows from v_stock_confidence.
+  const overall = useMemo(() => {
+    const o = { none: 0, estimated: 0, counted: 0 };
+    (confidence || []).filter(r => r.cat === null).forEach(r => { o[r.stock_source] = r.part_count; });
+    return o;
+  }, [confidence]);
+  const overallTotal = overall.none + overall.estimated + overall.counted;
+  const pct = overallTotal ? Math.round((overall.counted / overallTotal) * 100) : 0;
+
+  const handleConfirm = async (part, countedVal) => {
+    const n = Number(countedVal);
+    if (countedVal === "" || isNaN(n) || n < 0) return flash("Enter a valid non-negative quantity", "err");
+    setSavingId(part.id);
+    const { data: txn, error } = await db.postPhysicalCount(part.id, n, part.loc || null, null);
+    setSavingId(null);
+    if (error) return flash(`Error: ${error.message}`, "err");
+    const diff = n - part.qtyOnHand;
+    flash(diff === 0
+      ? `Confirmed ${part.code} as-is (${n})`
+      : `${part.code}: estimated ${part.qtyOnHand} → counted ${n}, adjustment ${diff>0?'+':''}${diff}`);
+    setCounted(c => { const c2 = { ...c }; delete c2[part.id]; return c2; });
+    load(); loadConfidence();
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const T_ = { padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' };
+
+  const printCountSheet = async () => {
+    if (!dbReady) return flash("Requires a live database connection", "err");
+    flash("Preparing count sheet…");
+    const { data: allRows, error } = await db.fetchParts(filters, 0, 5000);
+    if (error) return flash(`Error: ${error.message}`, "err");
+    const list = (allRows || []).map(mapPart);
+    const win = window.open("", "_blank");
+    if (!win) return flash("Pop-up blocked — allow pop-ups to print", "err");
+    win.document.write(`<!doctype html><html><head><title>Stock Count Sheet</title><style>
+      body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}
+      h1{font-size:16px;margin-bottom:4px;} p{color:#555;margin-top:0;margin-bottom:16px;}
+      table{width:100%;border-collapse:collapse;} th,td{border:1px solid #999;padding:6px 8px;text-align:left;}
+      th{background:#eee;} .blank{width:110px;}
+    </style></head><body>
+      <h1>Stock Count Sheet</h1>
+      <p>Generated ${new Date().toLocaleString()} — ${list.length} part(s)</p>
+      <table><thead><tr><th>Code</th><th>Description</th><th>Location</th><th class="blank">Counted Qty</th></tr></thead><tbody>
+      ${list.map(p => `<tr><td>${p.code}</td><td>${(p.shortDesc||'').replace(/</g,'&lt;')}</td><td>${p.loc||''}</td><td></td></tr>`).join('')}
+      </tbody></table>
+    </body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  return (
+    <div>
+      <Toast msg={toast}/>
+      <PageHeader title="Stock Count" sub="Confirm or correct estimated opening balances, one shelf or one model at a time"/>
+
+      {/* Progress header */}
+      <Card style={{ marginBottom:20 }}>
+        {!dbReady ? (
+          <div style={{ color:T.muted, fontSize:13 }}>🟡 Requires a live database connection.</div>
+        ) : confidence === null ? (
+          <div style={{ color:T.muted, fontSize:13 }}>Loading…</div>
+        ) : (
+          <>
+            <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:8 }}>
+              {overall.counted.toLocaleString()} of {overallTotal.toLocaleString()} parts physically counted · {overall.estimated.toLocaleString()} still estimated
+              {overall.none > 0 && ` · ${overall.none.toLocaleString()} never set`}
+            </div>
+            <div style={{ height:10, background:T.subtle, borderRadius:6, overflow:"hidden", border:`1px solid ${T.border}` }}>
+              <div style={{ height:"100%", width:`${pct}%`, background:T.success, transition:"width .3s" }}/>
+            </div>
+            <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>{pct}% counted</div>
+          </>
+        )}
+      </Card>
+
+      {/* Filters + actions */}
+      <Card style={{ marginBottom:20 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <Select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={{ width:"auto", minWidth:140 }}>
+            <option value="">All Categories</option>
+            {categories.map(c=><option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+          </Select>
+          <Select value={fMfr} onChange={e=>setFMfr(e.target.value)} style={{ width:"auto", minWidth:140 }}>
+            <option value="">All Manufacturers</option>
+            {manufacturers.filter(m=>!fCat||(m.catCodes||[]).includes(fCat)).map(m=><option key={m.code} value={m.code}>{m.code} — {m.label}</option>)}
+          </Select>
+          <Select value={fModel} onChange={e=>setFModel(e.target.value)} style={{ width:"auto", minWidth:120 }}>
+            <option value="">All Models</option>
+            {models.filter(m=>!fMfr||m.mfrCode===fMfr).map(m=><option key={m.code} value={m.code}>{m.code}</option>)}
+          </Select>
+          <Select value={fFg} onChange={e=>setFFg(e.target.value)} style={{ width:"auto", minWidth:140 }}>
+            <option value="">All Functional Groups</option>
+            {funcGroups.map(f=><option key={f.code} value={f.code}>{f.code} — {f.label}</option>)}
+          </Select>
+          <Input value={fLoc} onChange={e=>setFLoc(e.target.value)} placeholder="Location…" style={{ width:120 }}/>
+          <Select value={fSource} onChange={e=>setFSource(e.target.value)} style={{ width:"auto", minWidth:150 }}>
+            <option value="">All Stock Sources</option>
+            <option value="estimated">Still Estimated</option>
+            <option value="counted">Counted</option>
+            <option value="none">Never Set</option>
+          </Select>
+          <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+            <Btn small variant="secondary" onClick={printCountSheet}>🖨️ Print Count Sheet</Btn>
+            <Btn small onClick={()=>setShowImport(true)}>📥 Bulk CSV Import</Btn>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        {!dbReady ? (
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
+        ) : loading ? (
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
+        ) : (
+          <>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  {['Code','Description','Location','Current Qty','Counted Qty','Actions'].map(h=>(
+                    <th key={h} style={T_}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0
+                  ? <tr><td colSpan={6} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts match these filters.</td></tr>
+                  : rows.map((p,i) => (
+                    <tr key={p.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                      <td style={{ padding:"7px 10px" }}><CodeTag code={p.code}/></td>
+                      <td style={{ padding:"7px 10px" }}>{p.shortDesc}</td>
+                      <td style={{ padding:"7px 10px", color:T.muted, fontFamily:"monospace", fontSize:11 }}>{p.loc||"—"}</td>
+                      <td style={{ padding:"7px 10px" }}><StockQtyDisplay qty={p.qtyOnHand} unit={p.unit} stockSource={p.stockSource} small/></td>
+                      <td style={{ padding:"7px 10px" }}>
+                        <Input type="number" value={counted[p.id] ?? ""} onChange={e=>setCounted(c=>({...c,[p.id]:e.target.value}))} placeholder="qty" style={{ width:90 }}/>
+                      </td>
+                      <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
+                        <Btn small disabled={savingId===p.id} onClick={()=>handleConfirm(p, counted[p.id] ?? "")} style={{ marginRight:6 }}>
+                          {savingId===p.id ? "…" : "✓ Confirm"}
+                        </Btn>
+                        <Btn small variant="secondary" disabled={savingId===p.id} onClick={()=>handleConfirm(p, p.qtyOnHand)}>As-is</Btn>
+                      </td>
+                    </tr>
+                  ))
+                }
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:16, fontSize:13 }}>
+            <span style={{ color:T.muted }}>Page {page+1} of {totalPages} ({total} parts)</span>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn small variant="secondary" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>← Prev</Btn>
+              <Btn small variant="secondary" disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</Btn>
+            </div>
+          </div>
+          </>
+        )}
+      </Card>
+
+      {showImport && (
+        <BulkCountImportModal onClose={()=>setShowImport(false)} onDone={()=>{ load(); loadConfidence(); }} flash={flash}/>
+      )}
+    </div>
+  );
+}
+
+function BulkCountImportModal({ onClose, onDone, flash }) {
+  const [fileName, setFileName] = useState("");
+  const [parsed,   setParsed]   = useState([]);   // raw parsed rows
+  const [matched,  setMatched]  = useState([]);   // { code, counted, location, part }
+  const [unmatched,setUnmatched]= useState([]);   // codes not found
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [progress, setProgress] = useState(null);
+
+  const handleFile = async (file) => {
+    setFileName(file.name);
+    setLoadingPreview(true);
+    const text = await file.text();
+    const rows = parseCsv(text);
+    setParsed(rows);
+    const codes = [...new Set(rows.map(r=>r.code))];
+    const { data: parts, error } = await db.fetchPartsByCodes(codes);
+    setLoadingPreview(false);
+    if (error) { flash(`Error looking up parts: ${error.message}`, "err"); return; }
+    const byCode = {}; (parts||[]).forEach(p=>{ byCode[p.code] = p; });
+    const m = [], um = [];
+    rows.forEach(r => {
+      const p = byCode[r.code];
+      if (!p) { um.push(r.code); return; }
+      m.push({ ...r, part: p });
+    });
+    setMatched(m);
+    setUnmatched(um);
+  };
+
+  const totalAdjustment = matched.reduce((sum,r) => sum + (Number(r.counted) - (r.part.qty_on_hand ?? 0)), 0);
+
+  const handleCommit = async () => {
+    setCommitting(true);
+    let done = 0, failed = 0;
+    for (const r of matched) {
+      const n = Number(r.counted);
+      if (isNaN(n) || n < 0) { failed++; continue; }
+      const { error } = await db.postPhysicalCount(r.part.id, n, r.location || r.part.location || null, 'Bulk CSV import');
+      if (error) failed++; else done++;
+      setProgress({ done: done+failed, total: matched.length });
+    }
+    setCommitting(false);
+    flash(`Imported ${done} count(s)${failed?`, ${failed} failed`:''}`, failed ? "err" : "ok");
+    onDone();
+    onClose();
+  };
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  return (
+    <Modal title="Bulk CSV Import — Physical Counts" onClose={onClose}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
+        <div style={{ fontSize:12, color:T.muted }}>
+          Expects columns <code>part_code,counted_quantity,location</code> (header row optional; location optional).
+        </div>
+        <div>
+          <label style={sLabel}>CSV File</label>
+          <input type="file" accept=".csv,text/csv" onChange={e=>e.target.files[0] && handleFile(e.target.files[0])}/>
+          {fileName && <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{fileName} — {parsed.length} row(s) parsed</div>}
+        </div>
+
+        {loadingPreview && <div style={{ color:T.muted, fontSize:12 }}>Matching part codes…</div>}
+
+        {!loadingPreview && parsed.length > 0 && (
+          <>
+            <div style={{ display:"flex", gap:16, fontSize:12 }}>
+              <span style={{ color:T.success, fontWeight:700 }}>{matched.length} matched</span>
+              <span style={{ color:T.danger, fontWeight:700 }}>{unmatched.length} unmatched</span>
+              <span style={{ color:T.text, fontWeight:700 }}>Net adjustment: {totalAdjustment>0?'+':''}{totalAdjustment}</span>
+            </div>
+
+            {unmatched.length > 0 && (
+              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}>
+                Unmatched codes: {unmatched.join(', ')}
+              </div>
+            )}
+
+            {matched.length > 0 && (
+              <div style={{ overflowX:"auto", border:`1px solid ${T.border}`, borderRadius:6 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:T.header }}>
+                      {['Code','Current','Counted','Adjustment'].map(h=>(
+                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matched.map((r,i) => {
+                      const diff = Number(r.counted) - (r.part.qty_on_hand ?? 0);
+                      return (
+                        <tr key={r.code} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                          <td style={{ padding:"6px 10px", fontFamily:"monospace" }}>{r.code}</td>
+                          <td style={{ padding:"6px 10px" }}>{r.part.qty_on_hand ?? 0}</td>
+                          <td style={{ padding:"6px 10px" }}>{r.counted}</td>
+                          <td style={{ padding:"6px 10px", fontWeight:700, color:diff===0?T.muted:(diff>0?T.success:T.danger) }}>{diff>0?'+':''}{diff}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+
+        {progress && <div style={{ fontSize:12, color:T.muted }}>Importing… {progress.done} / {progress.total}</div>}
+
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>
+            {committing ? "Importing…" : `💾 Commit ${matched.length} Count(s)`}
+          </Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
 
@@ -4047,6 +4462,7 @@ const NAV = [
   { id:"tree",          label:"Hierarchy Tree",      icon:"🌳", group:"Tools",       adminOnly:false },
   { id:"master",        label:"Master Parts Table",  icon:"📊", group:"Inventory",   adminOnly:false },
   { id:"ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   adminOnly:false },
+  { id:"stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   adminOnly:false },
   { id:"admin",         label:"Administration",      icon:"🔑", group:"System",      adminOnly:true  },
   { id:"auditlog",      label:"Audit Log",           icon:"📜", group:"System",      adminOnly:true  },
   { id:"users",         label:"User Management",     icon:"👥", group:"System",      adminOnly:true  },
@@ -4075,6 +4491,7 @@ function AppShell() {
     ...state,
     dbReady,
     ops, // Supabase-aware save/delete functions for every entity
+    navigateTo: setPage, // lets a page (e.g. a Dashboard tile) switch the active sidebar page
     // Legacy compat setters — pages that still use setXxx() directly
     // will update local state only; pages that use ops.saveXxx() persist to DB
     setCategories:    (fn) => { /* no-op: use ops.saveCategory */ },
@@ -4104,6 +4521,7 @@ function AppShell() {
     tree:          <HierarchyTreePage data={data} />,
     master:        <MasterTablePage data={data} />,
     ledger:        <StockLedgerPage data={data} />,
+    stockcount:    <StockCountPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,

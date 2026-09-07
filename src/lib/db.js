@@ -275,12 +275,14 @@ export async function softDeleteFuncGroup(code) {
 // ─── SPARE PARTS ──────────────────────────────────────────────
 export async function fetchPartsCount(filters = {}) {
   let q = supabase.from('spare_parts').select('*', { count: 'exact', head: true }).is('deleted_at', null);
-  if (filters.cat)    q = q.eq('cat', filters.cat);
-  if (filters.disc)   q = q.eq('disc', filters.disc);
-  if (filters.status) q = q.eq('status', filters.status);
-  if (filters.mfr)    q = q.eq('mfr', filters.mfr);
-  if (filters.model)  q = q.eq('model', filters.model);
-  if (filters.fg)     q = q.eq('fg', filters.fg);
+  if (filters.cat)         q = q.eq('cat', filters.cat);
+  if (filters.disc)        q = q.eq('disc', filters.disc);
+  if (filters.status)      q = q.eq('status', filters.status);
+  if (filters.mfr)         q = q.eq('mfr', filters.mfr);
+  if (filters.model)       q = q.eq('model', filters.model);
+  if (filters.fg)          q = q.eq('fg', filters.fg);
+  if (filters.location)    q = q.eq('location', filters.location);
+  if (filters.stockSource) q = q.eq('stock_source', filters.stockSource);
   if (filters.search) {
     q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%`);
   }
@@ -291,19 +293,33 @@ export async function fetchPartsCount(filters = {}) {
 export async function fetchParts(filters = {}, page = 0, pageSize = 100) {
   let q = supabase
     .from('spare_parts')
-    .select('code,short_desc,long_desc,cat,mfr,model,disc,fg,part_no,oem_part,qty,unit,location,min_stock,max_stock,remarks,status,image_url,datasheet_url,created_at')
+    .select('id,code,short_desc,long_desc,cat,mfr,model,disc,fg,part_no,oem_part,qty_per_assembly,qty_on_hand,stock_source,last_counted_at,unit,location,min_stock,max_stock,remarks,status,image_url,datasheet_url,created_at')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .range(page * pageSize, (page + 1) * pageSize - 1);
-  if (filters.cat)    q = q.eq('cat', filters.cat);
-  if (filters.disc)   q = q.eq('disc', filters.disc);
-  if (filters.status) q = q.eq('status', filters.status);
-  if (filters.mfr)    q = q.eq('mfr', filters.mfr);
-  if (filters.model)  q = q.eq('model', filters.model);
+  if (filters.cat)         q = q.eq('cat', filters.cat);
+  if (filters.disc)        q = q.eq('disc', filters.disc);
+  if (filters.status)      q = q.eq('status', filters.status);
+  if (filters.mfr)         q = q.eq('mfr', filters.mfr);
+  if (filters.model)       q = q.eq('model', filters.model);
+  if (filters.fg)          q = q.eq('fg', filters.fg);
+  if (filters.location)    q = q.eq('location', filters.location);
+  if (filters.stockSource) q = q.eq('stock_source', filters.stockSource);
   if (filters.search) {
     q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%,oem_part.ilike.%${filters.search}%,location.ilike.%${filters.search}%`);
   }
   return q;
+}
+
+// Look up a batch of parts by their code — used by the Stock Count
+// page's CSV bulk-import preview to match uploaded rows in one query.
+export async function fetchPartsByCodes(codes) {
+  if (!codes || codes.length === 0) return { data: [], error: null };
+  return supabase
+    .from('spare_parts')
+    .select('id,code,short_desc,qty_on_hand,unit,location,stock_source')
+    .in('code', codes)
+    .is('deleted_at', null);
 }
 
 // Lightweight fetch for the Hierarchy Tree — only the columns needed to
@@ -381,10 +397,11 @@ export async function deletePartsByFilter(filters = {}) {
   return { data, error };
 }
 
-// ─── STOCK MOVEMENTS (LEDGER) ──────────────────────────────────
-// Append-only ledger. spare_parts.qty is a computed running balance
-// maintained entirely by the apply_stock_movement DB trigger — never
-// write to spare_parts.qty directly once this ledger is in use.
+// ─── STOCK MOVEMENTS (LEGACY LEDGER) ────────────────────────────
+// Superseded by stock_transactions / post_physical_count() (see
+// migrations 001_stock_transactions.sql and 002_opening_balances.sql).
+// Kept for historical reads only — its DB trigger no longer updates
+// any spare_parts column, so posting here no longer changes anything.
 export const STOCK_TRANSACTION_TYPES = ['RECEIPT', 'ISSUE', 'CONSUMPTION', 'RETURN', 'TRANSFER'];
 
 export async function fetchStockMovementsCount(filters = {}) {
@@ -421,6 +438,33 @@ export async function insertStockMovement(row) {
     })
     .select('*').maybeSingle();
   if (!error) await audit('CREATE', 'stock_movements', data.id, null, data);
+  return { data, error };
+}
+
+// ─── STOCK CONFIDENCE / PHYSICAL COUNTS ────────────────────────
+// Backed by migration 002_opening_balances.sql: spare_parts.qty_on_hand
+// is either 'estimated' (seeded from the catalogue, not counted) or
+// 'counted' (confirmed on the floor). post_physical_count() and
+// reset_estimated_balances() are SECURITY DEFINER RPCs that enforce
+// their own role checks server-side — see that migration for the
+// exact rules. Both RPCs' own INSERT/UPDATE on stock_transactions is
+// already audited by that table's own DB trigger, so no app-level
+// audit() call is needed here (unlike the plain CRUD functions above).
+export async function fetchStockConfidence() {
+  return supabase.from('v_stock_confidence').select('cat,stock_source,part_count');
+}
+
+export async function postPhysicalCount(partId, countedQty, location, notes) {
+  const { data, error } = await supabase.rpc('post_physical_count', {
+    p_part_id: partId, p_counted_qty: countedQty, p_location: location || null, p_notes: notes || null,
+  });
+  return { data, error };
+}
+
+export async function resetEstimatedBalances(categoryCode) {
+  const { data, error } = await supabase.rpc('reset_estimated_balances', {
+    p_category_code: categoryCode || null,
+  });
   return { data, error };
 }
 
