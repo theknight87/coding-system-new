@@ -664,6 +664,98 @@ export async function bulkSetReorderSettings(filters = {}, values = {}) {
   return supabase.rpc('bulk_set_reorder_settings', params);
 }
 
+// ─── STOCK ALERTS ───────────────────────────────────────────────
+// Reads from v_active_alerts / get_alert_counts() / get_unconfigured_count()
+// (migration 017) — built on top of the existing v_stock_status rather
+// than duplicating its severity logic. See that migration's header
+// comment for why.
+
+// One aggregate round trip for the Dashboard tiles + header bell.
+export async function fetchAlertCounts() {
+  return supabase.rpc('get_alert_counts');
+}
+
+export async function fetchUnconfiguredCount() {
+  return supabase.rpc('get_unconfigured_count');
+}
+
+function applyAlertFilters(q, filters = {}) {
+  if (filters.severity && filters.severity.length) q = q.in('stock_status', filters.severity);
+  if (filters.cat)    q = q.eq('cat', filters.cat);
+  if (filters.mfr)    q = q.eq('mfr', filters.mfr);
+  if (filters.disc)   q = q.eq('disc', filters.disc);
+  if (filters.hideAcknowledged) q = q.eq('is_acknowledged', false);
+  if (filters.search) {
+    q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%`);
+  }
+  return q;
+}
+
+export async function fetchActiveAlertsCount(filters = {}) {
+  let q = supabase.from('v_active_alerts').select('part_id', { count: 'exact', head: true });
+  q = applyAlertFilters(q, filters);
+  const { count, error } = await q;
+  return { count: count ?? 0, error };
+}
+
+export async function fetchActiveAlerts(filters = {}, page = 0, pageSize = 50) {
+  let q = supabase
+    .from('v_active_alerts')
+    .select('*')
+    .order('severity_rank', { ascending: true })
+    .order('shortage_qty', { ascending: false })
+    .range(page * pageSize, (page + 1) * pageSize - 1);
+  q = applyAlertFilters(q, filters);
+  return q;
+}
+
+// Batched fetch for CSV export — pulls the full filtered set in pages
+// of 1000 via .range(), same batching approach used by the Master
+// Table export, so the whole result set is never requested in one
+// unbounded query.
+export async function fetchAllActiveAlerts(filters = {}, maxRows = 20000) {
+  const batchSize = 1000;
+  let all = [];
+  for (let offset = 0; offset < maxRows; offset += batchSize) {
+    let q = supabase.from('v_active_alerts').select('*')
+      .order('severity_rank', { ascending: true })
+      .order('shortage_qty', { ascending: false })
+      .range(offset, offset + batchSize - 1);
+    q = applyAlertFilters(q, filters);
+    const { data, error } = await q;
+    if (error) return { data: all, error };
+    all = all.concat(data || []);
+    if (!data || data.length < batchSize) break;
+  }
+  return { data: all, error: null };
+}
+
+export async function acknowledgeAlert(partId, severity, note = null) {
+  const userId = await uid();
+  const { data, error } = await supabase
+    .from('alert_acknowledgements')
+    .upsert({
+      part_id: partId, severity, acknowledged_by: userId,
+      acknowledged_at: new Date().toISOString(), snooze_until: null, note,
+    }, { onConflict: 'part_id,severity' })
+    .select('*').maybeSingle();
+  if (!error) await audit('UPDATE', 'alert_acknowledgements', partId, null, { severity, action: 'acknowledge' });
+  return { data, error };
+}
+
+export async function snoozeAlert(partId, severity, snoozeUntil) {
+  const userId = await uid();
+  const { data, error } = await supabase
+    .from('alert_acknowledgements')
+    .upsert({
+      part_id: partId, severity, acknowledged_by: userId,
+      acknowledged_at: new Date().toISOString(), snooze_until: snoozeUntil,
+    }, { onConflict: 'part_id,severity' })
+    .select('*').maybeSingle();
+  if (!error) await audit('UPDATE', 'alert_acknowledgements', partId, null, { severity, action: 'snooze', snoozeUntil });
+  return { data, error };
+}
+
 // ─── TRASH / RECYCLE BIN ──────────────────────────────────────
 // Every soft-deletable table, with the columns needed to show a
 // meaningful row in the Trash page and the label used in the UI.

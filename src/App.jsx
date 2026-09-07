@@ -91,6 +91,7 @@ const TXN_NEEDS_TO   = ['receipt', 'return_to_store', 'transfer_in', 'transfer_o
 
 function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
   const { isAdmin, isDeptUser } = useAuth();
+  const alerts = useAlerts();
   const canPost = isAdmin || isDeptUser; // this app's two roles both have stock_transactions_insert rights
 
   const [selectedPart, setSelectedPart] = useState(part || null);
@@ -154,6 +155,7 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
     });
     setSaving(false);
     if (err) { setError(err.message); return; }
+    alerts.refreshAlerts();
     onSaved && onSaved({ txn: data, part: selectedPart, newBalance: resultQty });
     onClose();
   };
@@ -296,7 +298,7 @@ const TRANSLATIONS = {
     nav_disciplines: "Disciplines", nav_manufacturers: "Manufacturers", nav_models: "Equipment Models",
     nav_funcgroups: "Functional Groups", nav_generator: "Code Generator", nav_tree: "Hierarchy Tree",
     nav_master: "Master Parts Table", nav_ledger: "Stock Ledger", nav_stockcount: "Stock Count",
-    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_admin: "Administration",
+    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_admin: "Administration",
     nav_auditlog: "Audit Log", nav_users: "User Management", nav_trash: "Trash",
     group_Reference: "Reference", group_MasterData: "Master Data", group_Tools: "Tools",
     group_Inventory: "Inventory", group_System: "System",
@@ -310,7 +312,7 @@ const TRANSLATIONS = {
     nav_disciplines: "التخصصات", nav_manufacturers: "الشركات المصنعة", nav_models: "موديلات المعدات",
     nav_funcgroups: "المجموعات الوظيفية", nav_generator: "مولد الأكواد", nav_tree: "الشجرة الهرمية",
     nav_master: "جدول قطع الغيار الرئيسي", nav_ledger: "دفتر المخزون", nav_stockcount: "جرد المخزون",
-    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_admin: "الإدارة",
+    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_admin: "الإدارة",
     nav_auditlog: "سجل التدقيق", nav_users: "إدارة المستخدمين", nav_trash: "المهملات",
     group_Reference: "مرجع", group_MasterData: "البيانات الرئيسية", group_Tools: "أدوات",
     group_Inventory: "المخزون", group_System: "النظام",
@@ -401,6 +403,66 @@ function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTS CONTEXT
+//
+// Single shared source for alert counts, read by the Dashboard tiles,
+// the header bell, and the /alerts page — all three read the same
+// get_alert_counts() result instead of each running their own query.
+//
+// Scope note: the spec's "preferred addition" of a debounced Supabase
+// Realtime subscription on stock changes is not included here — this
+// codebase doesn't use Realtime anywhere else, and polling (60s) +
+// refresh-on-focus + an explicit refreshAlerts() call after every
+// stock-changing operation (Stock Count, Stock Movements, Reorder
+// Settings save) covers the same need without introducing a new
+// pattern. Can be added later if 60s is too slow in practice.
+// ═══════════════════════════════════════════════════════════════
+
+const AlertsContext = createContext(null);
+const useAlerts = () => useContext(AlertsContext);
+
+function AlertsProvider({ children, dbReady }) {
+  const [counts, setCounts] = useState({ out: 0, critical: 0, low: 0 });
+  const [unacknowledged, setUnacknowledged] = useState({ out: 0, critical: 0, low: 0 });
+  const [unconfigured, setUnconfigured] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const refreshAlerts = useCallback(() => {
+    if (!dbReady) { setLoading(false); return; }
+    Promise.all([db.fetchAlertCounts(), db.fetchUnconfiguredCount()]).then(([countsRes, unconfRes]) => {
+      const next = { out: 0, critical: 0, low: 0 };
+      const nextUnack = { out: 0, critical: 0, low: 0 };
+      (countsRes.data || []).forEach(r => {
+        if (r.severity in next) { next[r.severity] = r.total; nextUnack[r.severity] = r.unacknowledged; }
+      });
+      setCounts(next);
+      setUnacknowledged(nextUnack);
+      setUnconfigured(unconfRes.data ?? 0);
+    }).finally(() => setLoading(false));
+  }, [dbReady]);
+
+  useEffect(() => { refreshAlerts(); }, [refreshAlerts]);
+
+  useEffect(() => {
+    const id = setInterval(refreshAlerts, 60000);
+    return () => clearInterval(id);
+  }, [refreshAlerts]);
+
+  useEffect(() => {
+    const onFocus = () => refreshAlerts();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshAlerts]);
+
+  const value = useMemo(() => ({
+    counts, unacknowledged, unconfigured, loading, refreshAlerts,
+    badgeCount: unacknowledged.out + unacknowledged.critical,
+  }), [counts, unacknowledged, unconfigured, loading, refreshAlerts]);
+
+  return <AlertsContext.Provider value={value}>{children}</AlertsContext.Provider>;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1788,16 +1850,7 @@ function Dashboard({ data }) {
   const [confidencePct, setConfidencePct] = useState(null); // null while loading
   const [partsInStock,  setPartsInStock]  = useState(null); // null while loading
   const [movementsThisMonth, setMovementsThisMonth] = useState(null);
-  const [needsAttention, setNeedsAttention] = useState(null); // null while loading
-
-  useEffect(() => {
-    if (!dbReady) { setNeedsAttention(null); return; }
-    db.fetchStockStatusSummary().then(({ data: rows }) => {
-      const counts = { out: 0, critical: 0, low: 0 };
-      (rows || []).forEach(r => { if (r.stock_status in counts) counts[r.stock_status] = r.part_count; });
-      setNeedsAttention(counts.out + counts.critical + counts.low);
-    });
-  }, [dbReady]);
+  const alerts = useAlerts();
 
   useEffect(() => {
     if (!dbReady) { setConfidencePct(null); return; }
@@ -1865,8 +1918,21 @@ function Dashboard({ data }) {
         <div onClick={()=>navigateTo && navigateTo('movements')} style={{ cursor: navigateTo?"pointer":"default" }}>
           <StatCard label="Movements This Month" value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} color="#7c3aed" icon="🚚" />
         </div>
-        <div onClick={()=>navigateTo && navigateTo('reorder')} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Needs Attention" value={needsAttention===null?"…":needsAttention.toLocaleString()} color={needsAttention?T.danger:T.success} icon="⚠️" />
+      </div>
+
+      {/* Stock Alerts */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 24 }}>
+        <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['out'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="🔴 Out of Stock" value={alerts.loading?"…":alerts.counts.out.toLocaleString()} color="#991B1B" icon="🔴" />
+        </div>
+        <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['critical'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="🟠 Critical" value={alerts.loading?"…":alerts.counts.critical.toLocaleString()} color="#DC2626" icon="🟠" />
+        </div>
+        <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['low'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="🟡 Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color="#D97706" icon="🟡" />
+        </div>
+        <div onClick={()=>navigateTo && navigateTo('reorder', { filter:'unconfigured' })} style={{ cursor: navigateTo?"pointer":"default", opacity: alerts.unconfigured===0?0.6:1 }}>
+          <StatCard label="⚪ Not Configured" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} color={T.muted} icon="⚪" />
         </div>
       </div>
 
@@ -4642,6 +4708,7 @@ function parseCsvWithHeader(text) {
 
 function StockCountPage({ data }) {
   const { categories, manufacturers, models, funcGroups, dbReady } = data;
+  const alerts = useAlerts();
   const PAGE_SIZE = 50;
 
   const [confidence,   setConfidence]   = useState(null); // rows from v_stock_confidence
@@ -4709,7 +4776,7 @@ function StockCountPage({ data }) {
       ? `Confirmed ${part.code} as-is (${n})`
       : `${part.code}: estimated ${part.qtyOnHand} → counted ${n}, adjustment ${diff>0?'+':''}${diff}`);
     setCounted(c => { const c2 = { ...c }; delete c2[part.id]; return c2; });
-    load(); loadConfidence();
+    load(); loadConfidence(); alerts.refreshAlerts();
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -4850,7 +4917,7 @@ function StockCountPage({ data }) {
       </Card>
 
       {showImport && (
-        <BulkCountImportModal onClose={()=>setShowImport(false)} onDone={()=>{ load(); loadConfidence(); }} flash={flash}/>
+        <BulkCountImportModal onClose={()=>setShowImport(false)} onDone={()=>{ load(); loadConfidence(); alerts.refreshAlerts(); }} flash={flash}/>
       )}
     </div>
   );
@@ -5266,7 +5333,8 @@ const STOCK_STATUS_META = {
 };
 
 function ReorderSettingsPage({ data }) {
-  const { categories, manufacturers, models, funcGroups, dbReady } = data;
+  const { categories, manufacturers, models, funcGroups, dbReady, navFilter, clearNavFilter } = data;
+  const alerts = useAlerts();
   const { isAdmin, isDeptUser } = useAuth();
   const canEdit = isAdmin || isDeptUser;
   const PAGE_SIZE = 50;
@@ -5296,6 +5364,14 @@ function ReorderSettingsPage({ data }) {
     const t = setTimeout(()=>setSearch(searchInput.trim()), 400);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Consume a one-shot filter handed off by navigateTo() (e.g. the
+  // Dashboard's "Not Configured" tile).
+  useEffect(() => {
+    if (!navFilter) return;
+    if (navFilter.filter === 'unconfigured') setFStatus('unset');
+    clearNavFilter();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filters = useMemo(() => ({
     search: search||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
@@ -5354,7 +5430,7 @@ function ReorderSettingsPage({ data }) {
     setSaving(false);
     flash(`Saved ${ok} part(s)${failed ? `, ${failed} failed` : ''}`, failed ? 'err' : 'ok');
     setEdits({});
-    load(); loadUnsetCount();
+    load(); loadUnsetCount(); alerts.refreshAlerts();
   };
 
   const exportCsv = async () => {
@@ -5505,11 +5581,11 @@ function ReorderSettingsPage({ data }) {
         <BulkReorderModal
           filters={filters} matchCount={total}
           onClose={()=>setShowBulk(false)}
-          onApplied={(count)=>{ flash(`Updated ${count} part(s)`); load(); loadUnsetCount(); }}
+          onApplied={(count)=>{ flash(`Updated ${count} part(s)`); load(); loadUnsetCount(); alerts.refreshAlerts(); }}
         />
       )}
       {showImport && (
-        <ReorderImportModal onClose={()=>setShowImport(false)} onDone={()=>{ load(); loadUnsetCount(); }} flash={flash}/>
+        <ReorderImportModal onClose={()=>setShowImport(false)} onDone={()=>{ load(); loadUnsetCount(); alerts.refreshAlerts(); }} flash={flash}/>
       )}
     </div>
   );
@@ -5768,6 +5844,271 @@ function MasterImportModal({ onClose, onDone, flash }) {
   );
 }
 
+// ─── STOCK ALERTS PAGE ────────────────────────────────────────
+const ALERTS_PAGE_SIZE = 50;
+
+function StockAlertsPage({ data }) {
+  const { categories, manufacturers, disciplines, dbReady, navFilter, clearNavFilter, navigateTo } = data;
+  const alerts = useAlerts();
+
+  const [severity, setSeverity] = useState([]); // [] = all
+  const [fCat,  setFCat]  = useState('');
+  const [fMfr,  setFMfr]  = useState('');
+  const [fDisc, setFDisc] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [hideAck, setHideAck] = useState(true);
+
+  const [page,    setPage]    = useState(0);
+  const [total,   setTotal]   = useState(0);
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState({}); // { [part_id]: true }
+  const [snoozeTarget, setSnoozeTarget] = useState(null); // { part_id, severity, code }
+  const [toast, setToast] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  useEffect(() => {
+    if (!navFilter) return;
+    if (navFilter.severity) setSeverity(navFilter.severity);
+    clearNavFilter();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const t = setTimeout(()=>setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const filters = useMemo(() => ({
+    severity: severity.length ? severity : undefined,
+    cat: fCat||undefined, mfr: fMfr||undefined, disc: fDisc||undefined,
+    search: search||undefined, hideAcknowledged: hideAck,
+  }), [severity, fCat, fMfr, fDisc, search, hideAck]);
+
+  useEffect(() => { setPage(0); setSelected({}); }, [filters]);
+
+  const load = useCallback(() => {
+    if (!dbReady) { setLoading(false); setRows([]); setTotal(0); return; }
+    setLoading(true);
+    Promise.all([
+      db.fetchActiveAlertsCount(filters),
+      db.fetchActiveAlerts(filters, page, ALERTS_PAGE_SIZE),
+    ]).then(([countRes, dataRes]) => {
+      setTotal(countRes.count ?? 0);
+      setRows(dataRes.data ?? []);
+    }).finally(()=>setLoading(false));
+  }, [dbReady, filters, page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleSeverity = (s) => setSeverity(prev => prev.includes(s) ? prev.filter(x=>x!==s) : [...prev, s]);
+
+  const doAcknowledge = async (row) => {
+    const { error } = await db.acknowledgeAlert(row.part_id, row.stock_status);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`Acknowledged ${row.code}`);
+    alerts.refreshAlerts();
+    load();
+  };
+
+  const doBulkAcknowledge = async () => {
+    const targets = rows.filter(r => selected[r.part_id]);
+    let done = 0, failed = 0;
+    for (const r of targets) {
+      const { error } = await db.acknowledgeAlert(r.part_id, r.stock_status);
+      if (error) failed++; else done++;
+    }
+    flash(`Acknowledged ${done} alert(s)${failed?`, ${failed} failed`:''}`, failed?'err':'ok');
+    setSelected({});
+    alerts.refreshAlerts();
+    load();
+  };
+
+  const doSnooze = async (days) => {
+    if (!snoozeTarget) return;
+    const until = new Date(Date.now() + days*24*60*60*1000).toISOString();
+    const { error } = await db.snoozeAlert(snoozeTarget.part_id, snoozeTarget.severity, until);
+    setSnoozeTarget(null);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`Snoozed ${snoozeTarget.code} for ${days} day(s)`);
+    alerts.refreshAlerts();
+    load();
+  };
+
+  const csvEsc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+  const downloadCsv = (lines, filename) => {
+    const blob = new Blob(['﻿'+lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAlertsCsv = async () => {
+    if (!dbReady) return flash('Requires a live database connection', 'err');
+    setExporting(true);
+    const { data: allRows, error } = await db.fetchAllActiveAlerts(filters);
+    setExporting(false);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    const header = ['Severity','Code','Short Description','Category','Manufacturer','Qty on Hand','Reorder Point','Min Stock','Shortage','UoM','Location','Acknowledged'];
+    const lines = [header.map(csvEsc).join(',')];
+    allRows.forEach(r => lines.push([
+      r.stock_status, r.code, r.short_desc, r.cat, r.mfr, r.qty_on_hand, r.reorder_point, r.min_stock,
+      r.shortage_qty, r.unit, r.location, r.is_acknowledged ? 'Yes' : 'No',
+    ].map(csvEsc).join(',')));
+    downloadCsv(lines, `stock-alerts-${new Date().toISOString().slice(0,10)}.csv`);
+    flash(`Exported ${allRows.length} alert(s)`);
+  };
+
+  const exportReorderListCsv = async () => {
+    if (!dbReady) return flash('Requires a live database connection', 'err');
+    setExporting(true);
+    const { data: allRows, error } = await db.fetchAllActiveAlerts(filters);
+    setExporting(false);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    const header = ['Code','Description','Qty on Hand','Reorder Point','Shortage Qty','UoM','Manufacturer'];
+    const lines = [header.map(csvEsc).join(',')];
+    allRows.forEach(r => lines.push([
+      r.code, r.short_desc, r.qty_on_hand, r.reorder_point, r.shortage_qty, r.unit, r.mfr,
+    ].map(csvEsc).join(',')));
+    downloadCsv(lines, `reorder-list-${new Date().toISOString().slice(0,10)}.csv`);
+    flash(`Exported ${allRows.length} row(s) to reorder list`);
+  };
+
+  const totalPages = Math.ceil(total / ALERTS_PAGE_SIZE);
+  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const allSelected = rows.length > 0 && rows.every(r => selected[r.part_id]);
+
+  return (
+    <div>
+      <PageHeader title="Stock Alerts" sub={`${total.toLocaleString()} active alert(s)`} />
+
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          {Object.entries(ALERT_SEVERITY_META).map(([key, meta]) => (
+            <button key={key} onClick={()=>toggleSeverity(key)}
+              style={{ padding:"6px 12px", borderRadius:16, border:`1.5px solid ${meta.color}`, background: severity.includes(key)?meta.color:'#fff', color: severity.includes(key)?'#fff':meta.color, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              {meta.dot} {meta.label}
+            </button>
+          ))}
+          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Code or description…" style={{ ...selStyle, minWidth:200, flex:"1 1 180px" }}/>
+          <select value={fCat} onChange={e=>setFCat(e.target.value)} style={selStyle}>
+            <option value="">All Categories</option>
+            {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+          </select>
+          <select value={fMfr} onChange={e=>setFMfr(e.target.value)} style={selStyle}>
+            <option value="">All Manufacturers</option>
+            {manufacturers.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fDisc} onChange={e=>setFDisc(e.target.value)} style={selStyle}>
+            <option value="">All Disciplines</option>
+            {disciplines.map(d=><option key={d.code} value={d.code}>{d.label}</option>)}
+          </select>
+          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:T.muted, cursor:"pointer" }}>
+            <input type="checkbox" checked={hideAck} onChange={e=>setHideAck(e.target.checked)}/> Hide acknowledged
+          </label>
+          <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+            <Btn small variant="secondary" onClick={exportAlertsCsv} disabled={exporting}>{exporting?"Exporting…":"📥 Export CSV"}</Btn>
+            <Btn small variant="secondary" onClick={exportReorderListCsv} disabled={exporting}>🛒 Export Reorder List</Btn>
+          </div>
+        </div>
+      </Card>
+
+      {Object.keys(selected).some(k=>selected[k]) && (
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+          <span style={{ fontSize:12, color:T.muted }}>{Object.values(selected).filter(Boolean).length} selected</span>
+          <Btn small onClick={doBulkAcknowledge}>✓ Acknowledge Selected</Btn>
+        </div>
+      )}
+
+      <Card>
+        <div style={{ overflowX:"auto" }}>
+          {loading ? (
+            <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading alerts…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ textAlign:"center", padding:40, color:T.muted }}>No active alerts — all stock levels are healthy ✅</div>
+          ) : (
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  <th style={{ padding:"8px 10px" }}>
+                    <input type="checkbox" checked={allSelected} onChange={e=>{
+                      const next = {};
+                      if (e.target.checked) rows.forEach(r=>{ next[r.part_id]=true; });
+                      setSelected(next);
+                    }}/>
+                  </th>
+                  {["Severity","Code","Description","Category","Mfr","On Hand","Reorder Pt","Min Stock","Shortage","UoM","Location","Actions"].map(h=>(
+                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i) => {
+                  const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, label:r.stock_status, dot:'⚪' };
+                  return (
+                    <tr key={r.part_id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:r.is_acknowledged?0.55:1 }}>
+                      <td style={{ padding:"7px 10px" }}>
+                        <input type="checkbox" checked={!!selected[r.part_id]} onChange={e=>setSelected(s=>({...s,[r.part_id]:e.target.checked}))}/>
+                      </td>
+                      <td style={{ padding:"7px 10px" }}><Pill color={meta.color} bg="#fff" size={11}>{meta.dot} {meta.label}</Pill></td>
+                      <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
+                      <td style={{ padding:"7px 10px", maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.short_desc}</td>
+                      <td style={{ padding:"7px 10px" }}><Pill size={11}>{r.cat}</Pill></td>
+                      <td style={{ padding:"7px 10px" }}><Pill color="#b45309" bg="#fef3c7" size={11}>{r.mfr}</Pill></td>
+                      <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700, color:meta.color }}>{r.qty_on_hand}</td>
+                      <td style={{ padding:"7px 10px", textAlign:"center" }}>{r.reorder_point}</td>
+                      <td style={{ padding:"7px 10px", textAlign:"center" }}>{r.min_stock}</td>
+                      <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}>{r.shortage_qty}</td>
+                      <td style={{ padding:"7px 10px" }}>{r.unit||"—"}</td>
+                      <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11 }}>{r.location||"—"}</td>
+                      <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
+                        {!r.is_acknowledged ? (
+                          <>
+                            <Btn small variant="success" onClick={()=>doAcknowledge(r)}>✓ Ack</Btn>{' '}
+                            <Btn small variant="secondary" onClick={()=>setSnoozeTarget({ part_id:r.part_id, severity:r.stock_status, code:r.code })}>💤 Snooze</Btn>{' '}
+                          </>
+                        ) : <span style={{ fontSize:11, color:T.muted }}>Acknowledged</span>}
+                        <Btn small variant="ghost" onClick={()=>navigateTo && navigateTo('master', { search: r.code })}>View</Btn>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      {totalPages > 1 && (
+        <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:14 }}>
+          <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:"#fff", cursor:page===0?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>‹ Prev</button>
+          <span style={{ fontSize:12, color:T.muted, alignSelf:"center" }}>Page {page+1} of {totalPages}</span>
+          <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page>=totalPages-1}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:"#fff", cursor:page>=totalPages-1?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>Next ›</button>
+        </div>
+      )}
+
+      {snoozeTarget && (
+        <Modal title={`Snooze ${snoozeTarget.code}`} onClose={()=>setSnoozeTarget(null)} maxWidth={360}>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ fontSize:13, color:T.muted }}>Hide this alert until it reappears, or for:</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn small onClick={()=>doSnooze(1)}>1 day</Btn>
+              <Btn small onClick={()=>doSnooze(3)}>3 days</Btn>
+              <Btn small onClick={()=>doSnooze(7)}>7 days</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+      <Toast msg={toast}/>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
@@ -5787,6 +6128,7 @@ const NAV = [
   { id:"stockcount",    labelKey:"nav_stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"movements",     labelKey:"nav_movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"🔔", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"🔑", group:"System",      groupKey:"group_System",       adminOnly:true  },
   { id:"auditlog",      labelKey:"nav_auditlog",      label:"Audit Log",           icon:"📜", group:"System",      groupKey:"group_System",       adminOnly:true  },
   { id:"users",         labelKey:"nav_users",         label:"User Management",     icon:"👥", group:"System",      groupKey:"group_System",       adminOnly:true  },
@@ -5856,6 +6198,7 @@ function AppShell() {
     stockcount:    <StockCountPage data={data} />,
     movements:     <StockMovementsPage data={data} />,
     reorder:       <ReorderSettingsPage data={data} />,
+    alerts:        <StockAlertsPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
@@ -5866,6 +6209,7 @@ function AppShell() {
   const roleBg    = { admin:'#dbeafe', department_user:'#d1fae5' };
 
   return (
+    <AlertsProvider dbReady={dbReady}>
     <div style={{ display:"flex",height:"100vh",fontFamily:"'Inter','Segoe UI',system-ui,sans-serif",background:T.bg,overflow:"hidden" }}>
 
       {/* ── SIDEBAR ── */}
@@ -5917,6 +6261,7 @@ function AppShell() {
               : <span style={{ fontSize:11,background:"#fef3c7",color:"#b45309",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟡 {t('local')}</span>
             }
             <span style={{ background:T.header,color:"#38bdf8",fontFamily:"monospace",fontWeight:800,fontSize:12,padding:"4px 12px",borderRadius:5,letterSpacing:1.5 }}>AA-BB-CC-DD-EE-0001</span>
+            <AlertBell navigateTo={data.navigateTo} />
             {profile && (
               <span style={{ background:roleBg[profile.role]??T.subtle,color:roleColor[profile.role]??T.muted,fontWeight:700,fontSize:11,padding:"4px 10px",borderRadius:12 }}>
                 {profile.role==='admin'?'🔑':'👤'} {profile.full_name||profile.email?.split('@')[0]}
@@ -5938,6 +6283,7 @@ function AppShell() {
         </div>
       </div>
     </div>
+    </AlertsProvider>
   );
 }
 
@@ -5989,6 +6335,87 @@ function NavItem({ n, active, onClick, collapsed }) {
     <div onClick={onClick} title={collapsed?label:""} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 14px",cursor:"pointer",background:active?"#1a3460":"transparent",borderLeft:active?"3px solid #38bdf8":"3px solid transparent",transition:"background .12s" }}>
       <span style={{ fontSize:15,flexShrink:0 }}>{n.icon}</span>
       {!collapsed&&<span style={{ fontSize:13,color:active?"#f1f5f9":"#94a3b8",fontWeight:active?700:400,whiteSpace:"nowrap" }}>{label}</span>}
+    </div>
+  );
+}
+
+const ALERT_SEVERITY_META = {
+  out:      { label:'Out of Stock', color:'#991B1B', dot:'🔴' },
+  critical: { label:'Critical',     color:'#DC2626', dot:'🟠' },
+  low:      { label:'Low Stock',    color:'#D97706', dot:'🟡' },
+};
+
+// Header bell — badge counts only unacknowledged out+critical (low is
+// deliberately excluded from the badge per spec, so it stays a
+// meaningful "needs action now" count), dropdown shows the top 10
+// across all three severities.
+function AlertBell({ navigateTo }) {
+  const alerts = useAlerts();
+  const [open, setOpen] = useState(false);
+  const [top,  setTop]  = useState([]);
+  const [loadingTop, setLoadingTop] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoadingTop(true);
+    db.fetchActiveAlerts({}, 0, 10).then(({ data }) => setTop(data || [])).finally(()=>setLoadingTop(false));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onEscape = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onClickOutside);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [open]);
+
+  const badgeCount = alerts.badgeCount;
+  const badgeLabel = badgeCount > 99 ? '99+' : String(badgeCount);
+
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <button
+        onClick={()=>setOpen(o=>!o)}
+        aria-label={`Stock alerts${badgeCount?`, ${badgeCount} unacknowledged`:''}`}
+        aria-haspopup="menu" aria-expanded={open}
+        style={{ position:'relative', background:'transparent', border:`1px solid ${T.border}`, borderRadius:6, padding:'4px 9px', fontSize:14, cursor:'pointer', color: badgeCount ? T.text : T.muted }}>
+        🔔
+        {badgeCount > 0 && (
+          <span style={{ position:'absolute', top:-6, right:-6, background:'#DC2626', color:'#fff', borderRadius:10, fontSize:10, fontWeight:800, padding:'1px 5px', minWidth:16, textAlign:'center', lineHeight:'14px' }}>
+            {badgeLabel}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div role="menu" style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:340, maxHeight:420, overflowY:'auto', background:T.card, border:`1px solid ${T.border}`, borderRadius:8, boxShadow:'0 8px 24px rgba(0,0,0,0.15)', zIndex:50 }}>
+          <div style={{ padding:'10px 14px', borderBottom:`1px solid ${T.border}`, fontWeight:700, fontSize:13, color:T.text }}>Stock Alerts</div>
+          {loadingTop ? (
+            <div style={{ padding:20, textAlign:'center', color:T.muted, fontSize:12 }}>Loading…</div>
+          ) : top.length === 0 ? (
+            <div style={{ padding:20, textAlign:'center', color:T.muted, fontSize:12 }}>No active alerts — all stock levels are healthy ✅</div>
+          ) : (
+            top.map(r => {
+              const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, dot:'⚪' };
+              return (
+                <div key={r.part_id} role="menuitem" style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 14px', borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
+                  <span>{meta.dot}</span>
+                  <span style={{ fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code}</span>
+                  <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:T.muted }}>{r.short_desc}</span>
+                  <span style={{ fontVariantNumeric:'tabular-nums', color:meta.color, fontWeight:700 }}>{r.qty_on_hand}/{r.reorder_point}</span>
+                </div>
+              );
+            })
+          )}
+          <div style={{ padding:10 }}>
+            <Btn small onClick={()=>{ setOpen(false); navigateTo && navigateTo('alerts'); }} style={{ width:'100%' }}>View all alerts</Btn>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
