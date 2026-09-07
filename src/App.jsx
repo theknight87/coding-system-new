@@ -298,10 +298,10 @@ const TRANSLATIONS = {
     nav_disciplines: "Disciplines", nav_manufacturers: "Manufacturers", nav_models: "Equipment Models",
     nav_funcgroups: "Functional Groups", nav_generator: "Code Generator", nav_tree: "Hierarchy Tree",
     nav_master: "Master Parts Table", nav_ledger: "Stock Ledger", nav_stockcount: "Stock Count",
-    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_admin: "Administration",
+    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_assets: "Asset Registry", nav_admin: "Administration",
     nav_auditlog: "Audit Log", nav_users: "User Management", nav_trash: "Trash",
     group_Reference: "Reference", group_MasterData: "Master Data", group_Tools: "Tools",
-    group_Inventory: "Inventory", group_System: "System",
+    group_Inventory: "Inventory", group_System: "System", group_Assets: "Assets",
   },
   ar: {
     appName: "نظام ترميز كار جاز", appVersion: "البيانات الرئيسية v3.0",
@@ -312,10 +312,10 @@ const TRANSLATIONS = {
     nav_disciplines: "التخصصات", nav_manufacturers: "الشركات المصنعة", nav_models: "موديلات المعدات",
     nav_funcgroups: "المجموعات الوظيفية", nav_generator: "مولد الأكواد", nav_tree: "الشجرة الهرمية",
     nav_master: "جدول قطع الغيار الرئيسي", nav_ledger: "دفتر المخزون", nav_stockcount: "جرد المخزون",
-    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_admin: "الإدارة",
+    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_assets: "سجل الأصول", nav_admin: "الإدارة",
     nav_auditlog: "سجل التدقيق", nav_users: "إدارة المستخدمين", nav_trash: "المهملات",
     group_Reference: "مرجع", group_MasterData: "البيانات الرئيسية", group_Tools: "أدوات",
-    group_Inventory: "المخزون", group_System: "النظام",
+    group_Inventory: "المخزون", group_System: "النظام", group_Assets: "الأصول",
   },
 };
 
@@ -1216,24 +1216,27 @@ function TrashPage() {
 
   const totalCount = groups.reduce((sum, g) => sum + g.data.length, 0);
 
-  const rowTitle = (r) => r.short_desc || r.label || r.code;
+  const rowKey = (r) => r[db.TRASH_TABLES.find(t=>t.table===r.__table)?.idCol || 'code'];
+  const rowTitle = (r) => r.short_desc || r.label || r.asset_tag || r.code;
 
   const handleRestore = async (r) => {
-    setBusyCode(r.code);
-    const { error } = await db.restoreRecord(r.__table, r.code);
+    const key = rowKey(r);
+    setBusyCode(key);
+    const { error } = await db.restoreRecord(r.__table, key);
     setBusyCode(null);
     if (error) return flash(`Error: ${error.message}`, 'err');
-    flash(`\"${r.code}\" restored`);
+    flash(`\"${key}\" restored`);
     reload();
   };
 
   const handlePurge = async (r) => {
-    setBusyCode(r.code);
-    const { error } = await db.hardDeleteRecord(r.__table, r.code);
+    const key = rowKey(r);
+    setBusyCode(key);
+    const { error } = await db.hardDeleteRecord(r.__table, key);
     setBusyCode(null);
     setConfirmPurge(null);
     if (error) return flash(`Error: ${error.message}`, 'err');
-    flash(`\"${r.code}\" permanently deleted`);
+    flash(`\"${key}\" permanently deleted`);
     reload();
   };
 
@@ -1286,19 +1289,19 @@ function TrashPage() {
                 {rows.length === 0
                   ? <tr><td colSpan={5} style={{ textAlign:'center', padding:36, color:T.muted }}>Trash is empty.</td></tr>
                   : rows.map((r, i) => (
-                    <tr key={`${r.__table}-${r.code}`} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                    <tr key={`${r.__table}-${rowKey(r)}`} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
                       <td style={{ padding:'8px 12px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(r.deleted_at).toLocaleString()}</td>
                       <td style={{ padding:'8px 12px' }}>
                         <span style={{ background:T.subtle, color:T.text, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{r.__label}</span>
                       </td>
-                      <td style={{ padding:'8px 12px', fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code}</td>
+                      <td style={{ padding:'8px 12px', fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code || r.asset_tag}</td>
                       <td style={{ padding:'8px 12px', color:T.muted, maxWidth:320, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{rowTitle(r)}</td>
                       <td style={{ padding:'8px 12px' }}>
                         <div style={{ display:'flex', gap:6 }}>
-                          <Btn small variant="success" onClick={()=>handleRestore(r)} disabled={busyCode===r.code}>
-                            {busyCode===r.code ? '…' : '↩ Restore'}
+                          <Btn small variant="success" onClick={()=>handleRestore(r)} disabled={busyCode===rowKey(r)}>
+                            {busyCode===rowKey(r) ? '…' : '↩ Restore'}
                           </Btn>
-                          <Btn small variant="danger" onClick={()=>setConfirmPurge(r)} disabled={busyCode===r.code}>
+                          <Btn small variant="danger" onClick={()=>setConfirmPurge(r)} disabled={busyCode===rowKey(r)}>
                             🗑 Purge
                           </Btn>
                         </div>
@@ -1316,7 +1319,7 @@ function TrashPage() {
       {confirmPurge && (
         <Modal title="Permanently Delete" onClose={()=>setConfirmPurge(null)}>
           <div style={{ padding:14, background:T.dangerBg, borderRadius:8, marginBottom:16 }}>
-            <div style={{ fontWeight:800, color:T.danger }}>{confirmPurge.code}</div>
+            <div style={{ fontWeight:800, color:T.danger }}>{rowKey(confirmPurge)}</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{confirmPurge.__label} — {rowTitle(confirmPurge)}</div>
           </div>
           <p style={{ fontSize:13, color:T.text, marginBottom:16, lineHeight:1.6 }}>
@@ -1324,8 +1327,8 @@ function TrashPage() {
           </p>
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <Btn variant="secondary" onClick={()=>setConfirmPurge(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={()=>handlePurge(confirmPurge)} disabled={busyCode===confirmPurge.code}>
-              {busyCode===confirmPurge.code ? 'Deleting…' : '🗑 Delete Permanently'}
+            <Btn variant="danger" onClick={()=>handlePurge(confirmPurge)} disabled={busyCode===rowKey(confirmPurge)}>
+              {busyCode===rowKey(confirmPurge) ? 'Deleting…' : '🗑 Delete Permanently'}
             </Btn>
           </div>
         </Modal>
@@ -6230,6 +6233,484 @@ function StockAlertsPage({ data }) {
   );
 }
 
+// ─── ASSET REGISTRY ───────────────────────────────────────────
+const ASSET_STATUS_META = {
+  active:        { label:'Active',        color:'#15803d', bg:'#dcfce7' },
+  maintenance:   { label:'Maintenance',   color:'#b45309', bg:'#fef3c7' },
+  down:          { label:'Down',          color:'#dc2626', bg:'#fee2e2' },
+  standby:       { label:'Standby',       color:'#475569', bg:'#f1f5f9' },
+  decommissioned:{ label:'Decommissioned',color:'#94a3b8', bg:'#f8fafc' },
+};
+
+function mapAsset(r) {
+  return {
+    id: r.id, assetTag: r.asset_tag, serialNumber: r.serial_number,
+    cat: r.cat, mfr: r.mfr, model: r.model,
+    catLabel: r.cat_label, mfrLabel: r.mfr_label, modelLabel: r.model_label,
+    site: r.site, location: r.location, subLocation: r.sub_location, status: r.status,
+    commissionedAt: r.commissioned_at, warrantyUntil: r.warranty_until,
+    runningHours: r.running_hours, pmIntervalHours: r.pm_interval_hours,
+    lastPmHours: r.last_pm_hours, lastPmDate: r.last_pm_date, pmIntervalDays: r.pm_interval_days,
+    photoUrl: r.photo_url, notes: r.notes,
+    eventCount: r.event_count, openEventCount: r.open_event_count, lastEventDate: r.last_event_date,
+    hoursUntilPm: r.hours_until_pm, daysUntilPm: r.days_until_pm, pmDue: r.pm_due,
+  };
+}
+
+const ASSETS_PAGE_SIZE = 50;
+
+function AssetRegistryPage({ data }) {
+  const { categories, manufacturers, models, dbReady, ops } = data;
+  const { isAdmin, isDeptUser } = useAuth();
+  const canEdit = isAdmin || isDeptUser;
+
+  const [viewMode, setViewMode] = useState('table'); // 'table' | 'grid'
+  const [search,    setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [fCat,   setFCat]   = useState('');
+  const [fMfr,   setFMfr]   = useState('');
+  const [fModel, setFModel] = useState('');
+  const [fLoc,   setFLoc]   = useState('');
+  const [fStatus,setFStatus]= useState('');
+
+  const [page,    setPage]    = useState(0);
+  const [total,   setTotal]   = useState(0);
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [kpis,    setKpis]    = useState(null);
+
+  const [formTarget,   setFormTarget]   = useState(null); // 'new' | asset object | null
+  const [detailTarget, setDetailTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [exporting,    setExporting]    = useState(false);
+  const [toast, setToast] = useState(null);
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  useEffect(() => {
+    const t = setTimeout(()=>setDebouncedSearch(search.trim()), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const filters = useMemo(() => ({
+    search: debouncedSearch||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
+    model: fModel||undefined, location: fLoc||undefined, status: fStatus||undefined,
+  }), [debouncedSearch, fCat, fMfr, fModel, fLoc, fStatus]);
+
+  useEffect(() => { setPage(0); }, [filters]);
+
+  const loadKpis = useCallback(() => {
+    if (!dbReady) { setKpis(null); return; }
+    db.fetchAssetKpis().then(({ data }) => setKpis(data));
+  }, [dbReady]);
+
+  const load = useCallback(() => {
+    if (!dbReady) { setLoading(false); setRows([]); setTotal(0); return; }
+    setLoading(true);
+    Promise.all([
+      db.fetchAssetsCount(filters),
+      db.fetchAssets(filters, page, ASSETS_PAGE_SIZE),
+    ]).then(([countRes, dataRes]) => {
+      setTotal(countRes.count ?? 0);
+      setRows((dataRes.data ?? []).map(mapAsset));
+    }).finally(()=>setLoading(false));
+  }, [dbReady, filters, page]);
+
+  useEffect(() => { loadKpis(); }, [loadKpis]);
+  useEffect(() => { load(); }, [load]);
+
+  const refreshAll = () => { load(); loadKpis(); };
+
+  const filteredMfrs   = manufacturers.filter(m => !fCat || (m.catCodes||[]).includes(fCat));
+  const filteredModels = models.filter(m => !fMfr || m.mfrCode === fMfr);
+  const totalPages = Math.ceil(total / ASSETS_PAGE_SIZE);
+  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const { error } = await db.softDeleteAsset(deleteTarget.id);
+    setDeleteTarget(null);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`${deleteTarget.assetTag} moved to Trash`);
+    setDetailTarget(null);
+    refreshAll();
+  };
+
+  const csvEsc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+  const exportCsv = async () => {
+    if (!dbReady) return flash('Requires a live database connection', 'err');
+    setExporting(true);
+    const { data: allRows, error } = await db.fetchAllAssets(filters);
+    setExporting(false);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    const header = ['Asset Tag','Serial Number','Category','Manufacturer','Model','Site','Location','Sub-Location','Status','Commissioned','Warranty Until','Running Hours','PM Interval (hrs)','Last PM Date','Last PM Hours','PM Interval (days)','Open Events','Notes'];
+    const lines = [header.map(csvEsc).join(',')];
+    allRows.forEach(r => lines.push([
+      r.asset_tag, r.serial_number, r.cat_label, r.mfr_label, r.model_label, r.site, r.location, r.sub_location,
+      r.status, r.commissioned_at, r.warranty_until, r.running_hours, r.pm_interval_hours, r.last_pm_date,
+      r.last_pm_hours, r.pm_interval_days, r.open_event_count, r.notes,
+    ].map(csvEsc).join(',')));
+    const blob = new Blob(['﻿'+lines.join('\r\n')], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `assets-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    flash(`Exported ${allRows.length} asset(s)`);
+  };
+
+  const HoursBar = ({ asset }) => {
+    if (!asset.pmIntervalHours) return <span style={{ fontVariantNumeric:'tabular-nums' }}>{asset.runningHours}</span>;
+    const base = asset.lastPmHours || 0;
+    const pos = Math.max(0, asset.runningHours - base);
+    const pct = Math.min(100, (pos / asset.pmIntervalHours) * 100);
+    const amber = pct >= 90;
+    return (
+      <div>
+        <div style={{ fontSize:11, fontVariantNumeric:'tabular-nums', color:T.text, marginBottom:2 }}>{asset.runningHours} hrs</div>
+        <div style={{ width:70, height:5, background:'#e2e8f0', borderRadius:3, overflow:'hidden' }}>
+          <div style={{ width:`${pct}%`, height:'100%', background: amber ? '#d97706' : '#16a34a' }}/>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <PageHeader title="Asset Registry" sub={`${total.toLocaleString()} equipment asset(s)`} />
+
+      {/* KPIs */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:12, marginBottom:20 }}>
+        <StatCard label="Total Assets" value={kpis?kpis.total.toLocaleString():"…"} color={T.accent} icon="🏭"/>
+        <StatCard label="Active" value={kpis?kpis.active.toLocaleString():"…"} color="#15803d" icon="🟢"/>
+        <StatCard label="In Maintenance" value={kpis?kpis.in_maintenance.toLocaleString():"…"} color="#b45309" icon="🟠"/>
+        <StatCard label="Down" value={kpis?kpis.down.toLocaleString():"…"} color="#dc2626" icon="🔴"/>
+        <StatCard label="Due for PM (30d)" value={kpis?kpis.due_30.toLocaleString():"…"} color="#7c3aed" icon="🛠️"/>
+      </div>
+
+      {/* Filters */}
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <input value={search} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Asset tag, serial no, model…" style={{ ...selStyle, minWidth:200, flex:"1 1 200px" }}/>
+          <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
+            <option value="">All Categories</option>
+            {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+          </select>
+          <select value={fMfr} onChange={e=>{setFMfr(e.target.value);setFModel("");}} style={selStyle}>
+            <option value="">All Manufacturers</option>
+            {filteredMfrs.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fModel} onChange={e=>setFModel(e.target.value)} style={selStyle}>
+            <option value="">All Models</option>
+            {filteredModels.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <input value={fLoc} onChange={e=>setFLoc(e.target.value)} placeholder="Site / location" style={{ ...selStyle, width:140 }}/>
+          <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={selStyle}>
+            <option value="">All Status</option>
+            {Object.entries(ASSET_STATUS_META).map(([k,m])=><option key={k} value={k}>{m.label}</option>)}
+          </select>
+          <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+            <div style={{ display:'flex', border:`1px solid ${T.border}`, borderRadius:6, overflow:'hidden' }}>
+              <button onClick={()=>setViewMode('table')} style={{ padding:'6px 10px', border:'none', background:viewMode==='table'?T.accent:'#fff', color:viewMode==='table'?'#fff':T.muted, cursor:'pointer', fontSize:13 }}>☰</button>
+              <button onClick={()=>setViewMode('grid')} style={{ padding:'6px 10px', border:'none', background:viewMode==='grid'?T.accent:'#fff', color:viewMode==='grid'?'#fff':T.muted, cursor:'pointer', fontSize:13 }}>▦</button>
+            </div>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={exporting}>{exporting?"Exporting…":"📥 Export CSV"}</Btn>
+            {canEdit && <Btn small onClick={()=>setFormTarget('new')}>+ Add Asset</Btn>}
+          </div>
+        </div>
+      </Card>
+
+      {loading ? (
+        <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading assets…</div>
+      ) : rows.length === 0 ? (
+        <Card><div style={{ textAlign:"center", padding:40, color:T.muted }}>No assets found.</div></Card>
+      ) : viewMode === 'grid' ? (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:14 }}>
+          {rows.map(a => {
+            const meta = ASSET_STATUS_META[a.status] || {};
+            return (
+              <Card key={a.id} style={{ cursor:'pointer', padding:0, overflow:'hidden' }} onClick={()=>setDetailTarget(a)}>
+                <div style={{ height:120, background:'#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  {a.photoUrl ? <img src={a.photoUrl} alt={a.assetTag} style={{ width:'100%', height:'100%', objectFit:'cover' }}/> : <span style={{ fontSize:36 }}>🏭</span>}
+                </div>
+                <div style={{ padding:12 }}>
+                  <div style={{ fontFamily:'monospace', fontWeight:800, fontSize:13, color:T.text }}>{a.assetTag}</div>
+                  <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>{a.mfrLabel} {a.modelLabel}</div>
+                  <Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.label}</Pill>
+                  {a.pmDue && <span style={{ marginLeft:6, fontSize:11, color:'#b45309', fontWeight:700 }}>🛠️ PM Due</span>}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        <Card>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  {["","Asset Tag","Model / Mfr","Location","Status","Running Hours","Last Service","Open Items"].map(h=>(
+                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((a,i) => {
+                  const meta = ASSET_STATUS_META[a.status] || {};
+                  return (
+                    <tr key={a.id} onClick={()=>setDetailTarget(a)}
+                      style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                      onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
+                      <td style={{ padding:"7px 10px", textAlign:"center" }}>{a.photoUrl ? <span title="Has photo">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}</td>
+                      <td style={{ padding:"7px 10px" }}>
+                        <div style={{ fontFamily:'monospace', fontWeight:800, color:T.text }}>{a.assetTag}</div>
+                        <div style={{ fontSize:11, color:T.muted }}>{a.modelLabel}</div>
+                      </td>
+                      <td style={{ padding:"7px 10px" }}>{a.modelLabel} <span style={{ color:T.muted }}>· {a.mfrLabel}</span></td>
+                      <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{a.location || "—"}{a.subLocation?` / ${a.subLocation}`:''}</td>
+                      <td style={{ padding:"7px 10px" }}><Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.label}</Pill></td>
+                      <td style={{ padding:"7px 10px" }}><HoursBar asset={a}/></td>
+                      <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{a.lastPmDate || "—"}</td>
+                      <td style={{ padding:"7px 10px" }}>
+                        {a.pmDue
+                          ? <Pill color="#b45309" bg="#fef3c7" mono={false} size={11}>🛠️ PM Due</Pill>
+                          : a.openEventCount > 0
+                            ? <Pill color="#1d4ed8" bg="#dbeafe" mono={false} size={11}>{a.openEventCount} open</Pill>
+                            : <span style={{ color:"#d1d5db" }}>—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {totalPages > 1 && (
+        <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:14 }}>
+          <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:"#fff", cursor:page===0?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>‹ Prev</button>
+          <span style={{ fontSize:12, color:T.muted, alignSelf:"center" }}>Page {page+1} of {totalPages}</span>
+          <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page>=totalPages-1}
+            style={{ padding:"5px 12px", borderRadius:5, border:`1px solid ${T.border}`, background:"#fff", cursor:page>=totalPages-1?"default":"pointer", fontSize:12, fontFamily:"inherit" }}>Next ›</button>
+        </div>
+      )}
+
+      {formTarget && (
+        <AssetFormModal
+          data={data} asset={formTarget==='new'?null:formTarget}
+          onClose={()=>setFormTarget(null)}
+          onSaved={(saved)=>{ flash(`${saved.asset_tag} saved`); setFormTarget(null); refreshAll(); }}
+        />
+      )}
+
+      {detailTarget && (
+        <AssetDetailModal
+          asset={detailTarget}
+          canEdit={canEdit}
+          onClose={()=>setDetailTarget(null)}
+          onEdit={()=>{ setFormTarget(detailTarget); }}
+          onDelete={()=>setDeleteTarget(detailTarget)}
+        />
+      )}
+
+      {deleteTarget && (
+        <Modal title="Move to Trash" onClose={()=>setDeleteTarget(null)} maxWidth={400}>
+          <div style={{ fontSize:13, color:T.text, marginBottom:16 }}>
+            Move <strong>{deleteTarget.assetTag}</strong> to Trash? It can be restored later from the Trash page.
+          </div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+            <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
+            <Btn variant="danger" onClick={handleDelete}>🗑 Move to Trash</Btn>
+          </div>
+        </Modal>
+      )}
+
+      <Toast msg={toast}/>
+    </div>
+  );
+}
+
+function AssetDetailModal({ asset, canEdit, onClose, onEdit, onDelete }) {
+  const meta = ASSET_STATUS_META[asset.status] || {};
+  const row = (label, value) => (
+    <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid ${T.border}`, fontSize:13 }}>
+      <span style={{ color:T.muted }}>{label}</span>
+      <span style={{ color:T.text, fontWeight:600 }}>{value ?? "—"}</span>
+    </div>
+  );
+  return (
+    <Modal title={asset.assetTag} onClose={onClose} maxWidth={520}>
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        {asset.photoUrl && <img src={asset.photoUrl} alt={asset.assetTag} style={{ width:'100%', maxHeight:200, objectFit:'cover', borderRadius:8 }}/>}
+        <div><Pill color={meta.color} bg={meta.bg} mono={false}>{meta.label}</Pill>{asset.pmDue && <span style={{ marginLeft:8, fontSize:12, color:'#b45309', fontWeight:700 }}>🛠️ PM Due</span>}</div>
+        {row('Model', `${asset.mfrLabel} ${asset.modelLabel}`)}
+        {row('Category', asset.catLabel)}
+        {row('Serial Number', asset.serialNumber)}
+        {row('Site / Location', [asset.site, asset.location, asset.subLocation].filter(Boolean).join(' / ') || null)}
+        {row('Running Hours', asset.runningHours)}
+        {row('PM Interval', asset.pmIntervalHours ? `${asset.pmIntervalHours} hrs` : (asset.pmIntervalDays ? `${asset.pmIntervalDays} days` : null))}
+        {row('Last PM Date', asset.lastPmDate)}
+        {row('Commissioned', asset.commissionedAt)}
+        {row('Warranty Until', asset.warrantyUntil)}
+        {row('Open Maintenance Events', asset.openEventCount)}
+        {row('Total Maintenance Events', asset.eventCount)}
+        {asset.notes && <div style={{ fontSize:13, color:T.muted, marginTop:6 }}>{asset.notes}</div>}
+        {canEdit && (
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
+            <Btn variant="danger" onClick={onDelete}>🗑 Move to Trash</Btn>
+            <Btn onClick={onEdit}>✏️ Edit</Btn>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function AssetFormModal({ data, asset, onClose, onSaved }) {
+  const { categories, manufacturers, models } = data;
+  const isEdit = !!asset;
+  const [cat,   setCat]   = useState(asset?.cat || '');
+  const [mfr,   setMfr]   = useState(asset?.mfr || '');
+  const [model, setModel] = useState(asset?.model || '');
+  const [serialNumber, setSerialNumber] = useState(asset?.serialNumber || '');
+  const [site,     setSite]     = useState(asset?.site || '');
+  const [location, setLocation] = useState(asset?.location || '');
+  const [subLocation, setSubLocation] = useState(asset?.subLocation || '');
+  const [status,   setStatus]   = useState(asset?.status || 'active');
+  const [commissionedAt, setCommissionedAt] = useState(asset?.commissionedAt || '');
+  const [warrantyUntil,  setWarrantyUntil]  = useState(asset?.warrantyUntil || '');
+  const [pmIntervalHours, setPmIntervalHours] = useState(asset?.pmIntervalHours ?? '');
+  const [lastPmHours,     setLastPmHours]     = useState(asset?.lastPmHours ?? '');
+  const [lastPmDate,      setLastPmDate]      = useState(asset?.lastPmDate || '');
+  const [pmIntervalDays,  setPmIntervalDays]  = useState(asset?.pmIntervalDays ?? '');
+  const [notes, setNotes] = useState(asset?.notes || '');
+  const [photoUrl, setPhotoUrl] = useState(asset?.photoUrl || null);
+  const [tagPreview, setTagPreview] = useState(asset?.assetTag || '');
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const filteredMfrs   = manufacturers.filter(m => !cat || (m.catCodes||[]).includes(cat));
+  const filteredModels = models.filter(m => !mfr || m.mfrCode === mfr);
+
+  // Client-side preview only — the authoritative tag is reserved by
+  // next_asset_tag() at save time (same soft-race tolerance as the
+  // existing part-code generator's own preview-then-insert pattern).
+  useEffect(() => {
+    if (isEdit || !cat || !mfr || !model) { if (!isEdit) setTagPreview(''); return; }
+    const prefix = `${cat}-${mfr}-${model}-`;
+    supabase.from('assets').select('asset_tag').ilike('asset_tag', `${prefix}%`).then(({ data: rows }) => {
+      const nums = (rows||[]).map(r => parseInt(r.asset_tag.split('-').pop()||'0'));
+      setTagPreview(prefix + String((nums.length?Math.max(...nums):0)+1).padStart(3,'0'));
+    });
+  }, [cat, mfr, model, isEdit]);
+
+  const handleSave = async () => {
+    setError('');
+    if (!isEdit && (!cat || !mfr || !model)) return setError('Category, manufacturer and model are required.');
+    const today = new Date().toISOString().slice(0,10);
+    if (commissionedAt && commissionedAt > today) return setError('Commissioned date cannot be in the future.');
+    if (warrantyUntil && commissionedAt && warrantyUntil < commissionedAt) return setError('Warranty until must be after the commissioned date.');
+    setSaving(true);
+    const payload = {
+      cat, mfr, model, serialNumber, site, location, subLocation, status,
+      commissionedAt: commissionedAt||null, warrantyUntil: warrantyUntil||null,
+      pmIntervalHours: pmIntervalHours===''?null:Number(pmIntervalHours),
+      lastPmHours: lastPmHours===''?null:Number(lastPmHours),
+      lastPmDate: lastPmDate||null,
+      pmIntervalDays: pmIntervalDays===''?null:Number(pmIntervalDays),
+      notes, photoUrl,
+    };
+    const { data: saved, error: err } = isEdit
+      ? await db.updateAsset(asset.id, payload)
+      : await db.insertAsset(payload);
+    setSaving(false);
+    if (err) return setError(err.message);
+    onSaved(saved);
+  };
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+  const fieldStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit", width:"100%", boxSizing:"border-box" };
+
+  return (
+    <Modal title={isEdit ? `Edit ${asset.assetTag}` : "Add Asset"} onClose={onClose} maxWidth={640}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"75vh", overflowY:"auto" }}>
+        <div>
+          <label style={sLabel}>Asset Tag</label>
+          <div style={{ background:T.header, color:"#38bdf8", fontFamily:"monospace", fontWeight:800, fontSize:14, padding:"8px 12px", borderRadius:5 }}>
+            {tagPreview || (isEdit ? asset.assetTag : "Select category, manufacturer & model…")}
+          </div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>Format: Category-Manufacturer-Model-Sequence, generated automatically — same discipline as part codes.</div>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+          <div>
+            <label style={sLabel}>Category</label>
+            <select value={cat} disabled={isEdit} onChange={e=>{setCat(e.target.value);setMfr('');setModel('');}} style={fieldStyle}>
+              <option value="">Select…</option>
+              {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={sLabel}>Manufacturer</label>
+            <select value={mfr} disabled={isEdit} onChange={e=>{setMfr(e.target.value);setModel('');}} style={fieldStyle}>
+              <option value="">Select…</option>
+              {filteredMfrs.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={sLabel}>Model</label>
+            <select value={model} disabled={isEdit} onChange={e=>setModel(e.target.value)} style={fieldStyle}>
+              <option value="">Select…</option>
+              {filteredModels.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          <div><label style={sLabel}>Serial Number</label><input value={serialNumber} onChange={e=>setSerialNumber(e.target.value)} style={fieldStyle}/></div>
+          <div>
+            <label style={sLabel}>Status</label>
+            <select value={status} onChange={e=>setStatus(e.target.value)} style={fieldStyle}>
+              {Object.entries(ASSET_STATUS_META).map(([k,m])=><option key={k} value={k}>{m.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+          <div><label style={sLabel}>Site</label><input value={site} onChange={e=>setSite(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Location</label><input value={location} onChange={e=>setLocation(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Sub-Location</label><input value={subLocation} onChange={e=>setSubLocation(e.target.value)} style={fieldStyle}/></div>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          <div><label style={sLabel}>Commissioned Date</label><input type="date" value={commissionedAt||''} onChange={e=>setCommissionedAt(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Warranty Until</label><input type="date" value={warrantyUntil||''} onChange={e=>setWarrantyUntil(e.target.value)} style={fieldStyle}/></div>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
+          <div><label style={sLabel}>PM Interval (hrs)</label><input type="number" value={pmIntervalHours} onChange={e=>setPmIntervalHours(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Last PM Hours</label><input type="number" value={lastPmHours} onChange={e=>setLastPmHours(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Last PM Date</label><input type="date" value={lastPmDate||''} onChange={e=>setLastPmDate(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>PM Interval (days)</label><input type="number" value={pmIntervalDays} onChange={e=>setPmIntervalDays(e.target.value)} style={fieldStyle}/></div>
+        </div>
+
+        <div><label style={sLabel}>Notes</label><textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={2} style={{ ...fieldStyle, resize:"vertical" }}/></div>
+
+        <FileUpload partCode={tagPreview || asset?.assetTag || 'pending'} bucket="asset-photos" label="Photo" currentUrl={photoUrl} onUploaded={setPhotoUrl}/>
+
+        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":(isEdit?"Save Changes":"Create Asset")}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
@@ -6250,6 +6731,7 @@ const NAV = [
   { id:"movements",     labelKey:"nav_movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"🔔", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"assets",        labelKey:"nav_assets",        label:"Asset Registry",      icon:"🏭", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
   { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"🔑", group:"System",      groupKey:"group_System",       adminOnly:true  },
   { id:"auditlog",      labelKey:"nav_auditlog",      label:"Audit Log",           icon:"📜", group:"System",      groupKey:"group_System",       adminOnly:true  },
   { id:"users",         labelKey:"nav_users",         label:"User Management",     icon:"👥", group:"System",      groupKey:"group_System",       adminOnly:true  },
@@ -6320,6 +6802,7 @@ function AppShell() {
     movements:     <StockMovementsPage data={data} />,
     reorder:       <ReorderSettingsPage data={data} />,
     alerts:        <StockAlertsPage data={data} />,
+    assets:        <AssetRegistryPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
