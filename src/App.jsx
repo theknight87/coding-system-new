@@ -1721,6 +1721,16 @@ function Dashboard({ data }) {
   const [confidencePct, setConfidencePct] = useState(null); // null while loading
   const [partsInStock,  setPartsInStock]  = useState(null); // null while loading
   const [movementsThisMonth, setMovementsThisMonth] = useState(null);
+  const [needsAttention, setNeedsAttention] = useState(null); // null while loading
+
+  useEffect(() => {
+    if (!dbReady) { setNeedsAttention(null); return; }
+    db.fetchStockStatusSummary().then(({ data: rows }) => {
+      const counts = { out: 0, critical: 0, low: 0 };
+      (rows || []).forEach(r => { if (r.stock_status in counts) counts[r.stock_status] = r.part_count; });
+      setNeedsAttention(counts.out + counts.critical + counts.low);
+    });
+  }, [dbReady]);
 
   useEffect(() => {
     if (!dbReady) { setConfidencePct(null); return; }
@@ -1787,6 +1797,9 @@ function Dashboard({ data }) {
         </div>
         <div onClick={()=>navigateTo && navigateTo('movements')} style={{ cursor: navigateTo?"pointer":"default" }}>
           <StatCard label="Movements This Month" value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} color="#7c3aed" icon="🚚" />
+        </div>
+        <div onClick={()=>navigateTo && navigateTo('reorder')} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="Needs Attention" value={needsAttention===null?"…":needsAttention.toLocaleString()} color={needsAttention?T.danger:T.success} icon="⚠️" />
         </div>
       </div>
 
