@@ -575,6 +575,95 @@ export async function fetchReversalsFor(txnIds) {
   return supabase.from('v_stock_transactions_detail').select('*').in('reverses_txn_id', txnIds);
 }
 
+// ─── REORDER SETTINGS / STOCK STATUS ────────────────────────────
+// Backed by migration 015_reorder_points.sql: v_stock_status computes
+// stock_status/suggested_order_qty/severity_rank per part from
+// min_stock/reorder_point/max_stock. Reads go through the view;
+// writes go straight to spare_parts (RLS-covered, same as every other
+// spare_parts column) or through bulk_set_reorder_settings() for the
+// "apply to filtered selection" bulk action.
+export const STOCK_STATUSES = ['out', 'critical', 'low', 'ok', 'unset'];
+
+function applyStockStatusFilters(q, filters = {}) {
+  if (filters.cat)    q = q.eq('cat', filters.cat);
+  if (filters.mfr)    q = q.eq('mfr', filters.mfr);
+  if (filters.model)  q = q.eq('model', filters.model);
+  if (filters.fg)     q = q.eq('fg', filters.fg);
+  if (filters.status) q = q.eq('stock_status', filters.status);
+  if (filters.search) q = q.ilike('code', `%${filters.search}%`);
+  return q;
+}
+
+export async function fetchStockStatusCount(filters = {}) {
+  let q = supabase.from('v_stock_status').select('id', { count: 'exact', head: true });
+  q = applyStockStatusFilters(q, filters);
+  const { count, error } = await q;
+  return { count: count ?? 0, error };
+}
+
+export async function fetchStockStatus(filters = {}, page = 0, pageSize = 50) {
+  let q = supabase
+    .from('v_stock_status')
+    .select('*')
+    .order('severity_rank', { ascending: true })
+    .order('code', { ascending: true })
+    .range(page * pageSize, (page + 1) * pageSize - 1);
+  q = applyStockStatusFilters(q, filters);
+  return q;
+}
+
+export async function fetchStockStatusSummary() {
+  return supabase.from('v_stock_status_summary').select('stock_status,part_count');
+}
+
+// Look up reorder-setting fields for a batch of codes — used by the
+// CSV import preview (same pattern as fetchPartsByCodes).
+export async function fetchReorderSettingsByCodes(codes) {
+  if (!codes || codes.length === 0) return { data: [], error: null };
+  return supabase
+    .from('spare_parts')
+    .select('id,code,short_desc,min_stock,reorder_point,max_stock,lead_time_days,is_critical,preferred_supplier')
+    .in('code', codes)
+    .is('deleted_at', null);
+}
+
+export async function updateReorderSettings(code, updates) {
+  const userId = await uid();
+  const payload = {};
+  if (updates.minStock !== undefined)      payload.min_stock = updates.minStock;
+  if (updates.reorderPoint !== undefined)  payload.reorder_point = updates.reorderPoint;
+  if (updates.maxStock !== undefined)      payload.max_stock = updates.maxStock;
+  if (updates.leadTimeDays !== undefined)  payload.lead_time_days = updates.leadTimeDays;
+  if (updates.isCritical !== undefined)    payload.is_critical = updates.isCritical;
+  if (updates.preferredSupplier !== undefined) payload.preferred_supplier = updates.preferredSupplier;
+  payload.updated_by = userId;
+  const { data, error } = await supabase.from('spare_parts').update(payload).eq('code', code).select('*').maybeSingle();
+  return { data, error };
+}
+
+// Applies the same reorder-setting values to every part matching the
+// filters, in one server-side statement (see migration 015 for why
+// this is an RPC rather than an .in([...ids]) update — thousands of
+// UUIDs would blow past URL length limits). Only fields present in
+// `values` are changed; omit a field to leave it untouched. maxStock
+// is nullable and NULL is itself meaningful ("unset"), so pass
+// `maxStock: null` explicitly to clear it — it's distinguished from
+// "don't touch max_stock" via a separate flag sent to the RPC.
+export async function bulkSetReorderSettings(filters = {}, values = {}) {
+  const params = {
+    p_cat: filters.cat || null, p_mfr: filters.mfr || null, p_model: filters.model || null,
+    p_fg: filters.fg || null, p_status: filters.status || null,
+    p_min_stock: values.minStock ?? null,
+    p_reorder_point: values.reorderPoint ?? null,
+    p_max_stock: values.maxStockSet ? values.maxStock : null,
+    p_max_stock_set: !!values.maxStockSet,
+    p_lead_time_days: values.leadTimeDays ?? null,
+    p_is_critical: values.isCritical ?? null,
+    p_preferred_supplier: values.preferredSupplier ?? null,
+  };
+  return supabase.rpc('bulk_set_reorder_settings', params);
+}
+
 // ─── TRASH / RECYCLE BIN ──────────────────────────────────────
 // Every soft-deletable table, with the columns needed to show a
 // meaningful row in the Trash page and the label used in the UI.
