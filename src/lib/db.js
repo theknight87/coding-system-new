@@ -468,6 +468,109 @@ export async function resetEstimatedBalances(categoryCode) {
   return { data, error };
 }
 
+// ─── STOCK TRANSACTIONS (LEDGER) ────────────────────────────────
+// The real ledger (migrations 011/012/014). Reads go through
+// v_stock_transactions_detail (adds balance_after + joined part/user
+// display fields); writes go straight to the base table — the DB
+// triggers from migration 011 handle recalculating qty_on_hand and
+// writing the audit_logs row automatically, so no app-level audit()
+// call is needed here.
+// "Everyday" types a normal user posts vs. the corrective ones — mirrors
+// the segmented control grouping in the Record Movement modal.
+export const TXN_TYPES_EVERYDAY   = ['receipt', 'issue', 'return_to_store', 'transfer_in', 'transfer_out'];
+export const TXN_TYPES_CORRECTIVE = ['adjustment_in', 'adjustment_out', 'scrap'];
+// Every value of the stock_txn_type enum, for filter dropdowns.
+export const ALL_TXN_TYPES = ['opening_balance', ...TXN_TYPES_EVERYDAY, ...TXN_TYPES_CORRECTIVE];
+// Inbound (+) vs outbound (−) — drives the colored pill on the ledger.
+export const TXN_TYPES_INBOUND  = ['opening_balance', 'receipt', 'return_to_store', 'transfer_in', 'adjustment_in'];
+export const TXN_TYPES_OUTBOUND = ['issue', 'scrap', 'transfer_out', 'adjustment_out'];
+
+function applyStockTxnFilters(q, filters = {}) {
+  if (filters.partId)   q = q.eq('part_id', filters.partId);
+  if (filters.txnType)  q = q.eq('txn_type', filters.txnType);
+  if (filters.cat)      q = q.eq('cat', filters.cat);
+  if (filters.mfr)      q = q.eq('mfr', filters.mfr);
+  if (filters.userId)   q = q.eq('created_by', filters.userId);
+  if (filters.dateFrom) q = q.gte('occurred_at', filters.dateFrom);
+  if (filters.dateTo)   q = q.lte('occurred_at', filters.dateTo);
+  if (filters.location) q = q.or(`location_from.eq.${filters.location},location_to.eq.${filters.location}`);
+  if (filters.search)   q = q.or(`part_code.ilike.%${filters.search}%,reference_no.ilike.%${filters.search}%`);
+  return q;
+}
+
+export async function fetchStockTransactionsCount(filters = {}) {
+  let q = supabase.from('v_stock_transactions_detail').select('id', { count: 'exact', head: true });
+  q = applyStockTxnFilters(q, filters);
+  const { count, error } = await q;
+  return { count: count ?? 0, error };
+}
+
+export async function fetchStockTransactions(filters = {}, page = 0, pageSize = 50) {
+  let q = supabase
+    .from('v_stock_transactions_detail')
+    .select('*')
+    .order('occurred_at', { ascending: false })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(page * pageSize, (page + 1) * pageSize - 1);
+  q = applyStockTxnFilters(q, filters);
+  return q;
+}
+
+// Summary tiles (total received / issued / net / count) for the
+// current filter set. Fetches the raw signed_qty column rather than
+// using a server-side aggregate, capped generously — fine for this
+// dataset's size, but a filter matching more than 10,000 transactions
+// will undercount until this is moved to a real aggregate/RPC.
+export async function fetchStockTransactionsSummary(filters = {}) {
+  let q = supabase.from('v_stock_transactions_detail').select('signed_qty,is_void').limit(10000);
+  q = applyStockTxnFilters(q, filters);
+  const { data, error } = await q;
+  if (error) return { data: null, error };
+  let received = 0, issued = 0, count = 0;
+  for (const row of data || []) {
+    count++;
+    if (row.is_void) continue;
+    const n = Number(row.signed_qty) || 0;
+    if (n > 0) received += n; else issued += -n;
+  }
+  return { data: { received, issued, net: received - issued, count }, error: null };
+}
+
+export async function insertStockTransaction(row) {
+  const userId = await uid();
+  const { data, error } = await supabase
+    .from('stock_transactions')
+    .insert({
+      part_id: row.partId,
+      txn_type: row.txnType,
+      quantity: row.quantity,
+      location_from: row.locationFrom || null,
+      location_to: row.locationTo || null,
+      reference_no: row.referenceNo || null,
+      unit_cost: row.unitCost === '' || row.unitCost == null ? null : Number(row.unitCost),
+      currency: row.currency || 'EGP',
+      notes: row.notes || null,
+      occurred_at: row.occurredAt || new Date().toISOString(),
+      created_by: userId,
+    })
+    .select('*').maybeSingle();
+  return { data, error };
+}
+
+export async function voidStockTransaction(txnId, reason) {
+  return supabase.rpc('void_stock_transaction', { p_txn_id: txnId, p_reason: reason || null });
+}
+
+// Looks up the reversing entries for a batch of voided transactions
+// (by their id, matched against reverses_txn_id) regardless of which
+// page of the ledger they landed on — used to render a voided row's
+// reversal nested directly beneath it.
+export async function fetchReversalsFor(txnIds) {
+  if (!txnIds || txnIds.length === 0) return { data: [], error: null };
+  return supabase.from('v_stock_transactions_detail').select('*').in('reverses_txn_id', txnIds);
+}
+
 // ─── TRASH / RECYCLE BIN ──────────────────────────────────────
 // Every soft-deletable table, with the columns needed to show a
 // meaningful row in the Trash page and the label used in the UI.
