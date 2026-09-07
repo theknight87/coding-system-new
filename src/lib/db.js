@@ -756,6 +756,27 @@ export async function snoozeAlert(partId, severity, snoozeUntil) {
   return { data, error };
 }
 
+// ─── PUSH SUBSCRIPTIONS ─────────────────────────────────────────
+export async function fetchMyPushSubscriptions() {
+  const userId = await uid();
+  if (!userId) return { data: [], error: null };
+  return supabase.from('push_subscriptions').select('*').eq('user_id', userId);
+}
+
+export async function savePushSubscription(sub) {
+  const userId = await uid();
+  const json = sub.toJSON();
+  return supabase.from('push_subscriptions').upsert({
+    user_id: userId, endpoint: json.endpoint,
+    p256dh: json.keys.p256dh, auth: json.keys.auth,
+    user_agent: navigator.userAgent, last_used_at: new Date().toISOString(),
+  }, { onConflict: 'endpoint' });
+}
+
+export async function deletePushSubscriptionByEndpoint(endpoint) {
+  return supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+}
+
 // ─── TRASH / RECYCLE BIN ──────────────────────────────────────
 // Every soft-deletable table, with the columns needed to show a
 // meaningful row in the Trash page and the label used in the UI.
