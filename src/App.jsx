@@ -89,7 +89,7 @@ const TXN_LABELS = {
 const TXN_NEEDS_FROM = ['issue', 'transfer_in', 'transfer_out', 'adjustment_out', 'scrap'];
 const TXN_NEEDS_TO   = ['receipt', 'return_to_store', 'transfer_in', 'transfer_out', 'adjustment_in'];
 
-function RecordMovementModal({ part, onClose, onSaved }) {
+function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
   const { isAdmin, isDeptUser } = useAuth();
   const canPost = isAdmin || isDeptUser; // this app's two roles both have stock_transactions_insert rights
 
@@ -99,7 +99,7 @@ function RecordMovementModal({ part, onClose, onSaved }) {
   const [pickerResults, setPickerResults] = useState([]);
   const [pickerLoading, setPickerLoading] = useState(false);
 
-  const [txnType,     setTxnType]     = useState('receipt');
+  const [txnType,     setTxnType]     = useState(initialTxnType || 'receipt');
   const [quantity,    setQuantity]    = useState('');
   const [locationFrom,setLocationFrom]= useState('');
   const [locationTo,  setLocationTo]  = useState('');
@@ -1458,21 +1458,37 @@ const CodeTag = ({ code }) => (
   </span>
 );
 
+// Stock-level state color: red when zero, amber at/below the reorder
+// point. `reorderPoint` isn't wired to real data yet — that column
+// arrives in a later phase — so callers that don't have one yet just
+// pass null/undefined and get red-when-zero only. Kept as a standalone
+// helper (not baked into StockQtyDisplay's markup) so it's ready to
+// wire up without touching every call site again.
+function qtyStateColor(qty, reorderPoint = null) {
+  const n = Number(qty) || 0;
+  if (n === 0) return T.danger;
+  if (reorderPoint != null && n <= reorderPoint) return T.warn;
+  return T.text;
+}
+
 // Honesty-in-the-UI primitive: renders a stock quantity so an
 // estimated (seeded, never physically counted) figure can never be
-// mistaken for a real one. Used anywhere qty_on_hand is shown.
-const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false }) => {
+// mistaken for a real one. Used anywhere qty_on_hand is shown. Also
+// applies qtyStateColor so a zero balance always reads as red.
+const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false, reorderPoint = null }) => {
   const size = small ? 12 : 13;
+  const stateColor = qtyStateColor(qty, reorderPoint);
+  const numStyle = { fontVariantNumeric: "tabular-nums" };
   if (stockSource === 'estimated') {
     return (
       <span title="Estimated starting balance — not yet physically counted" style={{ display:"inline-flex", alignItems:"center", gap:5, cursor:"help" }}>
-        <span style={{ color:T.muted, fontSize:size }}>~{qty}{unit?` ${unit}`:''}</span>
+        <span style={{ color: stateColor===T.text?T.muted:stateColor, fontSize:size, fontWeight:stateColor!==T.text?700:400, ...numStyle }}>~{qty}{unit?` ${unit}`:''}</span>
         <span style={{ fontSize:9, fontWeight:800, color:T.warn, background:T.warnBg, padding:"1px 5px", borderRadius:4, textTransform:"uppercase", letterSpacing:0.4 }}>est.</span>
       </span>
     );
   }
   if (stockSource === 'counted') {
-    return <span style={{ fontSize:size, color:T.text }}>{qty}{unit?` ${unit}`:''}</span>;
+    return <span style={{ fontSize:size, color:stateColor, fontWeight:stateColor!==T.text?700:400, ...numStyle }}>{qty}{unit?` ${unit}`:''}</span>;
   }
   return <span title="No stock data recorded yet" style={{ fontSize:size, color:T.muted, cursor:"help" }}>— {unit}</span>;
 };
@@ -1703,6 +1719,8 @@ function Dashboard({ data }) {
   const [recentParts,  setRecentParts]  = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
   const [confidencePct, setConfidencePct] = useState(null); // null while loading
+  const [partsInStock,  setPartsInStock]  = useState(null); // null while loading
+  const [movementsThisMonth, setMovementsThisMonth] = useState(null);
 
   useEffect(() => {
     if (!dbReady) { setConfidencePct(null); return; }
@@ -1711,6 +1729,18 @@ function Dashboard({ data }) {
       (rows||[]).filter(r=>r.cat===null).forEach(r => { overall[r.stock_source] = r.part_count; });
       const total = overall.none + overall.estimated + overall.counted;
       setConfidencePct(total ? Math.round((overall.counted/total)*100) : 0);
+    });
+  }, [dbReady]);
+
+  useEffect(() => {
+    if (!dbReady) { setPartsInStock(null); setMovementsThisMonth(null); return; }
+    const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0,0,0,0);
+    Promise.all([
+      db.fetchPartsCount({ inStock: 'in' }),
+      db.fetchStockTransactionsCount({ dateFrom: startOfMonth.toISOString() }),
+    ]).then(([inStockRes, movementsRes]) => {
+      setPartsInStock(inStockRes.count || 0);
+      setMovementsThisMonth(movementsRes.count || 0);
     });
   }, [dbReady]);
 
@@ -1751,6 +1781,12 @@ function Dashboard({ data }) {
         <StatCard label="Disciplines" value={disciplines.length} color="#0e7490" icon="🔬" />
         <div onClick={()=>navigateTo && navigateTo('stockcount')} style={{ cursor: navigateTo?"pointer":"default" }}>
           <StatCard label="Stock data confidence" value={confidencePct===null?"…":`${confidencePct}% counted`} color="#15803d" icon="🧮" />
+        </div>
+        <div onClick={()=>navigateTo && navigateTo('master', { inStock: 'in' })} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="Parts in Stock" value={partsInStock===null?"…":partsInStock.toLocaleString()} color="#0891b2" icon="📥" />
+        </div>
+        <div onClick={()=>navigateTo && navigateTo('movements')} style={{ cursor: navigateTo?"pointer":"default" }}>
+          <StatCard label="Movements This Month" value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} color="#7c3aed" icon="🚚" />
         </div>
       </div>
 
@@ -3465,8 +3501,11 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   const [toast,       setToast]       = useState(null);
   const [imgUrl,      setImgUrl]      = useState(part.imageUrl || null);
   const [showRecordModal, setShowRecordModal] = useState(false);
+  const [quickActionType, setQuickActionType] = useState(null); // preset type for the quick-action buttons
   const [movements,       setMovements]       = useState([]);
   const [movLoading,      setMovLoading]      = useState(false);
+  const [txnHistory,      setTxnHistory]      = useState([]); // up to 1000 non-void txns, for location + consumption math
+  const [histLoading,     setHistLoading]     = useState(false);
 
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
@@ -3487,9 +3526,21 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   const loadMovements = useCallback(() => {
     if (!dbReady || !fullPart.id) return;
     setMovLoading(true);
-    db.fetchStockTransactions({ partId: fullPart.id }, 0, 5)
+    db.fetchStockTransactions({ partId: fullPart.id }, 0, 20)
       .then(({ data }) => setMovements(data || []))
       .finally(() => setMovLoading(false));
+  }, [fullPart.id, dbReady]);
+
+  // Broader (non-paginated-display) history used only to derive the
+  // per-location breakdown and the 12-month consumption sparkline —
+  // approximate for a part with an unusually long transaction history
+  // (capped at 1000 rows), plenty for this catalogue's real volume.
+  const loadTxnHistory = useCallback(() => {
+    if (!dbReady || !fullPart.id) return;
+    setHistLoading(true);
+    db.fetchStockTransactions({ partId: fullPart.id }, 0, 1000)
+      .then(({ data }) => setTxnHistory((data || []).filter(t => !t.is_void)))
+      .finally(() => setHistLoading(false));
   }, [fullPart.id, dbReady]);
 
   // The Hierarchy Tree passes a lightweight part object (code, short_desc,
@@ -3508,6 +3559,42 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
 
   // Recent stock movements for this part (live DB only).
   useEffect(() => { loadMovements(); }, [loadMovements]);
+  useEffect(() => { loadTxnHistory(); }, [loadTxnHistory]);
+
+  // Per-location breakdown, derived from where each non-void movement
+  // added to (location_to) or removed from (location_from). Not a true
+  // per-location ledger table — an approximation from movement history.
+  const locationBreakdown = useMemo(() => {
+    const map = {};
+    txnHistory.forEach(t => {
+      const qty = Number(t.signed_qty) || 0;
+      if (qty > 0 && t.location_to)   map[t.location_to]   = (map[t.location_to]   || 0) + qty;
+      if (qty < 0 && t.location_from) map[t.location_from] = (map[t.location_from] || 0) + qty;
+    });
+    return Object.entries(map).map(([location, qty]) => ({ location, qty })).sort((a,b)=>b.qty-a.qty);
+  }, [txnHistory]);
+
+  // 12-month consumption: monthly issue totals for the sparkline, plus
+  // rolling 30/90/365-day figures and an average monthly rate.
+  const consumption = useMemo(() => {
+    const issues = txnHistory.filter(t => t.txn_type === 'issue');
+    const now = Date.now();
+    const sumDays = (days) => issues
+      .filter(t => now - new Date(t.occurred_at).getTime() <= days*86400000)
+      .reduce((s,t) => s + Math.abs(Number(t.signed_qty)||0), 0);
+    const base = new Date(); base.setDate(1); base.setHours(0,0,0,0);
+    const monthKeys = [];
+    for (let i=11; i>=0; i--) { const d=new Date(base); d.setMonth(d.getMonth()-i); monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); }
+    const bucketMap = Object.fromEntries(monthKeys.map(k=>[k,0]));
+    issues.forEach(t => {
+      const d = new Date(t.occurred_at);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (k in bucketMap) bucketMap[k] += Math.abs(Number(t.signed_qty)||0);
+    });
+    const buckets = monthKeys.map(k => bucketMap[k]);
+    const d365 = sumDays(365);
+    return { d30: sumDays(30), d90: sumDays(90), d365, avgMonthly: Math.round((d365/12)*10)/10, buckets, monthKeys };
+  }, [txnHistory]);
 
   const partView = fullPart; // use this everywhere below instead of raw `part`
 
@@ -3624,19 +3711,109 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 </div>
               ))}
             </div>
-            {/* Stock on hand — rendered separately so an estimated figure
-                can never be mistaken for a plain string value */}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8 }}>
-              <div style={{ background:T.subtle,borderRadius:6,padding:"9px 12px" }}>
-                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>Quantity on Hand</div>
-                <StockQtyDisplay qty={partView.qtyOnHand} unit={partView.unit} stockSource={partView.stockSource} />
-                {partView.stockSource==='counted' && partView.lastCountedAt && (
-                  <div style={{ fontSize:10, color:T.muted, marginTop:3 }}>Last counted {new Date(partView.lastCountedAt).toLocaleDateString()}</div>
+            {/* ═══ STOCK PANEL ═══ */}
+            <div style={{ border:`1px solid ${T.border}`, borderRadius:8, padding:16, marginBottom:20, background:T.subtle }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                <div style={{ fontSize:12, fontWeight:800, color:T.text, textTransform:"uppercase", letterSpacing:0.6 }}>📊 Stock</div>
+                {dbReady && (
+                  <div style={{ display:"flex", gap:6 }}>
+                    <Btn small variant="success" onClick={()=>{setQuickActionType('receipt'); setShowRecordModal(true);}}>+ Receive</Btn>
+                    <Btn small variant="danger" onClick={()=>{setQuickActionType('issue'); setShowRecordModal(true);}}>− Issue</Btn>
+                    <Btn small variant="secondary" onClick={()=>{setQuickActionType('adjustment_in'); setShowRecordModal(true);}}>± Adjust</Btn>
+                  </div>
                 )}
               </div>
-              <div style={{ background:T.subtle,borderRadius:6,padding:"9px 12px" }}>
-                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>Qty per Assembly (catalogue)</div>
-                <div style={{ fontSize:13,fontWeight:600,color:T.text }}>{partView.qtyPerAssembly??0} {partView.unit||"EA"}</div>
+
+              {/* On hand + qty/assembly */}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
+                <div style={{ background:T.card,borderRadius:6,padding:"9px 12px", border:`1px solid ${T.border}` }}>
+                  <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>Quantity on Hand</div>
+                  <StockQtyDisplay qty={partView.qtyOnHand} unit={partView.unit} stockSource={partView.stockSource} />
+                  <div style={{ fontSize:10, color:T.muted, marginTop:3 }}>
+                    {partView.lastCountedAt ? `Last counted ${new Date(partView.lastCountedAt).toLocaleDateString()}` : 'Never physically counted'}
+                  </div>
+                </div>
+                <div style={{ background:T.card,borderRadius:6,padding:"9px 12px", border:`1px solid ${T.border}` }}>
+                  <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:3 }}>Qty per Assembly (catalogue)</div>
+                  <div style={{ fontSize:13,fontWeight:600,color:T.text }}>{partView.qtyPerAssembly??0} {partView.unit||"EA"}</div>
+                </div>
+              </div>
+
+              {/* Per-location breakdown */}
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6 }}>By Location</div>
+                {histLoading ? (
+                  <div style={{ fontSize:12, color:T.muted }}>Loading…</div>
+                ) : locationBreakdown.length === 0 ? (
+                  <div style={{ fontSize:12, color:T.muted, background:T.card, border:`1px solid ${T.border}`, borderRadius:6, padding:"8px 12px" }}>No location data recorded in movement history.</div>
+                ) : (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                    {locationBreakdown.map(l => (
+                      <div key={l.location} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:6, padding:"6px 12px", fontSize:12 }}>
+                        <span style={{ fontFamily:"monospace", fontWeight:700, color:T.text }}>{l.location}</span>
+                        <span style={{ marginLeft:8, fontWeight:700, color:qtyStateColor(l.qty), fontVariantNumeric:"tabular-nums" }}>{l.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 12-month consumption */}
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6 }}>Consumption (Issues)</div>
+                <div style={{ display:"flex", alignItems:"flex-end", gap:3, height:36, marginBottom:8 }}>
+                  {consumption.buckets.map((v,i) => {
+                    const maxB = Math.max(1, ...consumption.buckets);
+                    return <div key={i} title={`${consumption.monthKeys[i]}: ${v}`} style={{ flex:1, background:T.accent, opacity:0.65, height:`${Math.max(4,(v/maxB)*100)}%`, borderRadius:2 }}/>;
+                  })}
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, fontSize:11 }}>
+                  <div><div style={{ color:T.muted }}>Last 30d</div><div style={{ fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{consumption.d30}</div></div>
+                  <div><div style={{ color:T.muted }}>Last 90d</div><div style={{ fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{consumption.d90}</div></div>
+                  <div><div style={{ color:T.muted }}>Last 365d</div><div style={{ fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{consumption.d365}</div></div>
+                  <div><div style={{ color:T.muted }}>Avg/Month</div><div style={{ fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{consumption.avgMonthly}</div></div>
+                </div>
+              </div>
+
+              {/* Last 20 movements */}
+              <div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                  <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6 }}>Last 20 Movements</div>
+                  {dbReady && (
+                    <a href="#" onClick={e=>{e.preventDefault(); data.navigateTo && data.navigateTo('movements', { search: partView.code });}} style={{ fontSize:11, color:T.accent, fontWeight:700, textDecoration:"none" }}>View all movements →</a>
+                  )}
+                </div>
+                {movLoading ? (
+                  <div style={{ fontSize:12,color:T.muted,padding:"10px 0" }}>Loading…</div>
+                ) : movements.length === 0 ? (
+                  <div style={{ fontSize:12,color:T.muted,background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:"10px 12px" }}>No movements recorded yet.</div>
+                ) : (
+                  <div style={{ overflowX:"auto", maxHeight:260, overflowY:"auto" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                      <thead>
+                        <tr style={{ background:T.header }}>
+                          {['Date','Type','Qty','Balance','Reference','User'].map(h=>(
+                            <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9, letterSpacing:0.8, position:"sticky", top:0 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movements.map((m,i)=>(
+                          <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:m.is_void?0.5:1 }}>
+                            <td style={{ padding:"6px 10px", color:T.muted, whiteSpace:"nowrap", textDecoration:m.is_void?"line-through":"none" }}>{new Date(m.occurred_at).toLocaleDateString()}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text, textDecoration:m.is_void?"line-through":"none" }}>{TXN_LABELS[m.txn_type]||m.txn_type}</td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:m.signed_qty>0?T.success:T.danger, fontVariantNumeric:"tabular-nums" }}>
+                              {m.signed_qty>0?'+':''}{m.signed_qty}
+                            </td>
+                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{m.balance_after}</td>
+                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.reference_no||'—'}</td>
+                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.user_full_name||m.user_email||'—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
             {/* Details grid */}
@@ -3662,42 +3839,6 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 </div>
               ))}
             </div>
-            {/* Recent stock movements */}
-            {dbReady && (
-              <div style={{ marginBottom:20 }}>
-                <div style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Recent Stock Movements</div>
-                {movLoading ? (
-                  <div style={{ fontSize:12,color:T.muted,padding:"10px 0" }}>Loading…</div>
-                ) : movements.length === 0 ? (
-                  <div style={{ fontSize:12,color:T.muted,background:T.subtle,borderRadius:6,padding:"10px 12px" }}>No movements recorded yet.</div>
-                ) : (
-                  <div style={{ overflowX:"auto" }}>
-                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                      <thead>
-                        <tr style={{ background:T.header }}>
-                          {['Date','Type','Qty','Balance','Reference'].map(h=>(
-                            <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9, letterSpacing:0.8 }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {movements.map((m,i)=>(
-                          <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:m.is_void?0.5:1 }}>
-                            <td style={{ padding:"6px 10px", color:T.muted, whiteSpace:"nowrap", textDecoration:m.is_void?"line-through":"none" }}>{new Date(m.occurred_at).toLocaleDateString()}</td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text, textDecoration:m.is_void?"line-through":"none" }}>{TXN_LABELS[m.txn_type]||m.txn_type}</td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:m.signed_qty>0?T.success:T.danger }}>
-                              {m.signed_qty>0?'+':''}{m.signed_qty}
-                            </td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text }}>{m.balance_after}</td>
-                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.reference_no||'—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
             <div style={{ display:"flex",justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={onClose}>Close</Btn>
             </div>
@@ -3759,8 +3900,9 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
       {showRecordModal && (
         <RecordMovementModal
           part={partView}
-          onClose={()=>setShowRecordModal(false)}
-          onSaved={({ newBalance })=>{ flash(`Movement recorded — now ${newBalance}`); loadMovements(); loadFullPart(); }}
+          initialTxnType={quickActionType}
+          onClose={()=>{setShowRecordModal(false); setQuickActionType(null);}}
+          onSaved={({ newBalance })=>{ flash(`Movement recorded — now ${newBalance}`); loadMovements(); loadTxnHistory(); loadFullPart(); }}
         />
       )}
     </div>
@@ -4008,7 +4150,7 @@ function HierarchyTreePage({ data }) {
 const PAGE_SIZE = 50;
 
 function MasterTablePage({ data }) {
-  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
+  const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady, navFilter, clearNavFilter } = data;
   const allSections = [...disciplines, ...engineSystems];
 
   // Filters
@@ -4018,6 +4160,8 @@ function MasterTablePage({ data }) {
   const [fModel,   setFModel]   = useState("");
   const [fDisc,    setFDisc]    = useState("");
   const [fStatus,  setFStatus]  = useState("");
+  const [fStock,   setFStock]   = useState("");  // '' | 'in' | 'out'
+  const [fSource,  setFSource]  = useState("");  // '' | 'estimated' | 'counted' | 'none'
 
   // Pagination
   const [page,       setPage]       = useState(0);
@@ -4032,10 +4176,20 @@ function MasterTablePage({ data }) {
   const [toast,        setToast]        = useState(null);
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
 
+  // Consume a one-shot filter handed off by navigateTo() (e.g. the
+  // Dashboard's "Parts in Stock" tile), then clear it so it doesn't
+  // stick around on the next visit to this page.
+  useEffect(() => {
+    if (!navFilter) return;
+    if (navFilter.inStock) setFStock(navFilter.inStock);
+    clearNavFilter();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filters = useMemo(()=>({
     search: search||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
     model: fModel||undefined, disc: fDisc||undefined, status: fStatus||undefined,
-  }),[search, fCat, fMfr, fModel, fDisc, fStatus]);
+    inStock: fStock||undefined, stockSource: fSource||undefined,
+  }),[search, fCat, fMfr, fModel, fDisc, fStatus, fStock, fSource]);
 
   // Debounce search
   useEffect(()=>{
@@ -4105,8 +4259,19 @@ function MasterTablePage({ data }) {
             <option value="">All Status</option>
             {["Active","Inactive","Obsolete"].map(s=><option key={s}>{s}</option>)}
           </select>
-          {(search||fCat||fMfr||fModel||fDisc||fStatus)&&(
-            <button onClick={()=>{setSearchInput("");setSearch("");setFCat("");setFMfr("");setFModel("");setFDisc("");setFStatus("");}}
+          <select value={fStock} onChange={e=>setFStock(e.target.value)} style={selStyle} title="Filter by on-hand stock level">
+            <option value="">All Stock</option>
+            <option value="in">In Stock</option>
+            <option value="out">Out of Stock</option>
+          </select>
+          <select value={fSource} onChange={e=>setFSource(e.target.value)} style={selStyle} title="Filter by how the on-hand figure was established">
+            <option value="">Est. / Counted / Not Set</option>
+            <option value="estimated">Estimated</option>
+            <option value="counted">Counted</option>
+            <option value="none">Not Set</option>
+          </select>
+          {(search||fCat||fMfr||fModel||fDisc||fStatus||fStock||fSource)&&(
+            <button onClick={()=>{setSearchInput("");setSearch("");setFCat("");setFMfr("");setFModel("");setFDisc("");setFStatus("");setFStock("");setFSource("");}}
               style={{ padding:"7px 12px", borderRadius:5, border:"1px solid #fca5a5", background:"#fee2e2", color:T.danger, fontSize:13, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
               ✕ Clear
             </button>
@@ -4141,14 +4306,14 @@ function MasterTablePage({ data }) {
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
               <thead>
                 <tr style={{ background:T.header }}>
-                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty","Loc","Status","Actions"].map(h=>(
+                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty/Assy","On Hand","Loc","Status","Actions"].map(h=>(
                     <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.length===0
-                  ? <tr><td colSpan={13} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts found.</td></tr>
+                  ? <tr><td colSpan={14} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts found.</td></tr>
                   : rows.map((r,i)=>{
                     const cat = categories.find(x=>x.code===r.cat);
                     const mdl = models.find(x=>x.code===r.model);
@@ -4171,7 +4336,8 @@ function MasterTablePage({ data }) {
                         <td style={{ padding:"7px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
                         <td style={{ padding:"7px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
                         <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.partNo||"—"}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
+                        <td style={{ padding:"7px 10px", textAlign:"center", color:T.muted, fontVariantNumeric:"tabular-nums" }} title="Quantity used per assembly — catalogue reference, not stock">{r.qtyPerAssembly}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
                         <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.loc||"—"}</td>
                         <td style={{ padding:"7px 10px" }}>
                           <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
@@ -4210,7 +4376,7 @@ function MasterTablePage({ data }) {
       <CodeLegend items={[
         ...categories.map(c=>({code:c.code,label:c.label})),
         ...disciplines.map(d=>({code:d.code,label:d.label})),
-        {code:"Qty",label:"Quantity"},{code:"Loc",label:"Storage Location"},
+        {code:"Qty/Assy",label:"Quantity per Assembly (catalogue)"},{code:"On Hand",label:"Live Quantity on Hand"},{code:"Loc",label:"Storage Location"},
       ]} />
 
       {selectedPart && (
@@ -4688,7 +4854,7 @@ const TXN_PILL = {
 };
 
 function StockMovementsPage({ data }) {
-  const { categories, manufacturers, dbReady, navigateTo } = data;
+  const { categories, manufacturers, dbReady, navigateTo, navFilter, clearNavFilter } = data;
   const { isAdmin } = useAuth();
   const PAGE_SIZE = 50;
 
@@ -4704,8 +4870,10 @@ function StockMovementsPage({ data }) {
   const [voidReason,setVoidReason]= useState('');
   const [voiding,   setVoiding]   = useState(false);
 
-  const [searchInput, setSearchInput] = useState('');
-  const [search,   setSearch]   = useState('');
+  // Pre-filtered arrival from e.g. Part Detail's "View all movements" link.
+  const [searchInput, setSearchInput] = useState(navFilter?.search || '');
+  const [search,   setSearch]   = useState(navFilter?.search || '');
+  useEffect(() => { if (navFilter) clearNavFilter(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo,   setDateTo]   = useState('');
   const [fType,    setFType]    = useState('');
@@ -4974,6 +5142,7 @@ function AppShell() {
   const { profile, isAdmin, signOut } = useAuth();
   const [page,      setPage]      = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
+  const [navFilter, setNavFilter] = useState(null); // one-shot filter payload for the next page
 
   const initData = {
     categories: INIT_CATEGORIES, manufacturers: INIT_MANUFACTURERS,
@@ -4988,7 +5157,13 @@ function AppShell() {
     ...state,
     dbReady,
     ops, // Supabase-aware save/delete functions for every entity
-    navigateTo: setPage, // lets a page (e.g. a Dashboard tile) switch the active sidebar page
+    // Switches the active sidebar page, optionally carrying a one-shot
+    // filter payload the destination page reads on mount then clears
+    // via clearNavFilter() (e.g. Dashboard tiles, Part Detail's "View
+    // all movements" link pre-filtering the Stock Movements page).
+    navigateTo: (pageId, filter=null) => { setNavFilter(filter); setPage(pageId); },
+    navFilter,
+    clearNavFilter: () => setNavFilter(null),
     // Legacy compat setters — pages that still use setXxx() directly
     // will update local state only; pages that use ops.saveXxx() persist to DB
     setCategories:    (fn) => { /* no-op: use ops.saveCategory */ },

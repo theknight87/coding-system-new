@@ -283,6 +283,8 @@ export async function fetchPartsCount(filters = {}) {
   if (filters.fg)          q = q.eq('fg', filters.fg);
   if (filters.location)    q = q.eq('location', filters.location);
   if (filters.stockSource) q = q.eq('stock_source', filters.stockSource);
+  if (filters.inStock === 'in')  q = q.gt('qty_on_hand', 0);
+  if (filters.inStock === 'out') q = q.eq('qty_on_hand', 0);
   if (filters.search) {
     q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%`);
   }
@@ -305,6 +307,8 @@ export async function fetchParts(filters = {}, page = 0, pageSize = 100) {
   if (filters.fg)          q = q.eq('fg', filters.fg);
   if (filters.location)    q = q.eq('location', filters.location);
   if (filters.stockSource) q = q.eq('stock_source', filters.stockSource);
+  if (filters.inStock === 'in')  q = q.gt('qty_on_hand', 0);
+  if (filters.inStock === 'out') q = q.eq('qty_on_hand', 0);
   if (filters.search) {
     q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%,part_no.ilike.%${filters.search}%,oem_part.ilike.%${filters.search}%,location.ilike.%${filters.search}%`);
   }
