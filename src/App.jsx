@@ -4254,7 +4254,34 @@ function MasterTablePage({ data }) {
   const [selectedPart, setSelectedPart] = useState(null);
   const [moveTarget,   setMoveTarget]   = useState(null); // part to record a movement for
   const [toast,        setToast]        = useState(null);
+  const [importOpen,   setImportOpen]   = useState(false);
+  const [exporting,    setExporting]    = useState(false);
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const exportCsv = async () => {
+    if (!dbReady) return flash('Requires a live database connection', 'err');
+    setExporting(true);
+    const { data: allRows, error } = await db.fetchParts(filters, 0, 5000);
+    setExporting(false);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    const mapped = (allRows||[]).map(mapPart);
+    const header = ['Code','Short Description','Long Description','Category','Manufacturer','Model','Discipline','Functional Group','Part No','OEM Part','Qty Per Assembly','Unit','Location','Status','Remarks'];
+    const esc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+    const lines = [header.map(esc).join(',')];
+    mapped.forEach(r => {
+      lines.push([
+        r.code, r.shortDesc, r.longDesc, r.cat, r.mfr, r.model, r.disc, r.fg,
+        r.partNo, r.oemPart, r.qtyPerAssembly, r.unit, r.loc, r.status, r.remarks,
+      ].map(esc).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `master-parts-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    flash(`Exported ${mapped.length} part(s)`);
+  };
 
   // Consume a one-shot filter handed off by navigateTo() (e.g. the
   // Dashboard's "Parts in Stock" tile), then clear it so it doesn't
@@ -4356,6 +4383,10 @@ function MasterTablePage({ data }) {
               ✕ Clear
             </button>
           )}
+          <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={exporting}>{exporting?"Exporting…":"📥 Export CSV"}</Btn>
+            <Btn small variant="secondary" onClick={()=>setImportOpen(true)}>📤 Import CSV</Btn>
+          </div>
         </div>
       </Card>
 
@@ -4486,6 +4517,16 @@ function MasterTablePage({ data }) {
             // server-managed (post_physical_count only) and isn't guessed client-side.
             setRows(r => r.map(p => p.id===part.id ? { ...p, qtyOnHand:newBalance } : p));
           }}
+        />
+      )}
+      {importOpen && (
+        <MasterImportModal
+          onClose={()=>setImportOpen(false)}
+          onDone={()=>{
+            db.fetchPartsCount(filters).then(({count})=>setTotal(count??0));
+            db.fetchParts(filters, page, PAGE_SIZE).then(({data})=>setRows((data??[]).map(mapPart)));
+          }}
+          flash={flash}
         />
       )}
       <Toast msg={toast}/>
@@ -5599,6 +5640,104 @@ function ReorderImportModal({ onClose, onDone, flash }) {
       <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
         <div style={{ fontSize:12, color:T.muted }}>
           Columns (header row required, any order): <code>part_code, min_stock, reorder_point, max_stock, lead_time_days, is_critical, preferred_supplier</code>. Only columns present are applied.
+        </div>
+        <div>
+          <label style={sLabel}>CSV File</label>
+          <input type="file" accept=".csv,text/csv" onChange={e=>e.target.files[0] && handleFile(e.target.files[0])}/>
+          {fileName && <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{fileName}</div>}
+        </div>
+        {loadingPreview && <div style={{ color:T.muted, fontSize:12 }}>Matching part codes…</div>}
+        {!loadingPreview && (matched.length>0 || unmatched.length>0) && (
+          <>
+            <div style={{ display:"flex", gap:16, fontSize:12 }}>
+              <span style={{ color:T.success, fontWeight:700 }}>{matched.length} matched</span>
+              <span style={{ color:T.danger, fontWeight:700 }}>{unmatched.length} unmatched</span>
+            </div>
+            {unmatched.length > 0 && (
+              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}>
+                Unmatched codes: {unmatched.join(', ')}
+              </div>
+            )}
+          </>
+        )}
+        {progress && <div style={{ fontSize:12, color:T.muted }}>Importing… {progress.done} / {progress.total}</div>}
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>{committing?"Importing…":`💾 Commit ${matched.length} Update(s)`}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Update-only CSV import for the Master Parts Table. Deliberately scoped
+// to descriptive/logistics fields only — code, category, manufacturer,
+// model, discipline and functional group define the coding hierarchy
+// (segments AA-BB-CC-DD-EE) and are never touched by a bulk CSV import;
+// changing those belongs in the Part Detail edit form or Code Generator,
+// which validate against the live hierarchy tables. This mirrors the
+// existing Reorder Settings CSV import's update-only-by-code pattern.
+function MasterImportModal({ onClose, onDone, flash }) {
+  const [fileName, setFileName] = useState('');
+  const [matched,  setMatched]  = useState([]);
+  const [unmatched,setUnmatched]= useState([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [progress, setProgress] = useState(null);
+
+  const handleFile = async (file) => {
+    setFileName(file.name);
+    setLoadingPreview(true);
+    const text = await file.text();
+    const parsed = parseCsvWithHeader(text)
+      .map(r => ({
+        code: (r.code || '').toUpperCase(),
+        shortDesc: r.shortdescription ?? r.shortdesc,
+        longDesc: r.longdescription ?? r.longdesc,
+        partNo: r.partno, oemPart: r.oempart, unit: r.unit,
+        loc: r.location, status: r.status, remarks: r.remarks,
+      }))
+      .filter(r => r.code);
+    const codes = [...new Set(parsed.map(r=>r.code))];
+    const { data: parts, error } = await db.fetchPartsByCodes(codes);
+    setLoadingPreview(false);
+    if (error) { flash(`Error looking up parts: ${error.message}`, 'err'); return; }
+    const byCode = {}; (parts||[]).forEach(p => { byCode[p.code] = p; });
+    const m = [], um = [];
+    parsed.forEach(r => { const p = byCode[r.code]; if (!p) um.push(r.code); else m.push({ ...r, part: p }); });
+    setMatched(m); setUnmatched(um);
+  };
+
+  const handleCommit = async () => {
+    setCommitting(true);
+    let done = 0, failed = 0;
+    for (const r of matched) {
+      const payload = {};
+      if (r.shortDesc !== undefined && r.shortDesc !== '') payload.short_desc = r.shortDesc;
+      if (r.longDesc !== undefined && r.longDesc !== '')   payload.long_desc = r.longDesc;
+      if (r.partNo !== undefined && r.partNo !== '')       payload.part_no = r.partNo;
+      if (r.oemPart !== undefined && r.oemPart !== '')     payload.oem_part = r.oemPart;
+      if (r.unit !== undefined && r.unit !== '')           payload.unit = r.unit;
+      if (r.loc !== undefined && r.loc !== '')             payload.location = r.loc;
+      if (r.status !== undefined && r.status !== '')       payload.status = r.status;
+      if (r.remarks !== undefined && r.remarks !== '')     payload.remarks = r.remarks;
+      if (Object.keys(payload).length === 0) { done++; setProgress({ done, total: matched.length }); continue; }
+      const { error } = await db.updatePart(r.code, payload);
+      if (error) failed++; else done++;
+      setProgress({ done: done+failed, total: matched.length });
+    }
+    setCommitting(false);
+    flash(`Imported ${done} part(s)${failed?`, ${failed} failed`:''}`, failed ? 'err' : 'ok');
+    onDone(); onClose();
+  };
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  return (
+    <Modal title="Import Master Parts (CSV)" onClose={onClose} maxWidth={640}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
+        <div style={{ fontSize:12, color:T.muted }}>
+          Update-only by <code>code</code> — matches existing parts, never creates new ones. Columns (header row required, any order): <code>code, short_description, long_description, part_no, oem_part, unit, location, status, remarks</code>. Category, manufacturer, model, discipline and functional group cannot be changed via import — edit those from the part's detail view.
         </div>
         <div>
           <label style={sLabel}>CSV File</label>
