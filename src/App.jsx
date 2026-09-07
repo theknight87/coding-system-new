@@ -4477,7 +4477,8 @@ function AdminPage({ data }) {
 
 // Minimal CSV parser — handles quoted fields with embedded commas,
 // good enough for a 3-column part_code,counted_quantity,location file.
-function parseCsv(text) {
+// Shared low-level tokenizer — handles quoted fields with embedded commas.
+function parseCsvRows(text) {
   const rows = [];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -4493,10 +4494,29 @@ function parseCsv(text) {
     cells.push(cur.trim());
     rows.push(cells);
   }
+  return rows;
+}
+
+function parseCsv(text) {
+  const rows = parseCsvRows(text);
   if (rows.length && /^part[_ ]?code$/i.test(rows[0][0] || "")) rows.shift(); // drop header row
   return rows
     .filter(r => r[0])
     .map(r => ({ code: r[0].toUpperCase(), counted: r[1], location: r[2] || "" }));
+}
+
+// Header-aware CSV parser — column order doesn't matter, matched by
+// (case-insensitive) header name. Used by the Reorder Settings import,
+// which has more columns than Stock Count's fixed 3-column format.
+function parseCsvWithHeader(text) {
+  const rows = parseCsvRows(text);
+  if (rows.length === 0) return [];
+  const header = rows[0].map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return rows.slice(1).filter(r => r[0]).map(r => {
+    const obj = {};
+    header.forEach((h, i) => { obj[h] = r[i] !== undefined ? r[i].trim() : ''; });
+    return obj;
+  });
 }
 
 function StockCountPage({ data }) {
@@ -5111,6 +5131,425 @@ function StockMovementsPage({ data }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// REORDER SETTINGS PAGE — bulk-editable min_stock/reorder_point/
+// max_stock/lead_time_days/is_critical, backed by v_stock_status
+// (migration 015_reorder_points.sql).
+// ═══════════════════════════════════════════════════════════════
+
+const STOCK_STATUS_META = {
+  out:      { label: 'Out',      color: '#fff',    bg: T.danger },
+  critical: { label: 'Critical', color: T.danger,  bg: T.dangerBg },
+  low:      { label: 'Low',      color: T.warn,    bg: T.warnBg },
+  ok:       { label: 'OK',       color: T.success, bg: T.successBg },
+  unset:    { label: 'Unset',    color: T.muted,   bg: T.subtle },
+};
+
+function ReorderSettingsPage({ data }) {
+  const { categories, manufacturers, models, funcGroups, dbReady } = data;
+  const { isAdmin, isDeptUser } = useAuth();
+  const canEdit = isAdmin || isDeptUser;
+  const PAGE_SIZE = 50;
+
+  const [rows,    setRows]    = useState([]);
+  const [total,   setTotal]   = useState(0);
+  const [page,    setPage]    = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [unsetCount, setUnsetCount] = useState(null);
+  const [toast,   setToast]   = useState(null);
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const [searchInput, setSearchInput] = useState('');
+  const [search,  setSearch]  = useState('');
+  const [fCat,    setFCat]    = useState('');
+  const [fMfr,    setFMfr]    = useState('');
+  const [fModel,  setFModel]  = useState('');
+  const [fFg,     setFFg]     = useState('');
+  const [fStatus, setFStatus] = useState('');
+
+  const [edits,  setEdits]  = useState({}); // { [id]: { minStock, reorderPoint, maxStock, leadTimeDays, isCritical } }
+  const [saving, setSaving] = useState(false);
+  const [showBulk,   setShowBulk]   = useState(false);
+  const [showImport, setShowImport] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(()=>setSearch(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const filters = useMemo(() => ({
+    search: search||undefined, cat: fCat||undefined, mfr: fMfr||undefined,
+    model: fModel||undefined, fg: fFg||undefined, status: fStatus||undefined,
+  }), [search, fCat, fMfr, fModel, fFg, fStatus]);
+
+  useEffect(() => { setPage(0); }, [filters.search, filters.cat, filters.mfr, filters.model, filters.fg, filters.status]);
+
+  const load = useCallback(() => {
+    if (!dbReady) { setLoading(false); setRows([]); setTotal(0); return; }
+    setLoading(true);
+    Promise.all([
+      db.fetchStockStatusCount(filters),
+      db.fetchStockStatus(filters, page, PAGE_SIZE),
+    ]).then(([countRes, rowsRes]) => {
+      setTotal(countRes.count || 0);
+      setRows(rowsRes.data || []);
+    }).finally(() => setLoading(false));
+  }, [filters.search, filters.cat, filters.mfr, filters.model, filters.fg, filters.status, page, dbReady]);
+
+  const loadUnsetCount = useCallback(() => {
+    if (!dbReady) return;
+    db.fetchStockStatusCount({ status: 'unset' }).then(({ count }) => setUnsetCount(count));
+  }, [dbReady]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadUnsetCount(); }, [loadUnsetCount]);
+
+  const editField = (row, field, value) => {
+    setEdits(e => ({ ...e, [row.id]: { ...(e[row.id] || {}), [field]: value } }));
+  };
+  const valueFor = (row, field, rawField) => {
+    const edited = edits[row.id];
+    if (edited && field in edited) return edited[field];
+    return row[rawField];
+  };
+  const editedCount = Object.keys(edits).length;
+
+  const handleSaveAll = async () => {
+    const entries = Object.entries(edits);
+    if (entries.length === 0) return;
+    setSaving(true);
+    let ok = 0, failed = 0;
+    for (const [id, fields] of entries) {
+      const row = rows.find(r => r.id === id);
+      if (!row) continue;
+      const payload = {};
+      if ('minStock' in fields)     payload.minStock = Number(fields.minStock) || 0;
+      if ('reorderPoint' in fields) payload.reorderPoint = Number(fields.reorderPoint) || 0;
+      if ('maxStock' in fields)     payload.maxStock = fields.maxStock === '' ? null : Number(fields.maxStock);
+      if ('leadTimeDays' in fields) payload.leadTimeDays = fields.leadTimeDays === '' ? null : Number(fields.leadTimeDays);
+      if ('isCritical' in fields)   payload.isCritical = !!fields.isCritical;
+      const { error } = await db.updateReorderSettings(row.code, payload);
+      if (error) failed++; else ok++;
+    }
+    setSaving(false);
+    flash(`Saved ${ok} part(s)${failed ? `, ${failed} failed` : ''}`, failed ? 'err' : 'ok');
+    setEdits({});
+    load(); loadUnsetCount();
+  };
+
+  const exportCsv = async () => {
+    if (!dbReady) return flash('Requires a live database connection', 'err');
+    flash('Preparing export…');
+    const { data: allRows, error } = await db.fetchStockStatus(filters, 0, 6000);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    const header = ['part_code','description','status','qty_on_hand','min_stock','reorder_point','max_stock','lead_time_days','is_critical','preferred_supplier'];
+    const esc = v => `"${String(v??'').replace(/"/g,'""')}"`;
+    const lines = [header.map(esc).join(',')];
+    (allRows||[]).forEach(r => {
+      lines.push([r.code, r.short_desc, r.stock_status, r.qty_on_hand, r.min_stock, r.reorder_point, r.max_stock, r.lead_time_days, r.is_critical, r.preferred_supplier].map(esc).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `reorder-settings-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const cellInputStyle = { width:72, padding:"5px 7px", borderRadius:4, border:`1px solid ${T.border}`, fontSize:12, fontFamily:"inherit", fontVariantNumeric:"tabular-nums" };
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <div>
+      <Toast msg={toast}/>
+      <PageHeader title="Reorder Settings" sub="Configure min stock, reorder point and max stock thresholds — bulk-editable for thousands of parts at once"/>
+
+      {!canEdit && (
+        <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:7, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#92400e", fontWeight:600 }}>
+          ⚠️ Your account doesn't have permission to change reorder settings. You can still view current thresholds below.
+        </div>
+      )}
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:16 }}>
+        <StatCard label="Parts Never Configured" value={unsetCount===null?"…":unsetCount.toLocaleString()} color={T.muted} icon="⚙️"/>
+        <StatCard label="Matching Current Filter" value={total.toLocaleString()} color={T.accent} icon="🔎"/>
+        <StatCard label="Pending Edits" value={editedCount} color={editedCount?T.warn:T.muted} icon="✏️"/>
+      </div>
+
+      <Card style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Part code…" style={{ ...selStyle, minWidth:180, flex:"1 1 160px" }}/>
+          <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
+            <option value="">All Categories</option>
+            {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+          </select>
+          <select value={fMfr} onChange={e=>{setFMfr(e.target.value);setFModel("");}} style={selStyle}>
+            <option value="">All Manufacturers</option>
+            {manufacturers.filter(m=>!fCat||(m.catCodes||[]).includes(fCat)).map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fModel} onChange={e=>setFModel(e.target.value)} style={selStyle}>
+            <option value="">All Models</option>
+            {models.filter(m=>!fMfr||m.mfrCode===fMfr).map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
+          </select>
+          <select value={fFg} onChange={e=>setFFg(e.target.value)} style={selStyle}>
+            <option value="">All Functional Groups</option>
+            {funcGroups.map(f=><option key={f.code} value={f.code}>{f.code} — {f.label}</option>)}
+          </select>
+          <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={selStyle}>
+            <option value="">All Statuses</option>
+            {db.STOCK_STATUSES.map(s=><option key={s} value={s}>{STOCK_STATUS_META[s].label}</option>)}
+          </select>
+          <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+            <Btn small variant="secondary" onClick={exportCsv}>⬇ Export CSV</Btn>
+            {canEdit && <Btn small variant="secondary" onClick={()=>setShowImport(true)}>📥 Import CSV</Btn>}
+            {canEdit && <Btn small onClick={()=>setShowBulk(true)}>⚡ Set for Filtered Selection</Btn>}
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        {!dbReady ? (
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
+        ) : loading ? (
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading…</div>
+        ) : (
+          <>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:T.header }}>
+                  {['Code','Description','On Hand','Status','Min Stock','Reorder Point','Max Stock','Lead (d)','Critical'].map(h=>(
+                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0
+                  ? <tr><td colSpan={9} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts match these filters.</td></tr>
+                  : rows.map((r,i) => {
+                    const meta = STOCK_STATUS_META[r.stock_status] || STOCK_STATUS_META.unset;
+                    const dirty = !!edits[r.id];
+                    return (
+                      <tr key={r.id} style={{ borderBottom:`1px solid ${T.border}`, background:dirty?'#fffbeb':(i%2?T.subtle:T.card) }}>
+                        <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
+                        <td style={{ padding:"7px 10px", maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.short_desc}</td>
+                        <td style={{ padding:"7px 10px", fontWeight:700, fontVariantNumeric:"tabular-nums", color:qtyStateColor(r.qty_on_hand) }}>{r.qty_on_hand}</td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <span style={{ background:meta.bg, color:meta.color, fontWeight:700, fontSize:10, padding:"2px 8px", borderRadius:4, textTransform:"uppercase" }}>{meta.label}</span>
+                        </td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <input type="number" disabled={!canEdit} value={valueFor(r,'minStock','min_stock')} onChange={e=>editField(r,'minStock',e.target.value)} style={cellInputStyle}/>
+                        </td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <input type="number" disabled={!canEdit} value={valueFor(r,'reorderPoint','reorder_point')} onChange={e=>editField(r,'reorderPoint',e.target.value)} style={cellInputStyle}/>
+                        </td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <input type="number" disabled={!canEdit} value={valueFor(r,'maxStock','max_stock') ?? ''} onChange={e=>editField(r,'maxStock',e.target.value)} placeholder="—" style={cellInputStyle}/>
+                        </td>
+                        <td style={{ padding:"7px 10px" }}>
+                          <input type="number" disabled={!canEdit} value={valueFor(r,'leadTimeDays','lead_time_days') ?? ''} onChange={e=>editField(r,'leadTimeDays',e.target.value)} style={{...cellInputStyle,width:56}}/>
+                        </td>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}>
+                          <input type="checkbox" disabled={!canEdit} checked={!!valueFor(r,'isCritical','is_critical')} onChange={e=>editField(r,'isCritical',e.target.checked)}/>
+                        </td>
+                      </tr>
+                    );
+                  })
+                }
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:16, fontSize:13 }}>
+            <span style={{ color:T.muted }}>Page {page+1} of {totalPages} ({total.toLocaleString()} parts)</span>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn small variant="secondary" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>← Prev</Btn>
+              <Btn small variant="secondary" disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</Btn>
+            </div>
+          </div>
+          </>
+        )}
+      </Card>
+
+      {canEdit && editedCount > 0 && (
+        <div style={{ position:"sticky", bottom:16, marginTop:16, display:"flex", justifyContent:"flex-end" }}>
+          <Card style={{ display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 24px rgba(0,0,0,0.15)" }} pad={12}>
+            <span style={{ fontSize:13, color:T.text, fontWeight:600 }}>{editedCount} unsaved change{editedCount===1?'':'s'}</span>
+            <Btn small variant="secondary" onClick={()=>setEdits({})} disabled={saving}>Discard</Btn>
+            <Btn small onClick={handleSaveAll} disabled={saving}>{saving?"Saving…":"💾 Save Changes"}</Btn>
+          </Card>
+        </div>
+      )}
+
+      {showBulk && (
+        <BulkReorderModal
+          filters={filters} matchCount={total}
+          onClose={()=>setShowBulk(false)}
+          onApplied={(count)=>{ flash(`Updated ${count} part(s)`); load(); loadUnsetCount(); }}
+        />
+      )}
+      {showImport && (
+        <ReorderImportModal onClose={()=>setShowImport(false)} onDone={()=>{ load(); loadUnsetCount(); }} flash={flash}/>
+      )}
+    </div>
+  );
+}
+
+function BulkReorderModal({ filters, matchCount, onClose, onApplied }) {
+  const [minStock,     setMinStock]     = useState('');
+  const [reorderPoint, setReorderPoint] = useState('');
+  const [maxStock,     setMaxStock]     = useState('');
+  const [clearMaxStock,setClearMaxStock]= useState(false);
+  const [leadTimeDays, setLeadTimeDays] = useState('');
+  const [criticalMode, setCriticalMode] = useState('unchanged'); // 'unchanged' | 'true' | 'false'
+  const [confirming,   setConfirming]   = useState(false);
+  const [applying,     setApplying]     = useState(false);
+  const [error,        setError]        = useState('');
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  const hasAnyValue = minStock!=='' || reorderPoint!=='' || maxStock!=='' || clearMaxStock || leadTimeDays!=='' || criticalMode!=='unchanged';
+
+  const handleApply = async () => {
+    if (!hasAnyValue) return setError('Set at least one field to apply.');
+    setApplying(true); setError('');
+    const { data: count, error: err } = await db.bulkSetReorderSettings(filters, {
+      minStock: minStock===''?undefined:Number(minStock),
+      reorderPoint: reorderPoint===''?undefined:Number(reorderPoint),
+      maxStockSet: maxStock!=='' || clearMaxStock,
+      maxStock: clearMaxStock ? null : (maxStock===''?undefined:Number(maxStock)),
+      leadTimeDays: leadTimeDays===''?undefined:Number(leadTimeDays),
+      isCritical: criticalMode==='unchanged'?undefined:(criticalMode==='true'),
+    });
+    setApplying(false);
+    if (err) { setError(err.message); return; }
+    onApplied(count);
+    onClose();
+  };
+
+  return (
+    <Modal title="Set for Filtered Selection" onClose={onClose}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
+        <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:6, padding:"10px 14px", fontSize:13, color:"#92400e", fontWeight:600 }}>
+          This applies to every part matching your current filters — <strong>{matchCount.toLocaleString()} part(s)</strong>. Leave a field blank to leave it unchanged.
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <div><label style={sLabel}>Min Stock</label><Input type="number" value={minStock} onChange={e=>setMinStock(e.target.value)} placeholder="unchanged"/></div>
+          <div><label style={sLabel}>Reorder Point</label><Input type="number" value={reorderPoint} onChange={e=>setReorderPoint(e.target.value)} placeholder="unchanged"/></div>
+          <div>
+            <label style={sLabel}>Max Stock</label>
+            <Input type="number" value={maxStock} onChange={e=>{setMaxStock(e.target.value); if(e.target.value) setClearMaxStock(false);}} placeholder="unchanged" disabled={clearMaxStock}/>
+            <label style={{ fontSize:11, color:T.muted, display:"flex", alignItems:"center", gap:5, marginTop:4 }}>
+              <input type="checkbox" checked={clearMaxStock} onChange={e=>{setClearMaxStock(e.target.checked); if(e.target.checked) setMaxStock('');}}/> Clear (set to unset)
+            </label>
+          </div>
+          <div><label style={sLabel}>Lead Time (days)</label><Input type="number" value={leadTimeDays} onChange={e=>setLeadTimeDays(e.target.value)} placeholder="unchanged"/></div>
+        </div>
+        <div>
+          <label style={sLabel}>Critical Flag</label>
+          <Select value={criticalMode} onChange={e=>setCriticalMode(e.target.value)}>
+            <option value="unchanged">Leave unchanged</option>
+            <option value="true">Mark Critical</option>
+            <option value="false">Mark Not Critical</option>
+          </Select>
+        </div>
+        <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn variant="danger" onClick={handleApply} disabled={applying}>{applying?"Applying…":`Apply to ${matchCount.toLocaleString()} Part(s)`}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ReorderImportModal({ onClose, onDone, flash }) {
+  const [fileName, setFileName] = useState('');
+  const [matched,  setMatched]  = useState([]);
+  const [unmatched,setUnmatched]= useState([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [progress, setProgress] = useState(null);
+
+  const handleFile = async (file) => {
+    setFileName(file.name);
+    setLoadingPreview(true);
+    const text = await file.text();
+    const parsed = parseCsvWithHeader(text)
+      .map(r => ({
+        code: (r.partcode || r.code || '').toUpperCase(),
+        minStock: r.minstock, reorderPoint: r.reorderpoint, maxStock: r.maxstock,
+        leadTimeDays: r.leadtimedays, isCritical: /^(true|1|yes)$/i.test(r.iscritical||''),
+        preferredSupplier: r.preferredsupplier || '',
+      }))
+      .filter(r => r.code);
+    const codes = [...new Set(parsed.map(r=>r.code))];
+    const { data: parts, error } = await db.fetchReorderSettingsByCodes(codes);
+    setLoadingPreview(false);
+    if (error) { flash(`Error looking up parts: ${error.message}`, 'err'); return; }
+    const byCode = {}; (parts||[]).forEach(p => { byCode[p.code] = p; });
+    const m = [], um = [];
+    parsed.forEach(r => { const p = byCode[r.code]; if (!p) um.push(r.code); else m.push({ ...r, part: p }); });
+    setMatched(m); setUnmatched(um);
+  };
+
+  const handleCommit = async () => {
+    setCommitting(true);
+    let done = 0, failed = 0;
+    for (const r of matched) {
+      const payload = {};
+      if (r.minStock !== undefined && r.minStock !== '') payload.minStock = Number(r.minStock);
+      if (r.reorderPoint !== undefined && r.reorderPoint !== '') payload.reorderPoint = Number(r.reorderPoint);
+      if (r.maxStock !== undefined && r.maxStock !== '') payload.maxStock = Number(r.maxStock);
+      if (r.leadTimeDays !== undefined && r.leadTimeDays !== '') payload.leadTimeDays = Number(r.leadTimeDays);
+      payload.isCritical = r.isCritical;
+      if (r.preferredSupplier) payload.preferredSupplier = r.preferredSupplier;
+      const { error } = await db.updateReorderSettings(r.code, payload);
+      if (error) failed++; else done++;
+      setProgress({ done: done+failed, total: matched.length });
+    }
+    setCommitting(false);
+    flash(`Imported ${done} part(s)${failed?`, ${failed} failed`:''}`, failed ? 'err' : 'ok');
+    onDone(); onClose();
+  };
+
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  return (
+    <Modal title="Import Reorder Settings (CSV)" onClose={onClose} maxWidth={640}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
+        <div style={{ fontSize:12, color:T.muted }}>
+          Columns (header row required, any order): <code>part_code, min_stock, reorder_point, max_stock, lead_time_days, is_critical, preferred_supplier</code>. Only columns present are applied.
+        </div>
+        <div>
+          <label style={sLabel}>CSV File</label>
+          <input type="file" accept=".csv,text/csv" onChange={e=>e.target.files[0] && handleFile(e.target.files[0])}/>
+          {fileName && <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{fileName}</div>}
+        </div>
+        {loadingPreview && <div style={{ color:T.muted, fontSize:12 }}>Matching part codes…</div>}
+        {!loadingPreview && (matched.length>0 || unmatched.length>0) && (
+          <>
+            <div style={{ display:"flex", gap:16, fontSize:12 }}>
+              <span style={{ color:T.success, fontWeight:700 }}>{matched.length} matched</span>
+              <span style={{ color:T.danger, fontWeight:700 }}>{unmatched.length} unmatched</span>
+            </div>
+            {unmatched.length > 0 && (
+              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}>
+                Unmatched codes: {unmatched.join(', ')}
+              </div>
+            )}
+          </>
+        )}
+        {progress && <div style={{ fontSize:12, color:T.muted }}>Importing… {progress.done} / {progress.total}</div>}
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>{committing?"Importing…":`💾 Commit ${matched.length} Update(s)`}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
 
@@ -5128,6 +5567,7 @@ const NAV = [
   { id:"ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   adminOnly:false },
   { id:"stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   adminOnly:false },
   { id:"movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   adminOnly:false },
+  { id:"reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   adminOnly:false },
   { id:"admin",         label:"Administration",      icon:"🔑", group:"System",      adminOnly:true  },
   { id:"auditlog",      label:"Audit Log",           icon:"📜", group:"System",      adminOnly:true  },
   { id:"users",         label:"User Management",     icon:"👥", group:"System",      adminOnly:true  },
@@ -5195,6 +5635,7 @@ function AppShell() {
     ledger:        <StockLedgerPage data={data} />,
     stockcount:    <StockCountPage data={data} />,
     movements:     <StockMovementsPage data={data} />,
+    reorder:       <ReorderSettingsPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
