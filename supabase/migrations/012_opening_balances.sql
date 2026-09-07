@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════
--- 002_opening_balances.sql
+-- 012_opening_balances.sql
 --
--- Depends on 001_stock_transactions.sql already being applied
+-- Depends on 011_stock_transactions.sql already being applied
 -- (stock_txn_type enum, stock_transactions table, spare_parts.id /
 -- qty_on_hand, current_user_role(), void_stock_transaction()).
 --
@@ -39,7 +39,7 @@
 --    left in place (historical rows preserved, nothing deleted) but
 --    it becomes inert: new rows can still be inserted into it, but
 --    nothing recalculates from it anymore. spare_parts.qty_on_hand
---    (from migration 001) is now the only real running balance,
+--    (from migration 011) is now the only real running balance,
 --    driven exclusively by stock_transactions.
 --    >>> Practical effect on the app: the "Stock Ledger" page and the
 --    >>> "📒 Record Movement" button in Part Detail (built two
@@ -153,24 +153,35 @@ bounds AS (
       WHERE st.part_id = sp.id AND st.txn_type = 'opening_balance'
     )
 ),
+-- Band F (major components) can land on 0. stock_transactions requires
+-- quantity > 0 (no zero-quantity movements), so a zero estimate marks
+-- the part 'estimated' directly (qty_on_hand correctly stays 0) without
+-- posting a meaningless zero-quantity ledger row.
+sized AS (
+  SELECT
+    part_id,
+    (lo + (abs(hashtext(part_code)::bigint) % (hi - lo + 1)))::numeric(12,3) AS est_qty
+  FROM bounds
+),
 inserted AS (
   INSERT INTO public.stock_transactions (
     part_id, txn_type, quantity, notes, is_estimated, occurred_at, created_by
   )
   SELECT
-    bounds.part_id,
+    part_id,
     'opening_balance'::public.stock_txn_type,
-    (bounds.lo + (abs(hashtext(bounds.part_code)::bigint) % (bounds.hi - bounds.lo + 1)))::numeric(12,3),
+    est_qty,
     'Estimated starting balance — not physically counted',
     true,
     now(),
     NULL
-  FROM bounds
+  FROM sized
+  WHERE est_qty > 0
   RETURNING part_id
 )
 UPDATE public.spare_parts
 SET stock_source = 'estimated'
-WHERE id IN (SELECT part_id FROM inserted);
+WHERE id IN (SELECT part_id FROM sized);
 
 -- ─── PART A4. post_physical_count() — estimate becomes real ───
 CREATE OR REPLACE FUNCTION public.post_physical_count(

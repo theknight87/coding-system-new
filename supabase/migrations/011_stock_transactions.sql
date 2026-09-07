@@ -1,23 +1,12 @@
 -- ═══════════════════════════════════════════════════════════════
--- 001_stock_transactions.sql
+-- 011_stock_transactions.sql
 --
--- ⚠ FILENAME NOTE: this repo's migrations are already numbered up to
--- 010 (supabase/migrations/010_stock_movements.sql). "001" collides
--- with the existing 001_initial_schema.sql. Rename this file to
--- 011_stock_transactions.sql before placing it in supabase/migrations/.
--- Delivered here with the literal name requested.
---
--- ⚠ SCHEMA CONFLICT NOTE (read before applying): this repo already
--- has a simpler stock ledger from migration 010 — a `stock_movements`
--- table that maintains `spare_parts.qty` via an `apply_stock_movement`
--- trigger. This migration builds a second, independent ledger
--- (`stock_transactions`) that maintains a *different* column,
--- `spare_parts.qty_on_hand`, via `recalc_part_stock`. The two systems
--- do not talk to each other — posting to one never touches the
--- other's balance column. Decide whether to deprecate migration 010's
--- `stock_movements`/`qty` path before wiring any frontend to this new
--- ledger, or you will end up with two different "quantity on hand"
--- numbers for the same part.
+-- RESOLVED (see migration 012_opening_balances.sql): the old
+-- stock_movements ledger from migration 010 is deprecated there — its
+-- trigger is dropped and spare_parts.qty is renamed to
+-- qty_per_assembly (pure catalogue data). qty_on_hand, maintained by
+-- this migration's stock_transactions ledger, is the one real
+-- "quantity on hand" going forward.
 --
 -- ⚠ SCHEMA PREREQUISITE: spare_parts has no uuid `id` column in this
 -- repo — its primary key is `code TEXT`. This migration ADDS a uuid
@@ -229,9 +218,13 @@ COMMENT ON VIEW public.v_negative_stock IS
 -- ─── 8. Audit logging ──────────────────────────────────────────
 -- Widen the existing audit_logs action check (same pattern as
 -- migration 009's RESTORE/PURGE/PURGE_ALL) to allow VOID.
+-- NOTE: the live constraint (checked directly) already includes 'INSERT' —
+-- an out-of-band change not present in any committed migration file
+-- (migrations 001/009 only list CREATE/UPDATE/DELETE/…). Preserved here
+-- rather than silently dropped, since 5 existing audit_logs rows use it.
 ALTER TABLE public.audit_logs DROP CONSTRAINT IF EXISTS audit_logs_action_check;
 ALTER TABLE public.audit_logs ADD CONSTRAINT audit_logs_action_check
-  CHECK (action IN ('CREATE','UPDATE','DELETE','LOGIN','LOGOUT','UPLOAD','EXPORT','RESTORE','PURGE','PURGE_ALL','VOID'));
+  CHECK (action IN ('CREATE','INSERT','UPDATE','DELETE','LOGIN','LOGOUT','UPLOAD','EXPORT','RESTORE','PURGE','PURGE_ALL','VOID'));
 
 CREATE OR REPLACE FUNCTION public.stock_transactions_audit_fn()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
@@ -355,7 +348,7 @@ CREATE POLICY "stock_transactions_insert" ON public.stock_transactions FOR INSER
 -- DROP TYPE IF EXISTS public.stock_txn_type;
 -- ALTER TABLE public.audit_logs DROP CONSTRAINT IF EXISTS audit_logs_action_check;
 -- ALTER TABLE public.audit_logs ADD CONSTRAINT audit_logs_action_check
---   CHECK (action IN ('CREATE','UPDATE','DELETE','LOGIN','LOGOUT','UPLOAD','EXPORT','RESTORE','PURGE','PURGE_ALL'));
+--   CHECK (action IN ('CREATE','INSERT','UPDATE','DELETE','LOGIN','LOGOUT','UPLOAD','EXPORT','RESTORE','PURGE','PURGE_ALL'));
 -- ALTER TABLE public.spare_parts DROP COLUMN IF EXISTS qty_on_hand;
 -- ALTER TABLE public.spare_parts DROP CONSTRAINT IF EXISTS spare_parts_id_unique;
 -- ALTER TABLE public.spare_parts DROP COLUMN IF EXISTS id;
