@@ -277,6 +277,73 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// LANGUAGE CONTEXT
+//
+// Scope: translates primary chrome (sidebar nav labels, top bar, login
+// screen, page headers) and flips document direction for RTL. It does
+// NOT translate every string in this ~5700-line app — that would be a
+// much larger, separate effort. This gives the whole app a working
+// Arabic/English switch immediately without touching page internals.
+// ═══════════════════════════════════════════════════════════════
+
+const TRANSLATIONS = {
+  en: {
+    appName: "CarGas Coding System", appVersion: "Master Data v3.0",
+    signOut: "Sign Out", collapse: "Collapse", liveDb: "Live DB", local: "Local",
+    topBarSub: "CarGas Coding System — Engineering Spare Parts Master Coding",
+    loading: "Loading…",
+    nav_dashboard: "Dashboard", nav_framework: "Coding Framework", nav_categories: "Main Categories",
+    nav_disciplines: "Disciplines", nav_manufacturers: "Manufacturers", nav_models: "Equipment Models",
+    nav_funcgroups: "Functional Groups", nav_generator: "Code Generator", nav_tree: "Hierarchy Tree",
+    nav_master: "Master Parts Table", nav_ledger: "Stock Ledger", nav_stockcount: "Stock Count",
+    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_admin: "Administration",
+    nav_auditlog: "Audit Log", nav_users: "User Management", nav_trash: "Trash",
+    group_Reference: "Reference", group_MasterData: "Master Data", group_Tools: "Tools",
+    group_Inventory: "Inventory", group_System: "System",
+  },
+  ar: {
+    appName: "نظام ترميز كار جاز", appVersion: "البيانات الرئيسية v3.0",
+    signOut: "تسجيل الخروج", collapse: "طي القائمة", liveDb: "متصل", local: "محلي",
+    topBarSub: "نظام ترميز كار جاز — ترميز قطع غيار الهندسة",
+    loading: "جاري التحميل…",
+    nav_dashboard: "الرئيسية", nav_framework: "إطار الترميز", nav_categories: "الفئات الرئيسية",
+    nav_disciplines: "التخصصات", nav_manufacturers: "الشركات المصنعة", nav_models: "موديلات المعدات",
+    nav_funcgroups: "المجموعات الوظيفية", nav_generator: "مولد الأكواد", nav_tree: "الشجرة الهرمية",
+    nav_master: "جدول قطع الغيار الرئيسي", nav_ledger: "دفتر المخزون", nav_stockcount: "جرد المخزون",
+    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_admin: "الإدارة",
+    nav_auditlog: "سجل التدقيق", nav_users: "إدارة المستخدمين", nav_trash: "المهملات",
+    group_Reference: "مرجع", group_MasterData: "البيانات الرئيسية", group_Tools: "أدوات",
+    group_Inventory: "المخزون", group_System: "النظام",
+  },
+};
+
+const LanguageContext = createContext(null);
+const useLang = () => useContext(LanguageContext);
+
+function LanguageProvider({ children }) {
+  const [lang, setLang] = useState(() => {
+    try { return localStorage.getItem('cargas_lang') || 'en'; } catch { return 'en'; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('cargas_lang', lang); } catch {}
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.lang = lang;
+  }, [lang]);
+
+  const dict = TRANSLATIONS[lang] || TRANSLATIONS.en;
+  const t = (key) => dict[key] ?? key;
+  const toggleLang = () => setLang(l => l === 'en' ? 'ar' : 'en');
+  const dir = lang === 'ar' ? 'rtl' : 'ltr';
+
+  return (
+    <LanguageContext.Provider value={{ lang, dir, t, toggleLang }}>
+      {children}
+    </LanguageContext.Provider>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // AUTH CONTEXT
 // ═══════════════════════════════════════════════════════════════
 
@@ -5567,24 +5634,24 @@ function ReorderImportModal({ onClose, onDone, flash }) {
 // ═══════════════════════════════════════════════════════════════
 
 const NAV = [
-  { id:"dashboard",     label:"Dashboard",           icon:"🏠", group:"",            adminOnly:false },
-  { id:"framework",     label:"Coding Framework",    icon:"📐", group:"Reference",   adminOnly:false },
-  { id:"categories",    label:"Main Categories",     icon:"📦", group:"Reference",   adminOnly:false },
-  { id:"disciplines",   label:"Disciplines",         icon:"🔬", group:"Reference",   adminOnly:false },
-  { id:"manufacturers", label:"Manufacturers",       icon:"🏭", group:"Master Data", adminOnly:false },
-  { id:"models",        label:"Equipment Models",    icon:"📋", group:"Master Data", adminOnly:false },
-  { id:"funcgroups",    label:"Functional Groups",   icon:"⚙️", group:"Master Data", adminOnly:false },
-  { id:"generator",     label:"Code Generator",      icon:"✨", group:"Tools",       adminOnly:false },
-  { id:"tree",          label:"Hierarchy Tree",      icon:"🌳", group:"Tools",       adminOnly:false },
-  { id:"master",        label:"Master Parts Table",  icon:"📊", group:"Inventory",   adminOnly:false },
-  { id:"ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   adminOnly:false },
-  { id:"stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   adminOnly:false },
-  { id:"movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   adminOnly:false },
-  { id:"reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   adminOnly:false },
-  { id:"admin",         label:"Administration",      icon:"🔑", group:"System",      adminOnly:true  },
-  { id:"auditlog",      label:"Audit Log",           icon:"📜", group:"System",      adminOnly:true  },
-  { id:"users",         label:"User Management",     icon:"👥", group:"System",      adminOnly:true  },
-  { id:"trash",         label:"Trash",                icon:"🗑️", group:"System",      adminOnly:true  },
+  { id:"dashboard",     labelKey:"nav_dashboard",     label:"Dashboard",           icon:"🏠", group:"",            groupKey:"",            adminOnly:false },
+  { id:"framework",     labelKey:"nav_framework",     label:"Coding Framework",    icon:"📐", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
+  { id:"categories",    labelKey:"nav_categories",    label:"Main Categories",     icon:"📦", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
+  { id:"disciplines",   labelKey:"nav_disciplines",   label:"Disciplines",         icon:"🔬", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
+  { id:"manufacturers", labelKey:"nav_manufacturers", label:"Manufacturers",       icon:"🏭", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
+  { id:"models",        labelKey:"nav_models",        label:"Equipment Models",    icon:"📋", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
+  { id:"funcgroups",    labelKey:"nav_funcgroups",    label:"Functional Groups",   icon:"⚙️", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
+  { id:"generator",     labelKey:"nav_generator",     label:"Code Generator",      icon:"✨", group:"Tools",       groupKey:"group_Tools",        adminOnly:false },
+  { id:"tree",          labelKey:"nav_tree",          label:"Hierarchy Tree",      icon:"🌳", group:"Tools",       groupKey:"group_Tools",        adminOnly:false },
+  { id:"master",        labelKey:"nav_master",        label:"Master Parts Table",  icon:"📊", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"ledger",        labelKey:"nav_ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"stockcount",    labelKey:"nav_stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"movements",     labelKey:"nav_movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"🔑", group:"System",      groupKey:"group_System",       adminOnly:true  },
+  { id:"auditlog",      labelKey:"nav_auditlog",      label:"Audit Log",           icon:"📜", group:"System",      groupKey:"group_System",       adminOnly:true  },
+  { id:"users",         labelKey:"nav_users",         label:"User Management",     icon:"👥", group:"System",      groupKey:"group_System",       adminOnly:true  },
+  { id:"trash",         labelKey:"nav_trash",         label:"Trash",                icon:"🗑️", group:"System",     groupKey:"group_System",       adminOnly:true  },
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -5593,6 +5660,7 @@ const NAV = [
 
 function AppShell() {
   const { profile, isAdmin, signOut } = useAuth();
+  const { t, lang, toggleLang } = useLang();
   const [page,      setPage]      = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
   const [navFilter, setNavFilter] = useState(null); // one-shot filter payload for the next page
@@ -5667,8 +5735,8 @@ function AppShell() {
           <img src="/logo.png" alt="CarGas" style={{ width:28,height:28,objectFit:"contain",flexShrink:0 }}/>
           {!collapsed&&(
             <div>
-              <div style={{ color:"#f1f5f9",fontWeight:800,fontSize:12,lineHeight:1.2 }}>CarGas Coding System</div>
-              <div style={{ color:"#475569",fontSize:10 }}>Master Data v3.0</div>
+              <div style={{ color:"#f1f5f9",fontWeight:800,fontSize:12,lineHeight:1.2 }}>{t('appName')}</div>
+              <div style={{ color:"#475569",fontSize:10 }}>{t('appVersion')}</div>
             </div>
           )}
         </div>
@@ -5679,7 +5747,7 @@ function AppShell() {
           ))}
           {groups.map(g=>(
             <div key={g}>
-              {!collapsed&&<div style={{ fontSize:9,fontWeight:700,color:"#334155",letterSpacing:1.5,textTransform:"uppercase",padding:"10px 14px 4px" }}>{g}</div>}
+              {!collapsed&&<div style={{ fontSize:9,fontWeight:700,color:"#334155",letterSpacing:1.5,textTransform:"uppercase",padding:"10px 14px 4px" }}>{t('group_'+g.replace(/\s+/g,''))}</div>}
               {visibleNav.filter(n=>n.group===g).map(n=>(
                 <NavItem key={n.id} n={n} active={effectivePage===n.id} onClick={()=>setPage(n.id)} collapsed={collapsed} />
               ))}
@@ -5689,7 +5757,7 @@ function AppShell() {
 
         <div onClick={()=>setCollapsed(!collapsed)} style={{ padding:"10px 14px",borderTop:`1px solid ${T.sidebarBorder}`,cursor:"pointer",color:"#475569",fontSize:12,display:"flex",alignItems:"center",gap:8 }}>
           <span style={{ fontSize:14 }}>{collapsed?"▶":"◀"}</span>
-          {!collapsed&&<span>Collapse</span>}
+          {!collapsed&&<span>{t('collapse')}</span>}
         </div>
       </div>
 
@@ -5697,13 +5765,17 @@ function AppShell() {
       <div style={{ flex:1,display:"flex",flexDirection:"column",overflow:"hidden" }}>
         <div style={{ background:T.card,borderBottom:`1px solid ${T.border}`,padding:"11px 28px",display:"flex",alignItems:"center",gap:16,flexShrink:0 }}>
           <div>
-            <div style={{ fontWeight:700,fontSize:14,color:T.text }}>{NAV.find(n=>n.id===effectivePage)?.label}</div>
-            <div style={{ fontSize:11,color:T.muted }}>CarGas Coding System — Engineering Spare Parts Master Coding</div>
+            <div style={{ fontWeight:700,fontSize:14,color:T.text }}>{t(NAV.find(n=>n.id===effectivePage)?.labelKey) || NAV.find(n=>n.id===effectivePage)?.label}</div>
+            <div style={{ fontSize:11,color:T.muted }}>{t('topBarSub')}</div>
           </div>
           <div style={{ marginLeft:"auto",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
+            <button onClick={toggleLang} title="Switch language / تغيير اللغة"
+              style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"4px 10px",fontSize:12,color:T.text,cursor:"pointer",fontFamily:"inherit",fontWeight:700 }}>
+              🌐 {lang === 'en' ? 'العربية' : 'English'}
+            </button>
             {dbReady
-              ? <span style={{ fontSize:11,background:"#dcfce7",color:"#15803d",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟢 Live DB</span>
-              : <span style={{ fontSize:11,background:"#fef3c7",color:"#b45309",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟡 Local</span>
+              ? <span style={{ fontSize:11,background:"#dcfce7",color:"#15803d",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟢 {t('liveDb')}</span>
+              : <span style={{ fontSize:11,background:"#fef3c7",color:"#b45309",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟡 {t('local')}</span>
             }
             <span style={{ background:T.header,color:"#38bdf8",fontFamily:"monospace",fontWeight:800,fontSize:12,padding:"4px 12px",borderRadius:5,letterSpacing:1.5 }}>AA-BB-CC-DD-EE-0001</span>
             {profile && (
@@ -5713,7 +5785,7 @@ function AppShell() {
             )}
             <button onClick={signOut}
               style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"4px 10px",fontSize:12,color:T.muted,cursor:"pointer",fontFamily:"inherit" }}>
-              Sign Out
+              {t('signOut')}
             </button>
           </div>
         </div>
@@ -5736,14 +5808,17 @@ function AppShell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AuthGate />
-    </AuthProvider>
+    <LanguageProvider>
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
+    </LanguageProvider>
   );
 }
 
 function AuthGate() {
   const { session } = useAuth();
+  const { t } = useLang();
   const supabaseConfigured = !!(
     import.meta.env.VITE_SUPABASE_URL &&
     !import.meta.env.VITE_SUPABASE_URL.includes('your-project')
@@ -5753,7 +5828,7 @@ function AuthGate() {
   if (session === undefined) {
     return (
       <div style={{ minHeight:'100vh',background:'#0c1526',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Inter',system-ui,sans-serif" }}>
-        <div style={{ color:'#475569',fontSize:14 }}>Loading…</div>
+        <div style={{ color:'#475569',fontSize:14 }}>{t('loading')}</div>
       </div>
     );
   }
@@ -5769,10 +5844,12 @@ function AuthGate() {
 }
 
 function NavItem({ n, active, onClick, collapsed }) {
+  const { t } = useLang();
+  const label = n.labelKey ? t(n.labelKey) : n.label;
   return (
-    <div onClick={onClick} title={collapsed?n.label:""} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 14px",cursor:"pointer",background:active?"#1a3460":"transparent",borderLeft:active?"3px solid #38bdf8":"3px solid transparent",transition:"background .12s" }}>
+    <div onClick={onClick} title={collapsed?label:""} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 14px",cursor:"pointer",background:active?"#1a3460":"transparent",borderLeft:active?"3px solid #38bdf8":"3px solid transparent",transition:"background .12s" }}>
       <span style={{ fontSize:15,flexShrink:0 }}>{n.icon}</span>
-      {!collapsed&&<span style={{ fontSize:13,color:active?"#f1f5f9":"#94a3b8",fontWeight:active?700:400,whiteSpace:"nowrap" }}>{n.label}</span>}
+      {!collapsed&&<span style={{ fontSize:13,color:active?"#f1f5f9":"#94a3b8",fontWeight:active?700:400,whiteSpace:"nowrap" }}>{label}</span>}
     </div>
   );
 }
