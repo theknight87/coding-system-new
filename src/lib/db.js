@@ -886,6 +886,111 @@ export async function softDeleteAsset(id) {
   return { data, error };
 }
 
+export async function fetchAssetById(id) {
+  return supabase.from('v_assets_overview').select('*').eq('id', id).maybeSingle();
+}
+
+// ─── ASSET HOURS LOG ──────────────────────────────────────────────
+export async function fetchAssetHoursLog(assetId) {
+  return supabase.from('asset_hours_log').select('*').eq('asset_id', assetId).order('read_at', { ascending: true });
+}
+
+// Insert-only — the AFTER INSERT trigger (migration 020) validates
+// the reading and updates assets.running_hours; nothing to do here
+// beyond the insert itself.
+export async function insertAssetHoursReading(assetId, readingHours, { notes, isCounterReset } = {}) {
+  const userId = await uid();
+  const { data, error } = await supabase.from('asset_hours_log').insert({
+    asset_id: assetId, reading_hours: readingHours, read_by: userId,
+    notes: notes || null, is_counter_reset: !!isCounterReset,
+  }).select().maybeSingle();
+  if (!error) await audit('CREATE', 'asset_hours_log', assetId, null, data);
+  return { data, error };
+}
+
+// ─── MAINTENANCE EVENTS ───────────────────────────────────────────
+export async function fetchMaintenanceEvents(assetId) {
+  return supabase.from('maintenance_events').select('*')
+    .eq('asset_id', assetId).is('deleted_at', null)
+    .order('event_date', { ascending: false });
+}
+
+// Distinct previously-used failure_mode/root_cause values across all
+// assets, for the corrective-event datalist — lets the vocabulary
+// converge organically instead of forcing a fixed taxonomy.
+export async function fetchMaintenanceVocabulary() {
+  const { data, error } = await supabase.from('maintenance_events')
+    .select('failure_mode,root_cause').eq('event_type', 'corrective').is('deleted_at', null).limit(500);
+  if (error) return { failureModes: [], rootCauses: [], error };
+  const failureModes = [...new Set((data||[]).map(r=>r.failure_mode).filter(Boolean))];
+  const rootCauses   = [...new Set((data||[]).map(r=>r.root_cause).filter(Boolean))];
+  return { failureModes, rootCauses, error: null };
+}
+
+export async function insertMaintenanceEvent(row) {
+  const userId = await uid();
+  const dbRow = {
+    asset_id: row.assetId, event_type: row.eventType, event_date: row.eventDate,
+    title: row.title, description: row.description || null,
+    running_hours_at_event: row.runningHoursAtEvent===''||row.runningHoursAtEvent==null ? null : Number(row.runningHoursAtEvent),
+    downtime_hours: row.downtimeHours===''||row.downtimeHours==null ? null : Number(row.downtimeHours),
+    work_order_no: row.workOrderNo || null, performed_by: row.performedBy || null,
+    status: row.status || 'completed',
+    failure_mode: row.failureMode || null, root_cause: row.rootCause || null,
+    created_by: userId,
+  };
+  const { data, error } = await supabase.from('maintenance_events').insert(dbRow).select('*').maybeSingle();
+  if (!error) await audit('CREATE', 'maintenance_events', data.id, null, data);
+  return { data, error };
+}
+
+// ─── MAINTENANCE PARTS USED ───────────────────────────────────────
+// Fetches every parts-used row for a given set of maintenance event
+// ids (joined to spare_parts for code/description/fg) — used by both
+// the Timeline (grouped per event) and the Parts Used tab (aggregated
+// across all of an asset's events). Callers first fetch the asset's
+// maintenance_events and pass their ids in; a single asset's full
+// history is always a small result set, safe to aggregate client-side
+// rather than needing a dedicated SQL aggregate view.
+export async function fetchMaintenancePartsUsedByEvents(eventIds) {
+  if (!eventIds || eventIds.length === 0) return { data: [], error: null };
+  return supabase
+    .from('maintenance_parts_used')
+    .select('id,maintenance_event_id,quantity,unit_cost,notes,created_at,part:spare_parts(id,code,short_desc,fg)')
+    .in('maintenance_event_id', eventIds);
+}
+
+export async function insertMaintenancePartsUsed(eventId, rows) {
+  const userId = await uid();
+  const payload = rows.map(r => ({
+    maintenance_event_id: eventId, part_id: r.partId,
+    quantity: Number(r.quantity), unit_cost: r.unitCost===''||r.unitCost==null?null:Number(r.unitCost),
+    notes: r.notes || null, created_by: userId,
+  }));
+  const { data, error } = await supabase.from('maintenance_parts_used').insert(payload).select('*');
+  if (!error) await audit('CREATE', 'maintenance_parts_used', eventId, null, { count: data.length });
+  return { data, error };
+}
+
+// ─── ASSET DOCUMENTS ───────────────────────────────────────────────
+export async function fetchAssetDocuments(assetId) {
+  return supabase.from('asset_documents').select('*').eq('asset_id', assetId).order('uploaded_at', { ascending: false });
+}
+
+export async function insertAssetDocument(assetId, label, url, path) {
+  const userId = await uid();
+  const { data, error } = await supabase.from('asset_documents')
+    .insert({ asset_id: assetId, label, url, path, uploaded_by: userId }).select().maybeSingle();
+  if (!error) await audit('CREATE', 'asset_documents', assetId, null, data);
+  return { data, error };
+}
+
+export async function deleteAssetDocument(id, path) {
+  const { error } = await supabase.from('asset_documents').delete().eq('id', id);
+  if (!error) { await deleteFile('asset-documents', path); await audit('DELETE', 'asset_documents', id, null, null); }
+  return { error };
+}
+
 // idCol defaults to 'code' when omitted — every table below except
 // `assets` uses a text `code` natural key. `assets` has no `code`
 // column (its natural key is `asset_tag`, PK is a uuid `id`), so it

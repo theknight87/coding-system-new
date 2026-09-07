@@ -4344,6 +4344,7 @@ function MasterTablePage({ data }) {
   useEffect(() => {
     if (!navFilter) return;
     if (navFilter.inStock) setFStock(navFilter.inStock);
+    if (navFilter.search) { setSearchInput(navFilter.search); setSearch(navFilter.search); }
     clearNavFilter();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -6246,7 +6247,7 @@ function mapAsset(r) {
 const ASSETS_PAGE_SIZE = 50;
 
 function AssetRegistryPage({ data }) {
-  const { categories, manufacturers, models, dbReady, ops } = data;
+  const { categories, manufacturers, models, dbReady, navigateTo } = data;
   const { isAdmin, isDeptUser } = useAuth();
   const canEdit = isAdmin || isDeptUser;
 
@@ -6266,8 +6267,6 @@ function AssetRegistryPage({ data }) {
   const [kpis,    setKpis]    = useState(null);
 
   const [formTarget,   setFormTarget]   = useState(null); // 'new' | asset object | null
-  const [detailTarget, setDetailTarget] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const [exporting,    setExporting]    = useState(false);
   const [toast, setToast] = useState(null);
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
@@ -6310,16 +6309,6 @@ function AssetRegistryPage({ data }) {
   const filteredModels = models.filter(m => !fMfr || m.mfrCode === fMfr);
   const totalPages = Math.ceil(total / ASSETS_PAGE_SIZE);
   const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    const { error } = await db.softDeleteAsset(deleteTarget.id);
-    setDeleteTarget(null);
-    if (error) return flash(`Error: ${error.message}`, 'err');
-    flash(`${deleteTarget.assetTag} moved to Trash`);
-    setDetailTarget(null);
-    refreshAll();
-  };
 
   const csvEsc = v => `"${String(v??'').replace(/"/g,'""')}"`;
   const exportCsv = async () => {
@@ -6414,7 +6403,7 @@ function AssetRegistryPage({ data }) {
           {rows.map(a => {
             const meta = ASSET_STATUS_META[a.status] || {};
             return (
-              <Card key={a.id} style={{ cursor:'pointer', padding:0, overflow:'hidden' }} onClick={()=>setDetailTarget(a)}>
+              <Card key={a.id} style={{ cursor:'pointer', padding:0, overflow:'hidden' }} onClick={()=>navigateTo('assetdetail', { assetId:a.id })}>
                 <div style={{ height:120, background:'#f1f5f9', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   {a.photoUrl ? <img src={a.photoUrl} alt={a.assetTag} style={{ width:'100%', height:'100%', objectFit:'cover' }}/> : <span style={{ fontSize:36 }}>🏭</span>}
                 </div>
@@ -6443,7 +6432,7 @@ function AssetRegistryPage({ data }) {
                 {rows.map((a,i) => {
                   const meta = ASSET_STATUS_META[a.status] || {};
                   return (
-                    <tr key={a.id} onClick={()=>setDetailTarget(a)}
+                    <tr key={a.id} onClick={()=>navigateTo('assetdetail', { assetId:a.id })}
                       style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
                       onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
@@ -6491,66 +6480,8 @@ function AssetRegistryPage({ data }) {
         />
       )}
 
-      {detailTarget && (
-        <AssetDetailModal
-          asset={detailTarget}
-          canEdit={canEdit}
-          onClose={()=>setDetailTarget(null)}
-          onEdit={()=>{ setFormTarget(detailTarget); }}
-          onDelete={()=>setDeleteTarget(detailTarget)}
-        />
-      )}
-
-      {deleteTarget && (
-        <Modal title="Move to Trash" onClose={()=>setDeleteTarget(null)} maxWidth={400}>
-          <div style={{ fontSize:13, color:T.text, marginBottom:16 }}>
-            Move <strong>{deleteTarget.assetTag}</strong> to Trash? It can be restored later from the Trash page.
-          </div>
-          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={handleDelete}>🗑 Move to Trash</Btn>
-          </div>
-        </Modal>
-      )}
-
       <Toast msg={toast}/>
     </div>
-  );
-}
-
-function AssetDetailModal({ asset, canEdit, onClose, onEdit, onDelete }) {
-  const meta = ASSET_STATUS_META[asset.status] || {};
-  const row = (label, value) => (
-    <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid ${T.border}`, fontSize:13 }}>
-      <span style={{ color:T.muted }}>{label}</span>
-      <span style={{ color:T.text, fontWeight:600 }}>{value ?? "—"}</span>
-    </div>
-  );
-  return (
-    <Modal title={asset.assetTag} onClose={onClose} maxWidth={520}>
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-        {asset.photoUrl && <img src={asset.photoUrl} alt={asset.assetTag} style={{ width:'100%', maxHeight:200, objectFit:'cover', borderRadius:8 }}/>}
-        <div><Pill color={meta.color} bg={meta.bg} mono={false}>{meta.label}</Pill>{asset.pmDue && <span style={{ marginLeft:8, fontSize:12, color:'#b45309', fontWeight:700 }}>🛠️ PM Due</span>}</div>
-        {row('Model', `${asset.mfrLabel} ${asset.modelLabel}`)}
-        {row('Category', asset.catLabel)}
-        {row('Serial Number', asset.serialNumber)}
-        {row('Site / Location', [asset.site, asset.location, asset.subLocation].filter(Boolean).join(' / ') || null)}
-        {row('Running Hours', asset.runningHours)}
-        {row('PM Interval', asset.pmIntervalHours ? `${asset.pmIntervalHours} hrs` : (asset.pmIntervalDays ? `${asset.pmIntervalDays} days` : null))}
-        {row('Last PM Date', asset.lastPmDate)}
-        {row('Commissioned', asset.commissionedAt)}
-        {row('Warranty Until', asset.warrantyUntil)}
-        {row('Open Maintenance Events', asset.openEventCount)}
-        {row('Total Maintenance Events', asset.eventCount)}
-        {asset.notes && <div style={{ fontSize:13, color:T.muted, marginTop:6 }}>{asset.notes}</div>}
-        {canEdit && (
-          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
-            <Btn variant="danger" onClick={onDelete}>🗑 Move to Trash</Btn>
-            <Btn onClick={onEdit}>✏️ Edit</Btn>
-          </div>
-        )}
-      </div>
-    </Modal>
   );
 }
 
@@ -6697,6 +6628,635 @@ function AssetFormModal({ data, asset, onClose, onSaved }) {
   );
 }
 
+// ─── ASSET DETAIL PAGE ────────────────────────────────────────
+const MAINTENANCE_TYPE_META = {
+  installation: { label:'Installation', color:'#0e7490', dot:'🔵' },
+  preventive:   { label:'Preventive',   color:'#16a34a', dot:'🟢' },
+  corrective:   { label:'Corrective',   color:'#d97706', dot:'🟠' },
+  inspection:   { label:'Inspection',   color:'#64748b', dot:'⚪' },
+  overhaul:     { label:'Overhaul',     color:'#dc2626', dot:'🔴' },
+  modification: { label:'Modification', color:'#7c3aed', dot:'🟣' },
+};
+
+// Simple inline SVG line chart — no charting library, matching this
+// app's existing sparkline (div-bar) approach for the same reason:
+// avoid unnecessary dependencies for one small chart.
+function HoursLogChart({ readings }) {
+  if (readings.length < 2) return <div style={{ fontSize:12, color:T.muted, padding:20, textAlign:'center' }}>Need at least 2 readings to plot a trend.</div>;
+  const W = 600, H = 160, PAD = 24;
+  const xs = readings.map(r => new Date(r.read_at).getTime());
+  const ys = readings.map(r => Number(r.reading_hours));
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(0, ...ys), maxY = Math.max(...ys) || 1;
+  const sx = x => PAD + (maxX>minX ? (x-minX)/(maxX-minX) : 0.5) * (W-2*PAD);
+  const sy = y => H-PAD - ((y-minY)/(maxY-minY||1)) * (H-2*PAD);
+  const points = readings.map(r => `${sx(new Date(r.read_at).getTime())},${sy(Number(r.reading_hours))}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H }}>
+      <line x1={PAD} y1={H-PAD} x2={W-PAD} y2={H-PAD} stroke={T.border} strokeWidth="1"/>
+      <polyline points={points} fill="none" stroke={T.accent} strokeWidth="2"/>
+      {readings.map((r,i) => (
+        <circle key={i} cx={sx(new Date(r.read_at).getTime())} cy={sy(Number(r.reading_hours))} r="3" fill={r.is_counter_reset ? T.danger : T.accent}/>
+      ))}
+    </svg>
+  );
+}
+
+function UpdateHoursModal({ asset, onClose, onSaved }) {
+  const [reading, setReading] = useState(asset.runningHours ?? '');
+  const [isReset, setIsReset] = useState(false);
+  const [notes,   setNotes]   = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState('');
+
+  const handleSave = async () => {
+    if (reading === '' || isNaN(Number(reading))) return setError('Enter a valid reading.');
+    setSaving(true);
+    const { error: err } = await db.insertAssetHoursReading(asset.id, Number(reading), { notes, isCounterReset: isReset });
+    setSaving(false);
+    if (err) return setError(err.message);
+    onSaved();
+  };
+
+  const fieldStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit", width:"100%", boxSizing:"border-box" };
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  return (
+    <Modal title="Update Hours Reading" onClose={onClose} maxWidth={380}>
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        <div style={{ fontSize:12, color:T.muted }}>Current: {asset.runningHours} hrs</div>
+        <div><label style={sLabel}>New Reading (hrs)</label><input type="number" value={reading} onChange={e=>setReading(e.target.value)} style={fieldStyle}/></div>
+        <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:T.muted, cursor:"pointer" }}>
+          <input type="checkbox" checked={isReset} onChange={e=>setIsReset(e.target.checked)}/> Meter was reset/replaced (allow a lower reading)
+        </label>
+        <div><label style={sLabel}>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} style={fieldStyle}/></div>
+        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"Save Reading"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// One repeatable row inside the maintenance-event parts builder. Owns
+// its own search state; reports the chosen part + quantity/cost up to
+// the parent via onChange. Defaults to filtering candidates by the
+// asset's model (its part code's model segment) with a toggle to
+// search all parts, and flags inline (non-blocking) when the entered
+// quantity exceeds what's on hand.
+function PartPickerRow({ row, assetModel, onChange, onRemove }) {
+  const [searchAll, setSearchAll] = useState(false);
+  const [query, setQuery] = useState(row.code || '');
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (row.partId || query.trim().length < 2) { setResults([]); return; }
+    const t = setTimeout(() => {
+      db.fetchParts({ search: query.trim(), model: searchAll ? undefined : assetModel }, 0, 15)
+        .then(({ data }) => { setResults(data || []); setOpen(true); });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, searchAll, assetModel, row.partId]);
+
+  const pickPart = (p) => {
+    onChange({ ...row, partId: p.id, code: p.code, shortDesc: p.short_desc, qtyOnHand: p.qty_on_hand });
+    setQuery(p.code); setOpen(false);
+  };
+
+  const exceedsStock = row.partId && row.quantity && Number(row.quantity) > (row.qtyOnHand ?? 0);
+  const fieldStyle = { padding:"6px 9px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:12, color:T.text, background:"#fff", fontFamily:"inherit", width:"100%", boxSizing:"border-box" };
+
+  return (
+    <div style={{ border:`1px solid ${T.border}`, borderRadius:6, padding:10, marginBottom:8 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr auto", gap:8, alignItems:"start" }}>
+        <div style={{ position:"relative" }}>
+          <input value={query} placeholder="Search part code / description…"
+            onChange={e=>{ setQuery(e.target.value); onChange({ ...row, partId:null, code:'', shortDesc:'' }); }}
+            style={fieldStyle}/>
+          {row.partId && <div style={{ fontSize:11, color:T.muted, marginTop:3 }}>{row.shortDesc} — on hand: <strong>{row.qtyOnHand}</strong></div>}
+          {open && results.length > 0 && (
+            <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:`1px solid ${T.border}`, borderRadius:6, boxShadow:"0 6px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:200, overflowY:"auto" }}>
+              {results.map(p => (
+                <div key={p.id} onClick={()=>pickPart(p)} style={{ padding:"6px 10px", cursor:"pointer", fontSize:12, borderBottom:`1px solid ${T.border}` }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                  <div style={{ fontFamily:"monospace", fontWeight:700 }}>{p.code}</div>
+                  <div style={{ color:T.muted }}>{p.short_desc} — on hand: {p.qty_on_hand}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <input type="number" min="0" step="any" placeholder="Qty" value={row.quantity}
+          onChange={e=>onChange({ ...row, quantity:e.target.value })} style={fieldStyle}/>
+        <input type="number" min="0" step="any" placeholder="Unit cost" value={row.unitCost}
+          onChange={e=>onChange({ ...row, unitCost:e.target.value })} style={fieldStyle}/>
+        <button onClick={onRemove} style={{ background:"transparent", border:"none", color:T.danger, cursor:"pointer", fontSize:16, padding:"4px 6px" }}>✕</button>
+      </div>
+      {!searchAll && <div style={{ fontSize:10, color:T.muted, marginTop:4 }}>Filtered to this asset's model — <span onClick={()=>setSearchAll(true)} style={{ color:T.accent, cursor:"pointer", textDecoration:"underline" }}>search all parts</span></div>}
+      {searchAll && <div style={{ fontSize:10, color:T.muted, marginTop:4 }}>Searching all parts — <span onClick={()=>setSearchAll(false)} style={{ color:T.accent, cursor:"pointer", textDecoration:"underline" }}>filter to this model</span></div>}
+      {exceedsStock && <div style={{ fontSize:11, color:T.danger, marginTop:4 }}>⚠️ Quantity exceeds on-hand stock ({row.qtyOnHand}) — allowed, but double-check.</div>}
+    </div>
+  );
+}
+
+function MaintenanceEventModal({ asset, onClose, onSaved }) {
+  const [eventType, setEventType] = useState('preventive');
+  const [eventDate, setEventDate] = useState(new Date().toISOString().slice(0,10));
+  const [runningHours, setRunningHours] = useState(asset.runningHours ?? '');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [downtimeHours, setDowntimeHours] = useState('');
+  const [workOrderNo, setWorkOrderNo] = useState('');
+  const [performedBy, setPerformedBy] = useState('');
+  const [status, setStatus] = useState('completed');
+  const [failureMode, setFailureMode] = useState('');
+  const [rootCause, setRootCause] = useState('');
+  const [vocab, setVocab] = useState({ failureModes:[], rootCauses:[] });
+  const [parts, setParts] = useState([]); // { partId, code, shortDesc, qtyOnHand, quantity, unitCost }
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => { db.fetchMaintenanceVocabulary().then(setVocab); }, []);
+
+  const addPartRow = () => setParts(p => [...p, { partId:null, code:'', shortDesc:'', qtyOnHand:0, quantity:'', unitCost:'' }]);
+  const updatePartRow = (i, row) => setParts(p => p.map((r,idx)=>idx===i?row:r));
+  const removePartRow = (i) => setParts(p => p.filter((_,idx)=>idx!==i));
+
+  const handleSave = async () => {
+    setError('');
+    if (!title.trim()) return setError('Title is required.');
+    if (!eventDate) return setError('Event date is required.');
+    const validParts = parts.filter(p => p.partId && p.quantity !== '' && Number(p.quantity) > 0);
+    if (parts.some(p => (p.code || p.quantity) && !(p.partId && p.quantity))) {
+      return setError('Every parts row needs both a selected part and a quantity, or remove the row.');
+    }
+    setSaving(true);
+    const { data: event, error: err } = await db.insertMaintenanceEvent({
+      assetId: asset.id, eventType, eventDate, title: title.trim(), description,
+      runningHoursAtEvent: runningHours, downtimeHours, workOrderNo, performedBy, status,
+      failureMode: eventType==='corrective'?failureMode:null, rootCause: eventType==='corrective'?rootCause:null,
+    });
+    if (err) { setSaving(false); return setError(err.message); }
+    if (validParts.length > 0) {
+      const { error: partsErr } = await db.insertMaintenancePartsUsed(event.id, validParts);
+      if (partsErr) { setSaving(false); return setError(`Event saved, but parts failed: ${partsErr.message}`); }
+    }
+    setSaving(false);
+    onSaved();
+  };
+
+  const fieldStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit", width:"100%", boxSizing:"border-box" };
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+
+  return (
+    <Modal title={`Log Maintenance — ${asset.assetTag}`} onClose={onClose} maxWidth={700}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"75vh", overflowY:"auto" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+          <div>
+            <label style={sLabel}>Event Type</label>
+            <select value={eventType} onChange={e=>setEventType(e.target.value)} style={fieldStyle}>
+              {Object.entries(MAINTENANCE_TYPE_META).map(([k,m])=><option key={k} value={k}>{m.label}</option>)}
+            </select>
+          </div>
+          <div><label style={sLabel}>Date</label><input type="date" value={eventDate} onChange={e=>setEventDate(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Running Hours at Event</label><input type="number" value={runningHours} onChange={e=>setRunningHours(e.target.value)} style={fieldStyle}/></div>
+        </div>
+
+        <div><label style={sLabel}>Title</label><input value={title} onChange={e=>setTitle(e.target.value)} style={fieldStyle}/></div>
+        <div><label style={sLabel}>Description</label><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={2} style={{ ...fieldStyle, resize:"vertical" }}/></div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
+          <div><label style={sLabel}>Downtime (hrs)</label><input type="number" value={downtimeHours} onChange={e=>setDowntimeHours(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Work Order No.</label><input value={workOrderNo} onChange={e=>setWorkOrderNo(e.target.value)} style={fieldStyle}/></div>
+          <div><label style={sLabel}>Performed By</label><input value={performedBy} onChange={e=>setPerformedBy(e.target.value)} style={fieldStyle}/></div>
+          <div>
+            <label style={sLabel}>Status</label>
+            <select value={status} onChange={e=>setStatus(e.target.value)} style={fieldStyle}>
+              <option value="open">Open</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+
+        {eventType === 'corrective' && (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <div>
+              <label style={sLabel}>Failure Mode</label>
+              <input list="failure-modes" value={failureMode} onChange={e=>setFailureMode(e.target.value)} style={fieldStyle}/>
+              <datalist id="failure-modes">{vocab.failureModes.map(v=><option key={v} value={v}/>)}</datalist>
+            </div>
+            <div>
+              <label style={sLabel}>Root Cause</label>
+              <input list="root-causes" value={rootCause} onChange={e=>setRootCause(e.target.value)} style={fieldStyle}/>
+              <datalist id="root-causes">{vocab.rootCauses.map(v=><option key={v} value={v}/>)}</datalist>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+            <label style={sLabel}>Parts Used</label>
+            <Btn small variant="secondary" onClick={addPartRow}>+ Add Part</Btn>
+          </div>
+          {parts.length === 0 && <div style={{ fontSize:12, color:T.muted }}>No parts logged for this event.</div>}
+          {parts.map((row,i) => (
+            <PartPickerRow key={i} row={row} assetModel={asset.model} onChange={r=>updatePartRow(i,r)} onRemove={()=>removePartRow(i)}/>
+          ))}
+        </div>
+
+        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"Log Event"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function AssetDocumentsTab({ asset, flash }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [label, setLabel] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const load = () => { setLoading(true); db.fetchAssetDocuments(asset.id).then(({ data }) => { setDocs(data||[]); setLoading(false); }); };
+  useEffect(() => { load(); }, [asset.id]);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!label.trim()) return flash('Enter a label for this document first', 'err');
+    setUploading(true);
+    const { url, path, error } = await db.uploadFile('asset-documents', asset.assetTag, file);
+    if (error) { setUploading(false); return flash(`Error: ${error.message}`, 'err'); }
+    const { error: insErr } = await db.insertAssetDocument(asset.id, label.trim(), url, path);
+    setUploading(false);
+    if (insErr) return flash(`Error: ${insErr.message}`, 'err');
+    setLabel(''); e.target.value = '';
+    flash('Document uploaded'); load();
+  };
+
+  const handleDelete = async (doc) => {
+    const { error } = await db.deleteAssetDocument(doc.id, doc.path);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash('Document removed'); load();
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center" }}>
+        <input value={label} onChange={e=>setLabel(e.target.value)} placeholder="Label (e.g. Operator Manual)" style={{ padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, flex:1 }}/>
+        <input type="file" onChange={handleFile} disabled={uploading} style={{ fontSize:12 }}/>
+      </div>
+      {uploading && <div style={{ fontSize:12, color:T.accent, marginBottom:10 }}>⏳ Uploading…</div>}
+      {loading ? <div style={{ color:T.muted, fontSize:13 }}>Loading…</div> : docs.length===0 ? (
+        <div style={{ color:T.muted, fontSize:13 }}>No documents uploaded yet.</div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+          {docs.map(d => (
+            <div key={d.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", border:`1px solid ${T.border}`, borderRadius:6 }}>
+              <span>📎</span>
+              <a href={d.url} target="_blank" rel="noreferrer" style={{ color:T.accent, fontSize:13, flex:1 }}>{d.label}</a>
+              <span style={{ fontSize:11, color:T.muted }}>{new Date(d.uploaded_at).toLocaleDateString()}</span>
+              <button onClick={()=>handleDelete(d)} style={{ background:"transparent", border:"none", color:T.danger, cursor:"pointer" }}>🗑</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssetDetailPage({ data }) {
+  const { navFilter, clearNavFilter, navigateTo } = data;
+  const { isAdmin, isDeptUser } = useAuth();
+  const canEdit = isAdmin || isDeptUser;
+  const assetId = navFilter?.assetId;
+
+  const [asset, setAsset] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [events, setEvents] = useState([]);
+  const [partsUsed, setPartsUsed] = useState([]); // flat, joined, across all events
+  const [hoursLog, setHoursLog] = useState([]);
+  const [tab, setTab] = useState('timeline');
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [showHoursModal, setShowHoursModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [partsSortDesc, setPartsSortDesc] = useState(true);
+  const [toast, setToast] = useState(null);
+  const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  const load = useCallback(() => {
+    if (!assetId) return;
+    setLoading(true);
+    db.fetchAssetById(assetId).then(({ data: a }) => {
+      if (!a) { setLoading(false); return; }
+      setAsset(mapAsset(a));
+      return db.fetchMaintenanceEvents(assetId).then(({ data: ev }) => {
+        setEvents(ev || []);
+        return db.fetchMaintenancePartsUsedByEvents((ev||[]).map(e=>e.id));
+      }).then(({ data: pu }) => setPartsUsed(pu || []));
+    }).finally(()=>setLoading(false));
+    db.fetchAssetHoursLog(assetId).then(({ data }) => setHoursLog(data || []));
+  }, [assetId]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { if (assetId) clearNavFilter(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!assetId) {
+    return <Card><div style={{ padding:40, textAlign:"center", color:T.muted }}>No asset selected. <Btn small onClick={()=>navigateTo('assets')}>← Back to Asset Registry</Btn></div></Card>;
+  }
+  if (loading && !asset) return <div style={{ textAlign:"center", padding:60, color:T.muted }}>⏳ Loading asset…</div>;
+  if (!asset) return <Card><div style={{ padding:40, textAlign:"center", color:T.muted }}>Asset not found. <Btn small onClick={()=>navigateTo('assets')}>← Back</Btn></div></Card>;
+
+  const meta = ASSET_STATUS_META[asset.status] || {};
+  const eventsById = Object.fromEntries(events.map(e=>[e.id, e]));
+  const partsByEvent = {};
+  partsUsed.forEach(p => { (partsByEvent[p.maintenance_event_id] ||= []).push(p); });
+
+  const thisYear = new Date().getFullYear();
+  const thisYearEvents = events.filter(e => new Date(e.event_date).getFullYear() === thisYear);
+  const thisYearPartsUsed = partsUsed.filter(p => {
+    const ev = eventsById[p.maintenance_event_id];
+    return ev && new Date(ev.event_date).getFullYear() === thisYear;
+  });
+  const totalDowntimeThisYear = thisYearEvents.reduce((s,e)=>s+(Number(e.downtime_hours)||0),0);
+  const fgCounts = {};
+  thisYearPartsUsed.forEach(p => { const fg = p.part?.fg; if (fg) fgCounts[fg] = (fgCounts[fg]||0) + Number(p.quantity); });
+  const topFg = Object.entries(fgCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+
+  // Parts Used tab aggregation across the asset's whole history.
+  const partsAgg = aggregatePartsUsage(partsUsed, eventsById);
+
+  const today = new Date().toISOString().slice(0,10);
+  const warrantyExpired = asset.warrantyUntil && asset.warrantyUntil < today;
+
+  const hoursBase = asset.lastPmHours || 0;
+  const hoursPos = asset.pmIntervalHours ? Math.max(0, asset.runningHours - hoursBase) : 0;
+  const hoursPct = asset.pmIntervalHours ? Math.min(100, (hoursPos / asset.pmIntervalHours) * 100) : 0;
+
+  const handleDelete = async () => {
+    const { error } = await db.softDeleteAsset(asset.id);
+    setShowDeleteConfirm(false);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    navigateTo('assets');
+  };
+
+  const tabs = [
+    { id:'timeline', label:'Timeline' },
+    { id:'parts',    label:'Parts Used' },
+    { id:'hours',    label:'Hours Log' },
+    { id:'docs',     label:'Documents' },
+  ];
+
+  return (
+    <div>
+      <PageHeader title={asset.assetTag} sub={`${asset.mfrLabel} ${asset.modelLabel}`} />
+      <Btn small variant="secondary" onClick={()=>navigateTo('assets')} style={{ marginBottom:16 }}>← Back to Asset Registry</Btn>
+
+      <div style={{ display:"grid", gridTemplateColumns:"320px 1fr", gap:20, alignItems:"start" }}>
+        {/* LEFT — sticky */}
+        <div style={{ position:"sticky", top:0, display:"flex", flexDirection:"column", gap:14 }}>
+          <Card style={{ padding:0, overflow:"hidden" }}>
+            <div style={{ height:160, background:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              {asset.photoUrl ? <img src={asset.photoUrl} alt={asset.assetTag} style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : <span style={{ fontSize:40 }}>🏭</span>}
+            </div>
+            <div style={{ padding:14 }}>
+              <div style={{ fontFamily:"monospace", fontWeight:800, fontSize:15, color:T.text }}>{asset.assetTag}</div>
+              <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>{asset.modelLabel}</div>
+              <Pill color={meta.color} bg={meta.bg} mono={false}>{meta.label}</Pill>
+              {canEdit && (
+                <div style={{ display:"flex", gap:6, marginTop:10 }}>
+                  <Btn small variant="secondary" onClick={()=>setShowEditModal(true)}>✏️ Edit</Btn>
+                  <Btn small variant="danger" onClick={()=>setShowDeleteConfirm(true)}>🗑 Trash</Btn>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader>Identity</SectionHeader>
+            {[
+              ['Serial Number', asset.serialNumber],
+              ['Manufacturer', asset.mfrLabel],
+              ['Category', asset.catLabel],
+              ['Site / Location', [asset.site, asset.location, asset.subLocation].filter(Boolean).join(' / ') || null],
+              ['Commissioned', asset.commissionedAt],
+            ].map(([label,val]) => (
+              <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
+                <span style={{ color:T.muted }}>{label}</span><span style={{ fontWeight:600, color:T.text }}>{val ?? "—"}</span>
+              </div>
+            ))}
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", fontSize:12 }}>
+              <span style={{ color:T.muted }}>Warranty</span>
+              <span style={{ fontWeight:700, color: warrantyExpired ? T.danger : (asset.warrantyUntil ? T.success : T.muted) }}>
+                {asset.warrantyUntil ? (warrantyExpired ? `Expired ${asset.warrantyUntil}` : `Until ${asset.warrantyUntil}`) : "—"}
+              </span>
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader>Running Hours</SectionHeader>
+            <div style={{ fontSize:22, fontWeight:800, color:T.text, marginBottom:6 }}>{asset.runningHours} <span style={{ fontSize:12, fontWeight:400, color:T.muted }}>hrs</span></div>
+            {asset.pmIntervalHours ? (
+              <>
+                <div style={{ width:"100%", height:8, background:"#e2e8f0", borderRadius:4, overflow:"hidden", marginBottom:6 }}>
+                  <div style={{ width:`${hoursPct}%`, height:"100%", background: hoursPct>=90?'#d97706':'#16a34a' }}/>
+                </div>
+                <div style={{ fontSize:11, color:T.muted }}>{Math.max(0, asset.pmIntervalHours - hoursPos)} hrs remaining to next PM ({asset.pmIntervalHours} hr interval)</div>
+              </>
+            ) : <div style={{ fontSize:11, color:T.muted }}>No hour-based PM interval configured.</div>}
+            {canEdit && <Btn small variant="secondary" onClick={()=>setShowHoursModal(true)} style={{ marginTop:10, width:"100%" }}>Update Hours Reading</Btn>}
+          </Card>
+
+          <Card>
+            <SectionHeader>{thisYear} Summary</SectionHeader>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:12 }}>
+              <div><div style={{ color:T.muted }}>Maintenance Events</div><div style={{ fontWeight:700, fontSize:16 }}>{thisYearEvents.length}</div></div>
+              <div><div style={{ color:T.muted }}>Parts Consumed</div><div style={{ fontWeight:700, fontSize:16 }}>{thisYearPartsUsed.reduce((s,p)=>s+Number(p.quantity),0)}</div></div>
+              <div><div style={{ color:T.muted }}>Downtime (hrs)</div><div style={{ fontWeight:700, fontSize:16 }}>{totalDowntimeThisYear}</div></div>
+              <div><div style={{ color:T.muted }}>Top Functional Group</div><div style={{ fontWeight:700, fontSize:13 }}>{topFg || "—"}</div></div>
+            </div>
+          </Card>
+
+          {canEdit && <Btn onClick={()=>setShowLogModal(true)} style={{ width:"100%" }}>+ Log Maintenance Event</Btn>}
+        </div>
+
+        {/* RIGHT — tabs */}
+        <div>
+          <div style={{ display:"flex", gap:4, borderBottom:`1px solid ${T.border}`, marginBottom:16 }}>
+            {tabs.map(tItem => (
+              <button key={tItem.id} onClick={()=>setTab(tItem.id)}
+                style={{ padding:"9px 16px", border:"none", borderBottom: tab===tItem.id?`2px solid ${T.accent}`:"2px solid transparent", background:"transparent", color: tab===tItem.id?T.accent:T.muted, fontWeight: tab===tItem.id?700:500, cursor:"pointer", fontSize:13, fontFamily:"inherit" }}>
+                {tItem.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'timeline' && (
+            events.length === 0 ? <Card><div style={{ padding:30, textAlign:"center", color:T.muted }}>No maintenance events logged yet.</div></Card> : (
+              <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                {events.map(ev => {
+                  const tmeta = MAINTENANCE_TYPE_META[ev.event_type] || {};
+                  const evParts = partsByEvent[ev.id] || [];
+                  return (
+                    <Card key={ev.id}>
+                      <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+                        <span style={{ fontSize:16 }}>{tmeta.dot}</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                            <div style={{ fontWeight:700, color:T.text }}>{ev.title}</div>
+                            <span style={{ fontSize:11, color:T.muted }}>{ev.event_date}</span>
+                          </div>
+                          <div style={{ fontSize:11, color:tmeta.color, fontWeight:700, marginBottom:4 }}>{tmeta.label}{ev.status!=='completed' && ` · ${ev.status}`}</div>
+                          {ev.description && <div style={{ fontSize:12, color:T.muted, marginBottom:6 }}>{ev.description}</div>}
+                          <div style={{ display:"flex", gap:14, flexWrap:"wrap", fontSize:11, color:T.muted, marginBottom:6 }}>
+                            {ev.running_hours_at_event!=null && <span>⏱ {ev.running_hours_at_event} hrs</span>}
+                            {ev.downtime_hours!=null && <span>⏸ {ev.downtime_hours}h downtime</span>}
+                            {ev.work_order_no && <span>📋 {ev.work_order_no}</span>}
+                            {ev.performed_by && <span>👤 {ev.performed_by}</span>}
+                          </div>
+                          {ev.event_type==='corrective' && (ev.failure_mode || ev.root_cause) && (
+                            <div style={{ fontSize:11, color:T.muted, marginBottom:6 }}>
+                              {ev.failure_mode && <span>Failure: {ev.failure_mode}. </span>}
+                              {ev.root_cause && <span>Root cause: {ev.root_cause}.</span>}
+                            </div>
+                          )}
+                          {evParts.length > 0 && (
+                            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                              {evParts.map(p => (
+                                <span key={p.id} onClick={()=>navigateTo('master',{ search:p.part?.code })}
+                                  style={{ background:T.subtle, color:T.text, fontSize:11, fontWeight:700, padding:"3px 8px", borderRadius:10, cursor:"pointer", fontFamily:"monospace" }}>
+                                  {p.part?.code} × {p.quantity}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {tab === 'parts' && (
+            <Card>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:T.header }}>
+                      {['Code','Description','Func Group','Times Replaced','Total Qty','First','Last','Avg Days Between','Total Cost'].map((h,i)=>(
+                        <th key={h} onClick={i===3?()=>setPartsSortDesc(s=>!s):undefined} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, cursor:i===3?"pointer":"default" }}>
+                          {h}{i===3?(partsSortDesc?' ↓':' ↑'):''}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {partsAgg.length===0 ? (
+                      <tr><td colSpan={9} style={{ textAlign:"center", padding:30, color:T.muted }}>No parts logged against this asset yet.</td></tr>
+                    ) : [...partsAgg].sort((a,b)=>partsSortDesc?b.timesReplaced-a.timesReplaced:a.timesReplaced-b.timesReplaced).map(p => (
+                      <tr key={p.code} style={{ borderBottom:`1px solid ${T.border}` }}>
+                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontWeight:700 }}>{p.code}</td>
+                        <td style={{ padding:"7px 10px" }}>{p.shortDesc}</td>
+                        <td style={{ padding:"7px 10px" }}>{p.fg||"—"}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}>{p.timesReplaced}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}>{p.totalQty}</td>
+                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{p.first}</td>
+                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{p.last}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"center" }}>{p.avgDaysBetween ?? "—"}</td>
+                        <td style={{ padding:"7px 10px", textAlign:"right" }}>{p.totalCost ? p.totalCost.toFixed(2) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {tab === 'hours' && (
+            <Card>
+              <HoursLogChart readings={hoursLog}/>
+              <div style={{ marginTop:14, maxHeight:240, overflowY:"auto" }}>
+                {[...hoursLog].reverse().map(r => (
+                  <div key={r.id} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
+                    <span style={{ color:T.muted }}>{new Date(r.read_at).toLocaleString()}</span>
+                    <span style={{ fontWeight:700 }}>{r.reading_hours} hrs{r.is_counter_reset?' (reset)':''}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {tab === 'docs' && <Card><AssetDocumentsTab asset={asset} flash={flash}/></Card>}
+        </div>
+      </div>
+
+      {showLogModal && (
+        <MaintenanceEventModal asset={asset} onClose={()=>setShowLogModal(false)}
+          onSaved={()=>{ setShowLogModal(false); flash('Maintenance event logged'); load(); }}/>
+      )}
+      {showHoursModal && (
+        <UpdateHoursModal asset={asset} onClose={()=>setShowHoursModal(false)}
+          onSaved={()=>{ setShowHoursModal(false); flash('Reading recorded'); load(); }}/>
+      )}
+      {showEditModal && (
+        <AssetFormModal data={data} asset={asset} onClose={()=>setShowEditModal(false)}
+          onSaved={()=>{ setShowEditModal(false); flash('Asset updated'); load(); }}/>
+      )}
+      {showDeleteConfirm && (
+        <Modal title="Move to Trash" onClose={()=>setShowDeleteConfirm(false)} maxWidth={400}>
+          <div style={{ fontSize:13, color:T.text, marginBottom:16 }}>Move <strong>{asset.assetTag}</strong> to Trash? It can be restored later from the Trash page.</div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+            <Btn variant="secondary" onClick={()=>setShowDeleteConfirm(false)}>Cancel</Btn>
+            <Btn variant="danger" onClick={handleDelete}>🗑 Move to Trash</Btn>
+          </div>
+        </Modal>
+      )}
+      <Toast msg={toast}/>
+    </div>
+  );
+}
+
+// Parts Used tab aggregation — grouped by part across the asset's
+// whole maintenance history. Kept as a plain function (not useMemo)
+// called during render since its inputs are already stable arrays
+// from state, and the asset detail page's dataset is always small.
+function aggregatePartsUsage(partsUsed, eventsById) {
+  const byPart = {};
+  partsUsed.forEach(p => {
+    const ev = eventsById[p.maintenance_event_id];
+    if (!ev || !p.part) return;
+    const key = p.part.code;
+    if (!byPart[key]) byPart[key] = { code:p.part.code, shortDesc:p.part.short_desc, fg:p.part.fg, dates:[], totalQty:0, totalCost:0 };
+    byPart[key].dates.push(ev.event_date);
+    byPart[key].totalQty += Number(p.quantity)||0;
+    byPart[key].totalCost += (Number(p.quantity)||0) * (Number(p.unit_cost)||0);
+  });
+  return Object.values(byPart).map(p => {
+    const sorted = [...p.dates].sort();
+    let avgDaysBetween = null;
+    if (sorted.length > 1) {
+      const diffs = [];
+      for (let i=1;i<sorted.length;i++) diffs.push((new Date(sorted[i]) - new Date(sorted[i-1])) / 86400000);
+      avgDaysBetween = Math.round(diffs.reduce((a,b)=>a+b,0)/diffs.length);
+    }
+    return {
+      code:p.code, shortDesc:p.shortDesc, fg:p.fg, timesReplaced:sorted.length, totalQty:p.totalQty,
+      first:sorted[0], last:sorted[sorted.length-1], avgDaysBetween, totalCost:p.totalCost,
+    };
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
@@ -6789,6 +7349,7 @@ function AppShell() {
     reorder:       <ReorderSettingsPage data={data} />,
     alerts:        <StockAlertsPage data={data} />,
     assets:        <AssetRegistryPage data={data} />,
+    assetdetail:   <AssetDetailPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,
