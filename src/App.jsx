@@ -291,7 +291,7 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
 const TRANSLATIONS = {
   en: {
     appName: "CarGas Coding System", appVersion: "Master Data v3.0",
-    signOut: "Sign Out", collapse: "Collapse", liveDb: "Live DB", local: "Local",
+    signOut: "Sign Out", collapse: "Collapse", expand: "Expand menu", liveDb: "Live DB", local: "Local",
     topBarSub: "CarGas Coding System — Engineering Spare Parts Master Coding",
     loading: "Loading…",
     nav_dashboard: "Dashboard", nav_framework: "Coding Framework", nav_categories: "Main Categories",
@@ -305,7 +305,7 @@ const TRANSLATIONS = {
   },
   ar: {
     appName: "نظام ترميز كار جاز", appVersion: "البيانات الرئيسية v3.0",
-    signOut: "تسجيل الخروج", collapse: "طي القائمة", liveDb: "متصل", local: "محلي",
+    signOut: "تسجيل الخروج", collapse: "طي القائمة", expand: "فتح القائمة", liveDb: "متصل", local: "محلي",
     topBarSub: "نظام ترميز كار جاز — ترميز قطع غيار الهندسة",
     loading: "جاري التحميل…",
     nav_dashboard: "الرئيسية", nav_framework: "إطار الترميز", nav_categories: "الفئات الرئيسية",
@@ -7742,6 +7742,17 @@ function AppShell() {
   // you move to another page.
   useEffect(() => { setCollapsed(WIDE_PAGES.has(effectivePage)); }, [effectivePage]);
 
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        setCollapsed(c => !c);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const pageMap = {
     dashboard:     <Dashboard data={data} />,
     framework:     <CodingFrameworkPage data={data} />,
@@ -7799,15 +7810,16 @@ function AppShell() {
           ))}
         </nav>
 
-        <div onClick={()=>setCollapsed(!collapsed)} style={{ padding:"10px 14px",borderTop:`1px solid ${T.sidebarBorder}`,cursor:"pointer",color:"#475569",fontSize:12,display:"flex",alignItems:"center",gap:8 }}>
-          <span style={{ fontSize:14 }}>{collapsed?"▶":"◀"}</span>
-          {!collapsed&&<span>{t('collapse')}</span>}
-        </div>
       </div>
 
       {/* ── MAIN ── */}
       <div style={{ flex:1,display:"flex",flexDirection:"column",overflow:"hidden" }}>
         <div style={{ background:T.card,borderBottom:`1px solid ${T.border}`,padding:"11px 28px",display:"flex",alignItems:"center",gap:16,flexShrink:0 }}>
+          <button onClick={()=>setCollapsed(c=>!c)}
+            title={`${collapsed?t('expand'):t('collapse')}  (Ctrl+B)`}
+            style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 10px",fontSize:16,lineHeight:1,color:T.text,cursor:"pointer",fontFamily:"inherit",flexShrink:0 }}>
+            ☰
+          </button>
           <div>
             <div style={{ fontWeight:700,fontSize:14,color:T.text }}>{t(NAV.find(n=>n.id===effectivePage)?.labelKey) || NAV.find(n=>n.id===effectivePage)?.label}</div>
             <div style={{ fontSize:11,color:T.muted }}>{t('topBarSub')}</div>
