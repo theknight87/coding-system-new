@@ -6908,6 +6908,17 @@ function AssetDocumentsTab({ asset, flash }) {
     flash('Document removed'); load();
   };
 
+  // asset-documents is a private bucket, so the stored public URL
+  // 404s ("Bucket not found") — a short-lived signed URL is required.
+  // The blank tab is opened synchronously *before* the await so the
+  // popup blocker still sees it as part of the click gesture.
+  const handleOpen = async (doc) => {
+    const tab = window.open('', '_blank');
+    const { url, error } = await db.createSignedUrl('asset-documents', doc.path);
+    if (error || !url) { if (tab) tab.close(); return flash(`Error opening file: ${error?.message || 'no URL'}`, 'err'); }
+    if (tab) tab.location = url; else window.location.href = url;
+  };
+
   return (
     <div>
       <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center" }}>
@@ -6922,7 +6933,7 @@ function AssetDocumentsTab({ asset, flash }) {
           {docs.map(d => (
             <div key={d.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", border:`1px solid ${T.border}`, borderRadius:6 }}>
               <span>📎</span>
-              <a href={d.url} target="_blank" rel="noreferrer" style={{ color:T.accent, fontSize:13, flex:1 }}>{d.label}</a>
+              <span onClick={()=>handleOpen(d)} style={{ color:T.accent, fontSize:13, flex:1, cursor:"pointer", textDecoration:"underline" }}>{d.label}</span>
               <span style={{ fontSize:11, color:T.muted }}>{new Date(d.uploaded_at).toLocaleDateString()}</span>
               <button onClick={()=>handleDelete(d)} style={{ background:"transparent", border:"none", color:T.danger, cursor:"pointer" }}>🗑</button>
             </div>

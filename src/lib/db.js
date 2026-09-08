@@ -1098,6 +1098,18 @@ export async function uploadFile(bucket, partCode, file) {
 export const deleteFile = (bucket, path) =>
   supabase.storage.from(bucket).remove([path]);
 
+// Non-public buckets (asset-documents, part-datasheets, part-manuals,
+// part-drawings) CANNOT be read through getPublicUrl() — Supabase's
+// /object/public/ route checks the bucket's public flag and returns
+// "Bucket not found" (NoSuchBucket) before RLS is ever consulted. A
+// short-lived signed URL is the only way to open a file in one of
+// those buckets, so anything opening a stored doc URL must go through
+// here rather than using the stored public URL directly.
+export async function createSignedUrl(bucket, path, expiresInSeconds = 3600) {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
+  return { url: data?.signedUrl ?? null, error };
+}
+
 // ─── AUDIT LOGS ───────────────────────────────────────────────
 export async function fetchAuditLogs({ limit = 200, offset = 0, action, tableName } = {}) {
   let q = supabase
