@@ -1692,7 +1692,7 @@ const PageHeader = ({ title, sub }) => (
   </div>
 );
 
-const Btn = ({ children, onClick, variant = "primary", small = false, disabled = false, style: s = {} }) => {
+const Btn = ({ children, onClick, variant = "primary", small = false, disabled = false, style: s = {}, title }) => {
   const base = { border: "none", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", fontWeight: 700, fontFamily: "inherit", transition: "opacity .15s", opacity: disabled ? 0.6 : 1, ...s };
   const size = small ? { padding: "5px 12px", fontSize: 12 } : { padding: "9px 18px", fontSize: 14 };
   const vars = {
@@ -1702,7 +1702,7 @@ const Btn = ({ children, onClick, variant = "primary", small = false, disabled =
     success:  { background: T.successBg,color: T.success },
     ghost:    { background: "transparent", color: T.muted },
   };
-  return <button onClick={onClick} disabled={disabled} style={{ ...base, ...size, ...vars[variant] }}>{children}</button>;
+  return <button onClick={onClick} disabled={disabled} title={title} style={{ ...base, ...size, ...vars[variant] }}>{children}</button>;
 };
 
 const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength, min, max, step }) => (
@@ -6271,7 +6271,7 @@ function StockAlertsPage({ data }) {
                     }}/>
                   </th>
                   {["Severity","Code","Description","Category","Mfr","On Hand","Reorder Pt","Min Stock","Shortage","UoM","Location","Actions"].map(h=>(
-                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, lineHeight:1.25 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -6283,9 +6283,9 @@ function StockAlertsPage({ data }) {
                       <td style={{ padding:"7px 9px" }}>
                         <input type="checkbox" checked={!!selected[r.part_id]} onChange={e=>setSelected(s=>({...s,[r.part_id]:e.target.checked}))}/>
                       </td>
-                      <td style={{ padding:"7px 9px" }}><Pill color={meta.color} bg="#fff" size={11}>{meta.dot} {meta.label}</Pill></td>
+                      <td style={{ padding:"7px 9px" }}><Pill color={meta.color} bg="#fff" mono={false} size={11}>{meta.dot} {meta.label}</Pill></td>
                       <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
-                      <td style={{ padding:"7px 9px", maxWidth:180, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.short_desc}</td>
+                      <td style={{ padding:"7px 9px", width:"100%", minWidth:150, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.short_desc}</td>
                       <td style={{ padding:"7px 9px" }}><Pill size={11}>{r.cat}</Pill></td>
                       <td style={{ padding:"7px 9px" }}><Pill color="#b45309" bg="#fef3c7" size={11}>{r.mfr}</Pill></td>
                       <td style={{ padding:"7px 9px", textAlign:"center", fontWeight:700, color:meta.color }}>{r.qty_on_hand}</td>
@@ -6298,7 +6298,7 @@ function StockAlertsPage({ data }) {
                         {!r.is_acknowledged ? (
                           <>
                             <Btn small variant="success" onClick={()=>doAcknowledge(r)}>✓ Ack</Btn>{' '}
-                            <Btn small variant="secondary" onClick={()=>setSnoozeTarget({ part_id:r.part_id, severity:r.stock_status, code:r.code })}>💤 Snooze</Btn>{' '}
+                            <Btn small variant="secondary" title="Snooze this alert" onClick={()=>setSnoozeTarget({ part_id:r.part_id, severity:r.stock_status, code:r.code })}>💤</Btn>{' '}
                           </>
                         ) : <span style={{ fontSize:11, color:T.muted }}>Acknowledged</span>}
                         <Btn small variant="ghost" onClick={()=>navigateTo && navigateTo('master', { search: r.code })}>View</Btn>
