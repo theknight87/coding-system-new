@@ -1110,6 +1110,22 @@ export async function createSignedUrl(bucket, path, expiresInSeconds = 3600) {
   return { url: data?.signedUrl ?? null, error };
 }
 
+// Buckets created with public:false. Files in these can only be opened
+// through createSignedUrl() — see its comment above.
+export const PRIVATE_BUCKETS = ['asset-documents', 'part-datasheets', 'part-manuals', 'part-drawings'];
+
+// Recovers the storage path from a stored getPublicUrl() link, for the
+// tables that only persist the URL (spare_parts.datasheet_url etc.)
+// and not the path. Returns null for anything that isn't a public
+// storage URL for this bucket.
+export function pathFromPublicUrl(url, bucket) {
+  if (!url) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const i = url.indexOf(marker);
+  if (i === -1) return null;
+  return decodeURIComponent(url.slice(i + marker.length).split('?')[0]);
+}
+
 // ─── AUDIT LOGS ───────────────────────────────────────────────
 export async function fetchAuditLogs({ limit = 200, offset = 0, action, tableName } = {}) {
   let q = supabase

@@ -1360,6 +1360,45 @@ function TrashPage() {
 // FILE UPLOAD COMPONENT
 // ═══════════════════════════════════════════════════════════════
 
+// Opens a stored Storage file. Public buckets (part-images,
+// asset-photos) can use their stored URL directly; private ones
+// (asset-documents, part-datasheets/manuals/drawings) 404 on that URL
+// — Supabase's /object/public/ route rejects a non-public bucket with
+// "Bucket not found" before RLS is consulted — so those go through a
+// short-lived signed URL instead. Pass `path` when the caller stored
+// it (asset_documents does); otherwise it's recovered from the URL.
+function StoredFileLink({ bucket, url, path, children, style }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+  const isPrivate = db.PRIVATE_BUCKETS.includes(bucket);
+
+  if (!isPrivate) {
+    return <a href={url} target="_blank" rel="noreferrer" style={{ color:T.accent, fontSize:12, ...style }}>{children}</a>;
+  }
+
+  const handleOpen = async () => {
+    // The blank tab is opened synchronously, before the await, so the
+    // popup blocker still sees it as part of the click gesture.
+    const tab = window.open('', '_blank');
+    setErr(''); setBusy(true);
+    const filePath = path || db.pathFromPublicUrl(url, bucket);
+    if (!filePath) { setBusy(false); if (tab) tab.close(); setErr('Cannot resolve file path'); return; }
+    const { url: signed, error } = await db.createSignedUrl(bucket, filePath);
+    setBusy(false);
+    if (error || !signed) { if (tab) tab.close(); setErr(error?.message || 'Could not open file'); return; }
+    if (tab) tab.location = signed; else window.location.href = signed;
+  };
+
+  return (
+    <>
+      <span onClick={handleOpen} style={{ color:T.accent, fontSize:12, cursor:'pointer', textDecoration:'underline', ...style }}>
+        {busy ? 'Opening…' : children}
+      </span>
+      {err && <span style={{ fontSize:11, color:T.danger, marginLeft:6 }}>⚠️ {err}</span>}
+    </>
+  );
+}
+
 function FileUpload({ partCode, bucket, label, currentUrl, onUploaded }) {
   const [uploading, setUploading] = useState(false);
   const [err,       setErr]       = useState('');
@@ -1382,7 +1421,7 @@ function FileUpload({ partCode, bucket, label, currentUrl, onUploaded }) {
         <div style={{ marginBottom:8 }}>
           {bucket==='part-images'
             ? <img src={currentUrl} alt="part" style={{ height:56, borderRadius:5, border:`1px solid ${T.border}`, objectFit:'cover' }}/>
-            : <a href={currentUrl} target="_blank" rel="noreferrer" style={{ color:T.accent, fontSize:12 }}>📎 View file</a>
+            : <StoredFileLink bucket={bucket} url={currentUrl}>📎 View file</StoredFileLink>
           }
         </div>
       )}
@@ -6908,16 +6947,6 @@ function AssetDocumentsTab({ asset, flash }) {
     flash('Document removed'); load();
   };
 
-  // asset-documents is a private bucket, so the stored public URL
-  // 404s ("Bucket not found") — a short-lived signed URL is required.
-  // The blank tab is opened synchronously *before* the await so the
-  // popup blocker still sees it as part of the click gesture.
-  const handleOpen = async (doc) => {
-    const tab = window.open('', '_blank');
-    const { url, error } = await db.createSignedUrl('asset-documents', doc.path);
-    if (error || !url) { if (tab) tab.close(); return flash(`Error opening file: ${error?.message || 'no URL'}`, 'err'); }
-    if (tab) tab.location = url; else window.location.href = url;
-  };
 
   return (
     <div>
@@ -6933,7 +6962,9 @@ function AssetDocumentsTab({ asset, flash }) {
           {docs.map(d => (
             <div key={d.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", border:`1px solid ${T.border}`, borderRadius:6 }}>
               <span>📎</span>
-              <span onClick={()=>handleOpen(d)} style={{ color:T.accent, fontSize:13, flex:1, cursor:"pointer", textDecoration:"underline" }}>{d.label}</span>
+              <span style={{ flex:1 }}>
+                <StoredFileLink bucket="asset-documents" url={d.url} path={d.path} style={{ fontSize:13 }}>{d.label}</StoredFileLink>
+              </span>
               <span style={{ fontSize:11, color:T.muted }}>{new Date(d.uploaded_at).toLocaleDateString()}</span>
               <button onClick={()=>handleDelete(d)} style={{ background:"transparent", border:"none", color:T.danger, cursor:"pointer" }}>🗑</button>
             </div>
