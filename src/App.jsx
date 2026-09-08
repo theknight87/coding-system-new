@@ -6732,6 +6732,11 @@ const MAINTENANCE_TYPE_META = {
   modification: { label:'Modification', color:'#7c3aed', dot:'🟣' },
 };
 
+// A logged part is "cancelled" exactly when the stock movement it
+// posted has been voided — either from here, or from the Stock
+// Movements page. There is no separate flag (migration 025).
+const isPartLineCancelled = (p) => p?.stock_transaction?.is_void === true;
+
 // Simple inline SVG line chart — no charting library, matching this
 // app's existing sparkline (div-bar) approach for the same reason:
 // avoid unnecessary dependencies for one small chart.
@@ -6973,6 +6978,186 @@ function MaintenanceEventModal({ asset, onClose, onSaved }) {
   );
 }
 
+// View / edit one maintenance event, and cancel the parts it logged.
+// event_date and asset are intentionally not editable: the database
+// locks them once stock has posted against them (migration 025), so
+// offering the fields would only produce a rejected save.
+function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged, onError }) {
+  const { isAdmin } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState('');
+  const [confirmCancel, setConfirmCancel] = useState(null); // part line pending cancel
+  const [cancelReason,  setCancelReason]  = useState('');
+
+  const [form, setForm] = useState({
+    title: event.title || '', description: event.description || '',
+    eventType: event.event_type, status: event.status,
+    runningHoursAtEvent: event.running_hours_at_event ?? '',
+    downtimeHours: event.downtime_hours ?? '',
+    workOrderNo: event.work_order_no || '', performedBy: event.performed_by || '',
+    failureMode: event.failure_mode || '', rootCause: event.root_cause || '',
+  });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.title.trim()) return setError('Title is required.');
+    setSaving(true); setError('');
+    const { error: err } = await db.updateMaintenanceEvent(event.id, { ...form, title: form.title.trim() });
+    setSaving(false);
+    if (err) return setError(err.message);
+    onChanged('Maintenance event updated');
+  };
+
+  const handleCancelPart = async () => {
+    const line = confirmCancel;
+    setConfirmCancel(null);
+    const { error: err } = await db.cancelMaintenancePart(line.id, cancelReason.trim() || null);
+    setCancelReason('');
+    if (err) return onError(err.message);
+    onChanged(`${line.part?.code} cancelled — stock returned`);
+  };
+
+  const handleDeleteEvent = async () => {
+    const { error: err } = await db.softDeleteMaintenanceEvent(event.id);
+    if (err) return onError(err.message);
+    onChanged('Maintenance event removed — any issued parts were returned to stock');
+  };
+
+  const meta = MAINTENANCE_TYPE_META[event.event_type] || {};
+  const fieldStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit", width:"100%", boxSizing:"border-box" };
+  const sLabel = { fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 };
+  const row = (label, value) => (
+    <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid ${T.border}`, fontSize:13, gap:12 }}>
+      <span style={{ color:T.muted, whiteSpace:"nowrap" }}>{label}</span>
+      <span style={{ color:T.text, fontWeight:600, textAlign:"right" }}>{value || "—"}</span>
+    </div>
+  );
+
+  return (
+    <Modal title={editing ? 'Edit Maintenance Event' : event.title} onClose={onClose} maxWidth={620}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"75vh", overflowY:"auto" }}>
+        {!editing ? (
+          <>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span>{meta.dot}</span>
+              <span style={{ color:meta.color, fontWeight:700, fontSize:13 }}>{meta.label}</span>
+              {event.status !== 'completed' && (
+                <Pill color={event.status==='cancelled'?T.danger:T.warn} bg={event.status==='cancelled'?T.dangerBg:T.warnBg} mono={false} size={11}>{event.status}</Pill>
+              )}
+              <span style={{ marginLeft:"auto", fontSize:12, color:T.muted }}>{event.event_date}</span>
+            </div>
+            {event.description && <div style={{ fontSize:13, color:T.text }}>{event.description}</div>}
+            {row('Running hours at event', event.running_hours_at_event)}
+            {row('Downtime (hrs)', event.downtime_hours)}
+            {row('Work order', event.work_order_no)}
+            {row('Performed by', event.performed_by)}
+            {event.event_type === 'corrective' && row('Failure mode', event.failure_mode)}
+            {event.event_type === 'corrective' && row('Root cause', event.root_cause)}
+
+            <div>
+              <div style={{ ...sLabel, marginTop:6 }}>Parts Used</div>
+              {parts.length === 0 ? (
+                <div style={{ fontSize:12, color:T.muted }}>No parts logged for this event.</div>
+              ) : parts.map(p => {
+                const cancelled = isPartLineCancelled(p);
+                return (
+                  <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
+                    <span style={{ fontFamily:"monospace", fontWeight:700, color: cancelled?T.muted:T.text, textDecoration: cancelled?"line-through":"none" }}>{p.part?.code}</span>
+                    <span style={{ flex:1, color:T.muted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.part?.short_desc}</span>
+                    <span style={{ fontWeight:700, color: cancelled?T.muted:T.text, textDecoration: cancelled?"line-through":"none" }}>×{p.quantity}</span>
+                    {cancelled
+                      ? <Pill color={T.danger} bg={T.dangerBg} mono={false} size={10}>Cancelled</Pill>
+                      : isAdmin && p.stock_transaction_id && (
+                          <Btn small variant="danger" onClick={()=>setConfirmCancel(p)}>Cancel</Btn>
+                        )}
+                  </div>
+                );
+              })}
+              {parts.some(isPartLineCancelled) && (
+                <div style={{ fontSize:11, color:T.muted, marginTop:6 }}>
+                  Cancelled parts were returned to stock and are not counted against this asset.
+                </div>
+              )}
+            </div>
+
+            {canEdit && (
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
+                <Btn variant="danger" onClick={handleDeleteEvent}>🗑 Remove Event</Btn>
+                <Btn onClick={()=>setEditing(true)}>✏️ Edit</Btn>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize:11, color:T.muted, background:T.subtle, padding:"8px 12px", borderRadius:6 }}>
+              Date ({event.event_date}) and asset cannot be changed once parts have been issued from stock against them.
+            </div>
+            <div><label style={sLabel}>Title</label><input value={form.title} onChange={e=>set('title', e.target.value)} style={fieldStyle}/></div>
+            <div><label style={sLabel}>Description</label><textarea value={form.description} onChange={e=>set('description', e.target.value)} rows={3} style={{ ...fieldStyle, resize:"vertical" }}/></div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div>
+                <label style={sLabel}>Event Type</label>
+                <select value={form.eventType} onChange={e=>set('eventType', e.target.value)} style={fieldStyle}>
+                  {Object.entries(MAINTENANCE_TYPE_META).map(([k,m])=><option key={k} value={k}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={sLabel}>Status</label>
+                <select value={form.status} onChange={e=>set('status', e.target.value)} style={fieldStyle}>
+                  <option value="open">Open</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+            </div>
+            {form.status === 'cancelled' && event.status !== 'cancelled' && (
+              <div style={{ fontSize:11, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>
+                Saving as cancelled returns every part this event issued back to stock.
+              </div>
+            )}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
+              <div><label style={sLabel}>Hours</label><input type="number" value={form.runningHoursAtEvent} onChange={e=>set('runningHoursAtEvent', e.target.value)} style={fieldStyle}/></div>
+              <div><label style={sLabel}>Downtime</label><input type="number" value={form.downtimeHours} onChange={e=>set('downtimeHours', e.target.value)} style={fieldStyle}/></div>
+              <div><label style={sLabel}>Work Order</label><input value={form.workOrderNo} onChange={e=>set('workOrderNo', e.target.value)} style={fieldStyle}/></div>
+              <div><label style={sLabel}>Performed By</label><input value={form.performedBy} onChange={e=>set('performedBy', e.target.value)} style={fieldStyle}/></div>
+            </div>
+            {form.eventType === 'corrective' && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <div><label style={sLabel}>Failure Mode</label><input value={form.failureMode} onChange={e=>set('failureMode', e.target.value)} style={fieldStyle}/></div>
+                <div><label style={sLabel}>Root Cause</label><input value={form.rootCause} onChange={e=>set('rootCause', e.target.value)} style={fieldStyle}/></div>
+              </div>
+            )}
+            {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+              <Btn variant="secondary" onClick={()=>{ setEditing(false); setError(''); }}>Cancel</Btn>
+              <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"Save Changes"}</Btn>
+            </div>
+          </>
+        )}
+      </div>
+
+      {confirmCancel && (
+        <Modal title="Cancel Logged Part" onClose={()=>{ setConfirmCancel(null); setCancelReason(''); }} maxWidth={420}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, color:T.text }}>
+              Cancel <strong>{confirmCancel.part?.code} × {confirmCancel.quantity}</strong>? The quantity goes back into stock and the line stays on this record marked cancelled.
+            </div>
+            <div>
+              <label style={sLabel}>Reason (optional)</label>
+              <input value={cancelReason} onChange={e=>setCancelReason(e.target.value)} placeholder="e.g. logged by mistake" style={fieldStyle}/>
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+              <Btn variant="secondary" onClick={()=>{ setConfirmCancel(null); setCancelReason(''); }}>Back</Btn>
+              <Btn variant="danger" onClick={handleCancelPart}>Cancel Part</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </Modal>
+  );
+}
+
 function AssetDocumentsTab({ asset, flash }) {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -7042,6 +7227,7 @@ function AssetDetailPage({ data }) {
   const [partsUsed, setPartsUsed] = useState([]); // flat, joined, across all events
   const [hoursLog, setHoursLog] = useState([]);
   const [tab, setTab] = useState('timeline');
+  const [eventTarget, setEventTarget] = useState(null); // timeline event opened for detail/edit
   const [showLogModal, setShowLogModal] = useState(false);
   const [showHoursModal, setShowHoursModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -7080,9 +7266,11 @@ function AssetDetailPage({ data }) {
 
   const thisYear = new Date().getFullYear();
   const thisYearEvents = events.filter(e => new Date(e.event_date).getFullYear() === thisYear);
+  // Cancelled lines are excluded everywhere they would otherwise be
+  // counted against this machine — that is the point of cancelling.
   const thisYearPartsUsed = partsUsed.filter(p => {
     const ev = eventsById[p.maintenance_event_id];
-    return ev && new Date(ev.event_date).getFullYear() === thisYear;
+    return ev && !isPartLineCancelled(p) && new Date(ev.event_date).getFullYear() === thisYear;
   });
   const totalDowntimeThisYear = thisYearEvents.reduce((s,e)=>s+(Number(e.downtime_hours)||0),0);
   const fgCounts = {};
@@ -7204,7 +7392,7 @@ function AssetDetailPage({ data }) {
                   const tmeta = MAINTENANCE_TYPE_META[ev.event_type] || {};
                   const evParts = partsByEvent[ev.id] || [];
                   return (
-                    <Card key={ev.id}>
+                    <Card key={ev.id} style={{ cursor:"pointer" }} onClick={()=>setEventTarget(ev)}>
                       <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
                         <span style={{ fontSize:16 }}>{tmeta.dot}</span>
                         <div style={{ flex:1 }}>
@@ -7228,12 +7416,16 @@ function AssetDetailPage({ data }) {
                           )}
                           {evParts.length > 0 && (
                             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                              {evParts.map(p => (
-                                <span key={p.id} onClick={()=>navigateTo('master',{ search:p.part?.code })}
-                                  style={{ background:T.subtle, color:T.text, fontSize:11, fontWeight:700, padding:"3px 8px", borderRadius:10, cursor:"pointer", fontFamily:"monospace" }}>
-                                  {p.part?.code} × {p.quantity}
-                                </span>
-                              ))}
+                              {evParts.map(p => {
+                                const cancelled = isPartLineCancelled(p);
+                                return (
+                                  <span key={p.id} onClick={e=>{ e.stopPropagation(); navigateTo('master',{ search:p.part?.code }); }}
+                                    title={cancelled ? 'Cancelled — stock was returned, not counted against this asset' : ''}
+                                    style={{ background: cancelled?T.dangerBg:T.subtle, color: cancelled?T.danger:T.text, fontSize:11, fontWeight:700, padding:"3px 8px", borderRadius:10, cursor:"pointer", fontFamily:"monospace", textDecoration: cancelled?"line-through":"none" }}>
+                                    {p.part?.code} × {p.quantity}{cancelled ? ' · cancelled' : ''}
+                                  </span>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -7302,6 +7494,16 @@ function AssetDetailPage({ data }) {
         <MaintenanceEventModal asset={asset} onClose={()=>setShowLogModal(false)}
           onSaved={()=>{ setShowLogModal(false); flash('Maintenance event logged'); load(); }}/>
       )}
+      {eventTarget && (
+        <MaintenanceEventDetailModal
+          event={eventTarget}
+          parts={partsByEvent[eventTarget.id] || []}
+          canEdit={canEdit}
+          onClose={()=>setEventTarget(null)}
+          onChanged={(msg)=>{ flash(msg); setEventTarget(null); load(); }}
+          onError={(msg)=>flash(msg, 'err')}
+        />
+      )}
       {showHoursModal && (
         <UpdateHoursModal asset={asset} onClose={()=>setShowHoursModal(false)}
           onSaved={()=>{ setShowHoursModal(false); flash('Reading recorded'); load(); }}/>
@@ -7332,7 +7534,7 @@ function aggregatePartsUsage(partsUsed, eventsById) {
   const byPart = {};
   partsUsed.forEach(p => {
     const ev = eventsById[p.maintenance_event_id];
-    if (!ev || !p.part) return;
+    if (!ev || !p.part || isPartLineCancelled(p)) return;
     const key = p.part.code;
     if (!byPart[key]) byPart[key] = { code:p.part.code, shortDesc:p.part.short_desc, fg:p.part.fg, dates:[], totalQty:0, totalCost:0 };
     byPart[key].dates.push(ev.event_date);
