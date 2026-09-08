@@ -3748,6 +3748,23 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
     return Object.entries(map).map(([location, qty]) => ({ location, qty })).sort((a,b)=>b.qty-a.qty);
   }, [txnHistory]);
 
+  // Which machines actually consumed this part, from the movements
+  // that maintenance generated (migration 023 stamps asset_id on them).
+  // Voided rows and their reversals are excluded — they cancel out, so
+  // counting either would overstate how often the part was replaced.
+  const assetConsumption = useMemo(() => {
+    const map = {};
+    txnHistory.forEach(t => {
+      if (!t.asset_id || t.is_void || t.reverses_txn_id) return;
+      const key = t.asset_tag || t.asset_id;
+      if (!map[key]) map[key] = { assetTag: t.asset_tag, assetId: t.asset_id, times: 0, qty: 0, last: null };
+      map[key].times += 1;
+      map[key].qty += Math.abs(Number(t.signed_qty) || 0);
+      if (!map[key].last || t.occurred_at > map[key].last) map[key].last = t.occurred_at;
+    });
+    return Object.values(map).sort((a,b) => b.times - a.times);
+  }, [txnHistory]);
+
   // 12-month consumption: monthly issue totals for the sparkline, plus
   // rolling 30/90/365-day figures and an average monthly rate.
   const consumption = useMemo(() => {
@@ -3926,6 +3943,26 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                       <div key={l.location} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:6, padding:"6px 12px", fontSize:12 }}>
                         <span style={{ fontFamily:"monospace", fontWeight:700, color:T.text }}>{l.location}</span>
                         <span style={{ marginLeft:8, fontWeight:700, color:qtyStateColor(l.qty), fontVariantNumeric:"tabular-nums" }}>{l.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Which assets consumed this part */}
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:10,color:T.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6 }}>Consumed By (Assets)</div>
+                {assetConsumption.length === 0 ? (
+                  <div style={{ fontSize:12, color:T.muted, background:T.card, border:`1px solid ${T.border}`, borderRadius:6, padding:"8px 12px" }}>Never logged against an asset's maintenance.</div>
+                ) : (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                    {assetConsumption.map(a => (
+                      <div key={a.assetId} onClick={()=>data.navigateTo && data.navigateTo('assetdetail',{ assetId:a.assetId })}
+                        style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:6, padding:"6px 12px", fontSize:12, cursor:"pointer" }}
+                        title={a.last ? `Last replaced ${new Date(a.last).toLocaleDateString()}` : ''}>
+                        <span style={{ fontFamily:"monospace", fontWeight:700, color:T.accent }}>{a.assetTag}</span>
+                        <span style={{ marginLeft:8, color:T.muted }}>×{a.times}</span>
+                        <span style={{ marginLeft:6, fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>({a.qty})</span>
                       </div>
                     ))}
                   </div>
@@ -5118,8 +5155,15 @@ function StockMovementsPage({ data }) {
   const [fCat,     setFCat]     = useState('');
   const [fMfr,     setFMfr]     = useState('');
   const [fLoc,     setFLoc]     = useState('');
+  const [fAsset,   setFAsset]   = useState('');
+  const [assetOptions, setAssetOptions] = useState([]);
 
   const flash = (text, type='ok') => { setToast({text,type}); setTimeout(()=>setToast(null),3200); };
+
+  useEffect(() => {
+    if (!dbReady) return;
+    db.fetchAssetOptions().then(({ data }) => setAssetOptions(data || []));
+  }, [dbReady]);
 
   useEffect(() => {
     const t = setTimeout(()=>setSearch(searchInput.trim()), 400);
@@ -5131,10 +5175,10 @@ function StockMovementsPage({ data }) {
     dateFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
     dateTo: dateTo ? new Date(dateTo + 'T23:59:59').toISOString() : undefined,
     txnType: fType || undefined, cat: fCat || undefined, mfr: fMfr || undefined,
-    location: fLoc || undefined,
-  }), [search, dateFrom, dateTo, fType, fCat, fMfr, fLoc]);
+    location: fLoc || undefined, assetId: fAsset || undefined,
+  }), [search, dateFrom, dateTo, fType, fCat, fMfr, fLoc, fAsset]);
 
-  useEffect(() => { setPage(0); }, [filters.search, filters.dateFrom, filters.dateTo, filters.txnType, filters.cat, filters.mfr, filters.location]);
+  useEffect(() => { setPage(0); }, [filters.search, filters.dateFrom, filters.dateTo, filters.txnType, filters.cat, filters.mfr, filters.location, filters.assetId]);
 
   const load = useCallback(() => {
     if (!dbReady) { setLoading(false); setRows([]); setTotal(0); setSummary(null); return; }
@@ -5181,13 +5225,14 @@ function StockMovementsPage({ data }) {
     flash('Preparing export…');
     const { data: allRows, error } = await db.fetchStockTransactions(filters, 0, 5000);
     if (error) return flash(`Error: ${error.message}`, 'err');
-    const header = ['Date','Part Code','Description','Type','Quantity','Signed Qty','Balance After','Location From','Location To','Reference','Unit Cost','User','Voided'];
+    const header = ['Date','Part Code','Description','Type','Quantity','Signed Qty','Balance After','Location From','Location To','Reference','Unit Cost','Asset','Maintenance','User','Voided'];
     const esc = v => `"${String(v??'').replace(/"/g,'""')}"`;
     const lines = [header.map(esc).join(',')];
     (allRows||[]).forEach(r => {
       lines.push([
         r.occurred_at, r.part_code, r.part_short_desc, r.txn_type, r.quantity, r.signed_qty, r.balance_after,
-        r.location_from, r.location_to, r.reference_no, r.unit_cost, r.user_full_name||r.user_email, r.is_void?'VOID':'',
+        r.location_from, r.location_to, r.reference_no, r.unit_cost, r.asset_tag, r.maintenance_title,
+        r.user_full_name||r.user_email, r.is_void?'VOID':'',
       ].map(esc).join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -5217,6 +5262,12 @@ function StockMovementsPage({ data }) {
         <td style={{ padding:"7px 10px", fontWeight:700, color:T.text }}>{r.balance_after}</td>
         <td style={{ padding:"7px 10px", fontSize:11, color:T.muted, fontFamily:"monospace" }}>{r.location_from||r.location_to ? `${r.location_from||'—'} → ${r.location_to||'—'}` : '—'}</td>
         <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{r.reference_no||'—'}</td>
+        <td style={{ padding:"7px 10px", fontSize:11 }}>
+          {r.asset_tag
+            ? <span title={r.maintenance_title||''} onClick={()=>navigateTo && navigateTo('assetdetail',{ assetId:r.asset_id })}
+                style={{ fontFamily:"monospace", fontWeight:700, color:T.accent, cursor:"pointer" }}>{r.asset_tag}</span>
+            : <span style={{ color:"#d1d5db" }}>—</span>}
+        </td>
         <td style={{ padding:"7px 10px", fontSize:11, color:T.text }}>{r.user_full_name||r.user_email||'—'}</td>
         <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
           {isAdmin && !r.is_void && !r.reverses_txn_id && (
@@ -5277,8 +5328,12 @@ function StockMovementsPage({ data }) {
             {manufacturers.map(m=><option key={m.code} value={m.code}>{m.label}</option>)}
           </select>
           <input value={fLoc} onChange={e=>setFLoc(e.target.value)} placeholder="Location…" style={{ ...selStyle, width:120 }}/>
-          {(search||dateFrom||dateTo||fType||fCat||fMfr||fLoc) && (
-            <button onClick={()=>{setSearchInput('');setSearch('');setDateFrom('');setDateTo('');setFType('');setFCat('');setFMfr('');setFLoc('');}}
+          <select value={fAsset} onChange={e=>setFAsset(e.target.value)} style={selStyle} title="Movements generated by maintenance on a specific asset">
+            <option value="">All Assets</option>
+            {assetOptions.map(a=><option key={a.id} value={a.id}>{a.asset_tag}</option>)}
+          </select>
+          {(search||dateFrom||dateTo||fType||fCat||fMfr||fLoc||fAsset) && (
+            <button onClick={()=>{setSearchInput('');setSearch('');setDateFrom('');setDateTo('');setFType('');setFCat('');setFMfr('');setFLoc('');setFAsset('');}}
               style={{ padding:"7px 12px", borderRadius:5, border:"1px solid #fca5a5", background:"#fee2e2", color:T.danger, fontSize:13, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
               ✕ Clear
             </button>
@@ -5297,14 +5352,14 @@ function StockMovementsPage({ data }) {
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                 <thead>
                   <tr style={{ background:T.header }}>
-                    {['Date','Part Code','Description','Type','Qty','Balance After','Location','Reference','User','Actions'].map(h=>(
+                    {['Date','Part Code','Description','Type','Qty','Balance After','Location','Reference','Asset','User','Actions'].map(h=>(
                       <th key={h} style={{ padding:"9px 12px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {renderList.length === 0
-                    ? <tr><td colSpan={10} style={{ textAlign:"center", padding:36, color:T.muted }}>No transactions match these filters.</td></tr>
+                    ? <tr><td colSpan={11} style={{ textAlign:"center", padding:36, color:T.muted }}>No transactions match these filters.</td></tr>
                     : renderList}
                 </tbody>
               </table>
@@ -6833,17 +6888,17 @@ function MaintenanceEventModal({ asset, onClose, onSaved }) {
       return setError('Every parts row needs both a selected part and a quantity, or remove the row.');
     }
     setSaving(true);
-    const { data: event, error: err } = await db.insertMaintenanceEvent({
+    // One RPC, one transaction (migration 023): the event, its parts,
+    // and the stock issues they post either all land or none do.
+    const { error: err } = await db.logMaintenanceEvent({
       assetId: asset.id, eventType, eventDate, title: title.trim(), description,
       runningHoursAtEvent: runningHours, downtimeHours, workOrderNo, performedBy, status,
       failureMode: eventType==='corrective'?failureMode:null, rootCause: eventType==='corrective'?rootCause:null,
-    });
-    if (err) { setSaving(false); return setError(err.message); }
-    if (validParts.length > 0) {
-      const { error: partsErr } = await db.insertMaintenancePartsUsed(event.id, validParts);
-      if (partsErr) { setSaving(false); return setError(`Event saved, but parts failed: ${partsErr.message}`); }
-    }
+    }, validParts);
     setSaving(false);
+    // Surfaces the database's own message — e.g. a part that is in the
+    // Trash, or one that no longer exists.
+    if (err) return setError(err.message);
     onSaved();
   };
 

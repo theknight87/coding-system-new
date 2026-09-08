@@ -495,6 +495,7 @@ function applyStockTxnFilters(q, filters = {}) {
   if (filters.cat)      q = q.eq('cat', filters.cat);
   if (filters.mfr)      q = q.eq('mfr', filters.mfr);
   if (filters.userId)   q = q.eq('created_by', filters.userId);
+  if (filters.assetId)  q = q.eq('asset_id', filters.assetId);
   if (filters.dateFrom) q = q.gte('occurred_at', filters.dateFrom);
   if (filters.dateTo)   q = q.lte('occurred_at', filters.dateTo);
   if (filters.location) q = q.or(`location_from.eq.${filters.location},location_to.eq.${filters.location}`);
@@ -531,10 +532,12 @@ export async function fetchStockTransactionsSummary(filters = {}) {
   q = applyStockTxnFilters(q, filters);
   const { data, error } = await q;
   if (error) return { data: null, error };
+  // Voided rows are counted, not skipped: each is cancelled by its own
+  // reversing entry, so skipping it here would double-count the
+  // correction — the same bug fixed in the database in migration 024.
   let received = 0, issued = 0, count = 0;
   for (const row of data || []) {
     count++;
-    if (row.is_void) continue;
     const n = Number(row.signed_qty) || 0;
     if (n > 0) received += n; else issued += -n;
   }
@@ -925,6 +928,41 @@ export async function fetchMaintenanceVocabulary() {
   const failureModes = [...new Set((data||[]).map(r=>r.failure_mode).filter(Boolean))];
   const rootCauses   = [...new Set((data||[]).map(r=>r.root_cause).filter(Boolean))];
   return { failureModes, rootCauses, error: null };
+}
+
+// Lightweight id+tag list for the Stock Movements asset filter.
+export async function fetchAssetOptions() {
+  return supabase.from('assets').select('id,asset_tag')
+    .is('deleted_at', null).order('asset_tag', { ascending: true }).limit(1000);
+}
+
+// Atomic event + parts insert (migration 023's RPC). Doing this as two
+// separate calls from the browser could leave an event with only some
+// of its parts — and only some of its stock movements — if the second
+// call failed. The function body is one transaction.
+export async function logMaintenanceEvent(row, parts = []) {
+  const { data, error } = await supabase.rpc('log_maintenance_event', {
+    p_asset_id: row.assetId,
+    p_event_type: row.eventType,
+    p_event_date: row.eventDate,
+    p_title: row.title,
+    p_description: row.description || null,
+    p_running_hours: row.runningHoursAtEvent === '' || row.runningHoursAtEvent == null ? null : Number(row.runningHoursAtEvent),
+    p_downtime_hours: row.downtimeHours === '' || row.downtimeHours == null ? null : Number(row.downtimeHours),
+    p_work_order_no: row.workOrderNo || null,
+    p_performed_by: row.performedBy || null,
+    p_status: row.status || 'completed',
+    p_failure_mode: row.failureMode || null,
+    p_root_cause: row.rootCause || null,
+    p_parts: parts.map(p => ({
+      part_id: p.partId,
+      quantity: Number(p.quantity),
+      unit_cost: p.unitCost === '' || p.unitCost == null ? null : Number(p.unitCost),
+      notes: p.notes || null,
+    })),
+  });
+  if (!error) await audit('CREATE', 'maintenance_events', data?.id, null, data);
+  return { data, error };
 }
 
 export async function insertMaintenanceEvent(row) {
