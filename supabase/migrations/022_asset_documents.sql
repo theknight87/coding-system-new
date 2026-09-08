@@ -4,10 +4,17 @@
 -- Storage + tracking table for the Asset Detail page's Documents tab
 -- (manuals, test reports, extra photos — anything beyond the single
 -- assets.photo_url cover image). Mirrors the part-manuals/datasheets
--- bucket pattern exactly: bucket marked non-public, but a permissive
--- SELECT policy on storage.objects means access is actually governed
--- by RLS, not the bucket's public flag (same as every doc bucket
--- already in this project).
+-- bucket pattern: bucket marked non-public, with a permissive SELECT
+-- policy on storage.objects.
+--
+-- ⚠ A non-public bucket CANNOT be read via getPublicUrl(). Supabase's
+-- /object/public/ route rejects it with "Bucket not found"
+-- (NoSuchBucket) before RLS is ever consulted — the SELECT policy
+-- below does NOT make the public URL work. Files here must be opened
+-- through a signed URL (db.js createSignedUrl), which is what the
+-- Documents tab does. The same caveat applies to the pre-existing
+-- part-datasheets / part-manuals / part-drawings buckets, whose
+-- stored public URLs have the same limitation.
 -- ═══════════════════════════════════════════════════════════════
 
 INSERT INTO storage.buckets (id, name, public)
