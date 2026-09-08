@@ -1664,8 +1664,12 @@ const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false, reorderPo
   return <span title="No stock data recorded yet" style={{ fontSize:size, color:T.muted, cursor:"help" }}>— {unit}</span>;
 };
 
-const Card = ({ children, style, pad = 20 }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: pad, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", ...style }}>
+// onClick/title are forwarded so a Card can be a clickable tile (the
+// asset grid, the maintenance timeline). Without this they were
+// silently dropped and the card looked clickable but did nothing.
+const Card = ({ children, style, pad = 20, onClick, title }) => (
+  <div onClick={onClick} title={title}
+    style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: pad, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", ...style }}>
     {children}
   </div>
 );
