@@ -565,8 +565,16 @@ export async function insertStockTransaction(row) {
   return { data, error };
 }
 
-export async function voidStockTransaction(txnId, reason) {
-  return supabase.rpc('void_stock_transaction', { p_txn_id: txnId, p_reason: reason || null });
+// quantity is optional: omitted (or null) reverses whatever is left
+// un-reversed on the transaction and marks it void; a smaller number
+// posts a partial counter-entry and leaves the row live so the rest
+// can still be reversed later (migration 026).
+export async function voidStockTransaction(txnId, reason, quantity) {
+  return supabase.rpc('void_stock_transaction', {
+    p_txn_id: txnId,
+    p_reason: reason || null,
+    p_quantity: quantity === '' || quantity == null ? null : Number(quantity),
+  });
 }
 
 // Looks up the reversing entries for a batch of voided transactions
@@ -992,13 +1000,42 @@ export async function insertMaintenanceEvent(row) {
 // rather than needing a dedicated SQL aggregate view.
 export async function fetchMaintenancePartsUsedByEvents(eventIds) {
   if (!eventIds || eventIds.length === 0) return { data: [], error: null };
-  // stock_transaction.is_void is what makes a line "cancelled" — there
-  // is no separate flag (migration 025), so it must come back with the
-  // line itself.
-  return supabase
-    .from('maintenance_parts_used')
-    .select('id,maintenance_event_id,quantity,unit_cost,notes,created_at,stock_transaction_id,part:spare_parts(id,code,short_desc,fg),stock_transaction:stock_transactions(is_void)')
+  // v_maintenance_parts_used (migration 026) adds the returned/net
+  // quantities and is_cancelled, which cannot be expressed as a plain
+  // PostgREST embed. Rows are reshaped to the nested `part` shape the
+  // rest of the UI already reads, with `quantity` kept as the issued
+  // amount so nothing that only cares about the original line breaks.
+  const { data, error } = await supabase
+    .from('v_maintenance_parts_used')
+    .select('*')
     .in('maintenance_event_id', eventIds);
+  if (error) return { data: null, error };
+  return {
+    data: (data || []).map(r => ({
+      ...r,
+      quantity: Number(r.issued_qty),
+      issued_qty: Number(r.issued_qty),
+      returned_qty: Number(r.returned_qty),
+      net_qty: Number(r.net_qty),
+      part: { id: r.part_id, code: r.part_code, short_desc: r.part_short_desc, fg: r.part_fg },
+    })),
+    error: null,
+  };
+}
+
+// Returns some or all of a part issued against a maintenance event:
+// posts a linked return_to_store movement and shrinks the line's net
+// quantity, so the maintenance record stops counting what came back
+// (migration 026). Returning the full outstanding amount cancels the
+// line outright.
+export async function returnMaintenancePart(lineId, quantity, reason) {
+  const { data, error } = await supabase.rpc('return_maintenance_part', {
+    p_line_id: lineId,
+    p_quantity: Number(quantity),
+    p_reason: reason || null,
+  });
+  if (!error) await audit('UPDATE', 'maintenance_parts_used', lineId, null, { returned: Number(quantity), reason });
+  return { data, error };
 }
 
 // Cancels a logged part: voids its stock movement but keeps the line

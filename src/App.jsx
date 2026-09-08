@@ -1700,8 +1700,9 @@ const Btn = ({ children, onClick, variant = "primary", small = false, disabled =
   return <button onClick={onClick} disabled={disabled} style={{ ...base, ...size, ...vars[variant] }}>{children}</button>;
 };
 
-const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength }) => (
+const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength, min, max, step }) => (
   <input type={type} value={value} onChange={onChange} placeholder={placeholder} maxLength={maxLength}
+    min={min} max={max} step={step}
     style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 14, color: T.text, background: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit", ...s }} />
 );
 
@@ -5147,6 +5148,7 @@ function StockMovementsPage({ data }) {
   const [showRecord,setShowRecord]= useState(false);
   const [voidTarget,setVoidTarget]= useState(null); // row being voided
   const [voidReason,setVoidReason]= useState('');
+  const [voidQty,   setVoidQty]   = useState('');
   const [voiding,   setVoiding]   = useState(false);
 
   // Pre-filtered arrival from e.g. Part Detail's "View all movements" link.
@@ -5215,12 +5217,18 @@ function StockMovementsPage({ data }) {
   const handleVoid = async () => {
     if (!voidTarget) return;
     if (!voidReason.trim()) return flash('A reason is required to void a transaction', 'err');
+    const qty = voidQty === '' ? null : Number(voidQty);
+    if (qty !== null && (!(qty > 0) || qty > Number(voidTarget.quantity))) {
+      return flash(`Enter a quantity between 0 and ${voidTarget.quantity}`, 'err');
+    }
     setVoiding(true);
-    const { error } = await db.voidStockTransaction(voidTarget.id, voidReason.trim());
+    const { error } = await db.voidStockTransaction(voidTarget.id, voidReason.trim(), qty);
     setVoiding(false);
     if (error) return flash(`Error: ${error.message}`, 'err');
-    flash(`Voided ${voidTarget.part_code} transaction — reversing entry posted`);
-    setVoidTarget(null); setVoidReason('');
+    flash(qty !== null && qty < Number(voidTarget.quantity)
+      ? `Reversed ${qty} of ${voidTarget.quantity} for ${voidTarget.part_code}`
+      : `Voided ${voidTarget.part_code} transaction — reversing entry posted`);
+    setVoidTarget(null); setVoidReason(''); setVoidQty('');
     load();
   };
 
@@ -5387,17 +5395,25 @@ function StockMovementsPage({ data }) {
       )}
 
       {voidTarget && (
-        <Modal title="Void Transaction" onClose={()=>{ if(!voiding){ setVoidTarget(null); setVoidReason(''); } }}>
+        <Modal title="Void Transaction" onClose={()=>{ if(!voiding){ setVoidTarget(null); setVoidReason(''); setVoidQty(''); } }}>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div style={{ background:T.dangerBg, borderRadius:6, padding:"10px 14px", fontSize:13, color:T.danger }}>
               Voiding <strong>{TXN_LABELS[voidTarget.txn_type]}</strong> of <strong>{voidTarget.quantity}</strong> for <CodeTag code={voidTarget.part_code}/> posts a reversing entry — history is never edited.
+            </div>
+            <div>
+              <label style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 }}>Quantity to reverse</label>
+              <Input type="number" min="0" step="any" max={voidTarget.quantity} value={voidQty}
+                onChange={e=>setVoidQty(e.target.value)} placeholder={`All ${voidTarget.quantity} (leave blank)`}/>
+              <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>
+                Leave blank to reverse everything still outstanding and mark this entry void. A smaller number reverses only that many units and keeps the entry live so the rest can be reversed later.
+              </div>
             </div>
             <div>
               <label style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 }}>Reason (required)</label>
               <Input value={voidReason} onChange={e=>setVoidReason(e.target.value)} placeholder="Why is this being voided?"/>
             </div>
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
-              <Btn variant="secondary" onClick={()=>{setVoidTarget(null);setVoidReason('');}} disabled={voiding}>Cancel</Btn>
+              <Btn variant="secondary" onClick={()=>{setVoidTarget(null);setVoidReason('');setVoidQty('');}} disabled={voiding}>Cancel</Btn>
               <Btn variant="danger" onClick={handleVoid} disabled={voiding}>{voiding?"Voiding…":"Void with Reason"}</Btn>
             </div>
           </div>
@@ -6738,8 +6754,14 @@ const MAINTENANCE_TYPE_META = {
 
 // A logged part is "cancelled" exactly when the stock movement it
 // posted has been voided — either from here, or from the Stock
-// Movements page. There is no separate flag (migration 025).
-const isPartLineCancelled = (p) => p?.stock_transaction?.is_void === true;
+// Movements page. There is no separate flag (migration 025);
+// v_maintenance_parts_used exposes it as is_cancelled.
+const isPartLineCancelled = (p) => p?.is_cancelled === true;
+
+// What this line actually cost the asset: what was issued minus what
+// came back (migration 026). A cancelled line counts as zero.
+const partLineNetQty = (p) =>
+  isPartLineCancelled(p) ? 0 : Number(p?.net_qty ?? p?.quantity ?? 0);
 
 // Simple inline SVG line chart — no charting library, matching this
 // app's existing sparkline (div-bar) approach for the same reason:
@@ -6993,6 +7015,10 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
   const [error,   setError]   = useState('');
   const [confirmCancel, setConfirmCancel] = useState(null); // part line pending cancel
   const [cancelReason,  setCancelReason]  = useState('');
+  const [returnTarget,  setReturnTarget]  = useState(null); // part line being returned
+  const [returnQty,     setReturnQty]     = useState('');
+  const [returnReason,  setReturnReason]  = useState('');
+  const [returning,     setReturning]     = useState(false);
 
   const [form, setForm] = useState({
     title: event.title || '', description: event.description || '',
@@ -7020,6 +7046,24 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
     setCancelReason('');
     if (err) return onError(err.message);
     onChanged(`${line.part?.code} cancelled — stock returned`);
+  };
+
+  // Partial return (migration 026): puts `qty` of an issued line back
+  // into store as a movement linked to this event, so the record shows
+  // only what was actually consumed. Returning everything outstanding
+  // cancels the line.
+  const handleReturnPart = async () => {
+    const line = returnTarget;
+    const outstanding = partLineNetQty(line);
+    const qty = Number(returnQty);
+    if (!qty || qty <= 0) return setError('Enter how many units are coming back.');
+    if (qty > outstanding) return setError(`Only ${outstanding} of ${line.part?.code} are still issued on this event.`);
+    setReturning(true); setError('');
+    const { error: err } = await db.returnMaintenancePart(line.id, qty, returnReason.trim() || null);
+    setReturning(false);
+    if (err) return setError(err.message);
+    setReturnTarget(null); setReturnQty(''); setReturnReason('');
+    onChanged(`${qty} × ${line.part?.code} returned to store`);
   };
 
   const handleDeleteEvent = async () => {
@@ -7065,15 +7109,29 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
                 <div style={{ fontSize:12, color:T.muted }}>No parts logged for this event.</div>
               ) : parts.map(p => {
                 const cancelled = isPartLineCancelled(p);
+                const returned  = Number(p.returned_qty) || 0;
+                const net       = partLineNetQty(p);
                 return (
                   <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
                     <span style={{ fontFamily:"monospace", fontWeight:700, color: cancelled?T.muted:T.text, textDecoration: cancelled?"line-through":"none" }}>{p.part?.code}</span>
                     <span style={{ flex:1, color:T.muted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.part?.short_desc}</span>
-                    <span style={{ fontWeight:700, color: cancelled?T.muted:T.text, textDecoration: cancelled?"line-through":"none" }}>×{p.quantity}</span>
+                    <span style={{ fontWeight:700, color: cancelled?T.muted:T.text, textDecoration: cancelled?"line-through":"none", whiteSpace:"nowrap" }}>
+                      ×{cancelled ? p.quantity : net}
+                    </span>
+                    {!cancelled && returned > 0 && (
+                      <span style={{ color:T.muted, whiteSpace:"nowrap" }} title={`${p.quantity} issued, ${returned} returned to store`}>
+                        ({p.quantity} issued − {returned} returned)
+                      </span>
+                    )}
                     {cancelled
                       ? <Pill color={T.danger} bg={T.dangerBg} mono={false} size={10}>Cancelled</Pill>
-                      : isAdmin && p.stock_transaction_id && (
-                          <Btn small variant="danger" onClick={()=>setConfirmCancel(p)}>Cancel</Btn>
+                      : p.stock_transaction_id && (
+                          <>
+                            {net > 0 && (
+                              <Btn small variant="secondary" onClick={()=>{ setReturnTarget(p); setReturnQty(String(net)); setReturnReason(''); setError(''); }}>↩ Return</Btn>
+                            )}
+                            {isAdmin && <Btn small variant="danger" onClick={()=>setConfirmCancel(p)}>Cancel</Btn>}
+                          </>
                         )}
                   </div>
                 );
@@ -7154,6 +7212,32 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={()=>{ setConfirmCancel(null); setCancelReason(''); }}>Back</Btn>
               <Btn variant="danger" onClick={handleCancelPart}>Cancel Part</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {returnTarget && (
+        <Modal title="Return Part to Store" onClose={()=>{ if(!returning){ setReturnTarget(null); setReturnQty(''); setReturnReason(''); } }} maxWidth={420}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, color:T.text }}>
+              <strong>{returnTarget.part?.code}</strong> — {partLineNetQty(returnTarget)} still issued against this event
+              {Number(returnTarget.returned_qty) > 0 && ` (${returnTarget.quantity} issued, ${returnTarget.returned_qty} already returned)`}.
+              Return only what came back; the rest stays counted against this asset.
+            </div>
+            <div>
+              <label style={sLabel}>Quantity to return</label>
+              <input type="number" min="0" step="any" max={partLineNetQty(returnTarget)}
+                value={returnQty} onChange={e=>setReturnQty(e.target.value)} style={fieldStyle}/>
+            </div>
+            <div>
+              <label style={sLabel}>Reason (optional)</label>
+              <input value={returnReason} onChange={e=>setReturnReason(e.target.value)} placeholder="e.g. not needed after strip-down" style={fieldStyle}/>
+            </div>
+            {error && <div style={{ fontSize:12, color:T.danger }}>{error}</div>}
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+              <Btn variant="secondary" onClick={()=>{ setReturnTarget(null); setReturnQty(''); setReturnReason(''); }} disabled={returning}>Back</Btn>
+              <Btn onClick={handleReturnPart} disabled={returning}>{returning ? 'Returning…' : '↩ Return to Store'}</Btn>
             </div>
           </div>
         </Modal>
@@ -7278,7 +7362,7 @@ function AssetDetailPage({ data }) {
   });
   const totalDowntimeThisYear = thisYearEvents.reduce((s,e)=>s+(Number(e.downtime_hours)||0),0);
   const fgCounts = {};
-  thisYearPartsUsed.forEach(p => { const fg = p.part?.fg; if (fg) fgCounts[fg] = (fgCounts[fg]||0) + Number(p.quantity); });
+  thisYearPartsUsed.forEach(p => { const fg = p.part?.fg; if (fg) fgCounts[fg] = (fgCounts[fg]||0) + partLineNetQty(p); });
   const topFg = Object.entries(fgCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
 
   // Parts Used tab aggregation across the asset's whole history.
@@ -7424,9 +7508,11 @@ function AssetDetailPage({ data }) {
                                 const cancelled = isPartLineCancelled(p);
                                 return (
                                   <span key={p.id} onClick={e=>{ e.stopPropagation(); navigateTo('master',{ search:p.part?.code }); }}
-                                    title={cancelled ? 'Cancelled — stock was returned, not counted against this asset' : ''}
+                                    title={cancelled ? 'Cancelled — stock was returned, not counted against this asset'
+                                      : (Number(p.returned_qty)>0 ? `${p.quantity} issued, ${p.returned_qty} returned to store` : '')}
                                     style={{ background: cancelled?T.dangerBg:T.subtle, color: cancelled?T.danger:T.text, fontSize:11, fontWeight:700, padding:"3px 8px", borderRadius:10, cursor:"pointer", fontFamily:"monospace", textDecoration: cancelled?"line-through":"none" }}>
-                                    {p.part?.code} × {p.quantity}{cancelled ? ' · cancelled' : ''}
+                                    {p.part?.code} × {cancelled ? p.quantity : partLineNetQty(p)}
+                                    {cancelled ? ' · cancelled' : (Number(p.returned_qty)>0 ? ` · ${p.returned_qty} returned` : '')}
                                   </span>
                                 );
                               })}
@@ -7541,9 +7627,11 @@ function aggregatePartsUsage(partsUsed, eventsById) {
     if (!ev || !p.part || isPartLineCancelled(p)) return;
     const key = p.part.code;
     if (!byPart[key]) byPart[key] = { code:p.part.code, shortDesc:p.part.short_desc, fg:p.part.fg, dates:[], totalQty:0, totalCost:0 };
+    const net = partLineNetQty(p);
+    if (net <= 0) return; // fully returned — nothing was consumed here
     byPart[key].dates.push(ev.event_date);
-    byPart[key].totalQty += Number(p.quantity)||0;
-    byPart[key].totalCost += (Number(p.quantity)||0) * (Number(p.unit_cost)||0);
+    byPart[key].totalQty += net;
+    byPart[key].totalCost += net * (Number(p.unit_cost)||0);
   });
   return Object.values(byPart).map(p => {
     const sorted = [...p.dates].sort();
