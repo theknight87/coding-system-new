@@ -1093,16 +1093,34 @@ function UsersPage() {
 
   const handleInvite = async () => {
     if (!form.email || !form.full_name) return flash('Email and name required','err');
-    const { error } = await supabase.auth.signInWithOtp({ email: form.email, options: { emailRedirectTo: window.location.origin } });
+    // The profile row cannot be created here — it has no id until the
+    // person accepts and auth.users issues one. The chosen name, role
+    // and department ride along as sign-up metadata instead, which the
+    // handle_new_user trigger reads when it creates the profile.
+    const { error } = await supabase.auth.signInWithOtp({
+      email: form.email,
+      options: {
+        emailRedirectTo: window.location.origin,
+        data: { full_name: form.full_name, role: form.role, department: form.department || null },
+      },
+    });
     if (error) return flash(error.message,'err');
-    await db.upsertUserProfile({ email:form.email, full_name:form.full_name, role:form.role, department:form.department });
-    flash(`Invitation sent to ${form.email}`);
+    flash(`Invitation sent to ${form.email} — they will join as ${form.role === 'admin' ? 'Admin' : 'Department User'}`);
     setShowModal(false);
     reload();
   };
 
   const handleRoleChange = async (userId, newRole) => {
-    await db.upsertUserProfile({ id:userId, role:newRole });
+    const prev = users.find(u => u.id === userId)?.role;
+    if (newRole === prev) return;
+    // Show the new value immediately, then put it back if the write
+    // is refused — the select must never disagree with the database.
+    setUsers(us => us.map(u => u.id === userId ? { ...u, role:newRole } : u));
+    const { error } = await db.updateUserRole(userId, newRole);
+    if (error) {
+      setUsers(us => us.map(u => u.id === userId ? { ...u, role:prev } : u));
+      return flash(`Could not change role: ${error.message}`, 'err');
+    }
     flash(`Role updated to ${newRole}`);
     reload();
   };
@@ -1671,6 +1689,20 @@ const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false, reorderPo
 // Card: cancels the card's horizontal padding so the columns get the
 // card's whole width.
 const TABLE_SCROLL = { overflowX: "auto", margin: "0 -20px" };
+
+// Pins a table's last (actions) column to the right edge, so its
+// buttons stay reachable on a table too wide to fit. A sticky cell is
+// transparent by default and would show the scrolling columns through
+// it, so each one paints its own row background; the left shadow marks
+// where the pinned column starts.
+const STICKY_ACTIONS_TH = {
+  position: "sticky", right: 0, zIndex: 2, background: T.header,
+  boxShadow: "-6px 0 6px -6px rgba(15,23,42,0.35)",
+};
+const stickyActionsTd = (bg) => ({
+  position: "sticky", right: 0, zIndex: 1, background: bg,
+  boxShadow: "-6px 0 6px -6px rgba(15,23,42,0.18)",
+});
 
 const Card = ({ children, style, pad = 20, onClick, title }) => (
   <div onClick={onClick} title={title}
@@ -6271,7 +6303,8 @@ function StockAlertsPage({ data }) {
                     }}/>
                   </th>
                   {["Severity","Code","Description","Category","Mfr","On Hand","Reorder Pt","Min Stock","Shortage","UoM","Location","Actions"].map(h=>(
-                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, lineHeight:1.25 }}>{h}</th>
+                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, lineHeight:1.25,
+                      ...(h === "Actions" ? STICKY_ACTIONS_TH : null) }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -6292,9 +6325,9 @@ function StockAlertsPage({ data }) {
                       <td style={{ padding:"7px 9px", textAlign:"center" }}>{r.reorder_point}</td>
                       <td style={{ padding:"7px 9px", textAlign:"center" }}>{r.min_stock}</td>
                       <td style={{ padding:"7px 9px", textAlign:"center", fontWeight:700 }}>{r.shortage_qty}</td>
-                      <td style={{ padding:"7px 9px" }}>{r.unit||"—"}</td>
-                      <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12 }}>{r.location||"—"}</td>
-                      <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>
+                      <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>{r.unit||"—"}</td>
+                      <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, whiteSpace:"nowrap" }}>{r.location||"—"}</td>
+                      <td style={{ padding:"7px 9px", whiteSpace:"nowrap", ...stickyActionsTd(i%2?T.subtle:T.card) }}>
                         {!r.is_acknowledged ? (
                           <>
                             <Btn small variant="success" onClick={()=>doAcknowledge(r)}>✓ Ack</Btn>{' '}

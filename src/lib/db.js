@@ -1255,5 +1255,35 @@ export const fetchUserProfile = (userId) =>
 export const fetchAllUsers = () =>
   supabase.from('user_profiles').select('*').order('full_name');
 
-export const upsertUserProfile = (profile) =>
-  supabase.from('user_profiles').upsert(profile, { onConflict: 'id' });
+// A plain UPDATE, not an upsert. upsert() sends an INSERT ... ON
+// CONFLICT, and the proposed row is checked against NOT NULL before
+// the conflict is resolved — so upserting {id, role} always failed
+// with 23502 on the email column, and the role never changed.
+export async function updateUserRole(userId, role) {
+  const { data: before } = await supabase.from('user_profiles')
+    .select('id,email,role').eq('id', userId).maybeSingle();
+  const { data, error } = await supabase.from('user_profiles')
+    .update({ role })
+    .eq('id', userId)
+    .select('id,email,full_name,role,department')
+    .maybeSingle();
+  // RLS rejects a non-admin silently: no error, but no row either.
+  if (!error && !data) {
+    return { data: null, error: { message: 'Nothing was updated — only an admin can change a role.' } };
+  }
+  if (!error) await audit('UPDATE', 'user_profiles', userId, before, data);
+  return { data, error };
+}
+
+// updated_at is maintained by the set_updated_at trigger.
+export async function updateUserProfile(userId, fields) {
+  const { data: before } = await supabase.from('user_profiles')
+    .select('*').eq('id', userId).maybeSingle();
+  const { data, error } = await supabase.from('user_profiles')
+    .update(fields).eq('id', userId).select('*').maybeSingle();
+  if (!error && !data) {
+    return { data: null, error: { message: 'Nothing was updated — only an admin can edit another user.' } };
+  }
+  if (!error) await audit('UPDATE', 'user_profiles', userId, before, data);
+  return { data, error };
+}
