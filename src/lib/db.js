@@ -992,10 +992,45 @@ export async function insertMaintenanceEvent(row) {
 // rather than needing a dedicated SQL aggregate view.
 export async function fetchMaintenancePartsUsedByEvents(eventIds) {
   if (!eventIds || eventIds.length === 0) return { data: [], error: null };
+  // stock_transaction.is_void is what makes a line "cancelled" — there
+  // is no separate flag (migration 025), so it must come back with the
+  // line itself.
   return supabase
     .from('maintenance_parts_used')
-    .select('id,maintenance_event_id,quantity,unit_cost,notes,created_at,part:spare_parts(id,code,short_desc,fg)')
+    .select('id,maintenance_event_id,quantity,unit_cost,notes,created_at,stock_transaction_id,part:spare_parts(id,code,short_desc,fg),stock_transaction:stock_transactions(is_void)')
     .in('maintenance_event_id', eventIds);
+}
+
+// Cancels a logged part: voids its stock movement but keeps the line
+// on the maintenance record, marked cancelled (migration 025).
+export async function cancelMaintenancePart(lineId, reason) {
+  const { error } = await supabase.rpc('cancel_maintenance_part', { p_line_id: lineId, p_reason: reason || null });
+  if (!error) await audit('VOID', 'maintenance_parts_used', lineId, null, { reason });
+  return { error };
+}
+
+export async function updateMaintenanceEvent(id, row) {
+  const { data: oldData } = await supabase.from('maintenance_events').select('*').eq('id', id).maybeSingle();
+  const payload = {
+    title: row.title, description: row.description || null,
+    event_type: row.eventType, status: row.status,
+    running_hours_at_event: row.runningHoursAtEvent === '' || row.runningHoursAtEvent == null ? null : Number(row.runningHoursAtEvent),
+    downtime_hours: row.downtimeHours === '' || row.downtimeHours == null ? null : Number(row.downtimeHours),
+    work_order_no: row.workOrderNo || null, performed_by: row.performedBy || null,
+    failure_mode: row.failureMode || null, root_cause: row.rootCause || null,
+  };
+  // event_date / asset_id are deliberately not sent: the database
+  // blocks changing them once stock has posted (migration 025).
+  const { data, error } = await supabase.from('maintenance_events').update(payload).eq('id', id).select('*').maybeSingle();
+  if (!error) await audit('UPDATE', 'maintenance_events', id, oldData, data);
+  return { data, error };
+}
+
+export async function softDeleteMaintenanceEvent(id) {
+  const { data, error } = await supabase.from('maintenance_events')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', id).select().maybeSingle();
+  if (!error) await audit('DELETE', 'maintenance_events', id, data, null);
+  return { data, error };
 }
 
 export async function insertMaintenancePartsUsed(eventId, rows) {
