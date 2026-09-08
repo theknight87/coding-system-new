@@ -908,7 +908,7 @@ function AuditLogPage() {
         {loading
           ? <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading audit log…</div>
           : (
-          <div style={{ overflowX:'auto' }}>
+          <div style={TABLE_SCROLL}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
@@ -1026,7 +1026,7 @@ function StockLedgerPage({ data }) {
           <div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading transactions…</div>
         ) : (
           <>
-            <div style={{ overflowX:'auto' }}>
+            <div style={TABLE_SCROLL}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
                 <thead>
                   <tr style={{ background:T.header }}>
@@ -1276,7 +1276,7 @@ function TrashPage() {
         {loading ? (
           <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading trash…</div>
         ) : (
-          <div style={{ overflowX:'auto' }}>
+          <div style={TABLE_SCROLL}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
@@ -1624,7 +1624,7 @@ const Pill = ({ children, color = T.accent, bg = T.accentLight, mono = true, siz
 );
 
 const CodeTag = ({ code }) => (
-  <span style={{ background: T.header, color: "#38bdf8", fontWeight: 800, fontSize: 13, padding: "3px 10px", borderRadius: 5, fontFamily: "monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>
+  <span style={{ background: T.header, color: "#38bdf8", fontWeight: 800, fontSize: 12, padding: "3px 7px", borderRadius: 5, fontFamily: "monospace", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
     {code}
   </span>
 );
@@ -1667,6 +1667,11 @@ const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false, reorderPo
 // onClick/title are forwarded so a Card can be a clickable tile (the
 // asset grid, the maintenance timeline). Without this they were
 // silently dropped and the card looked clickable but did nothing.
+// Full-bleed scroll container for a table that is the wide child of a
+// Card: cancels the card's horizontal padding so the columns get the
+// card's whole width.
+const TABLE_SCROLL = { overflowX: "auto", margin: "0 -20px" };
+
 const Card = ({ children, style, pad = 20, onClick, title }) => (
   <div onClick={onClick} title={title}
     style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: pad, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", ...style }}>
@@ -4547,7 +4552,7 @@ function MasterTablePage({ data }) {
       <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>👆 Click any row to view, edit or delete the part</div>
 
       <Card>
-        <div style={{ overflowX:"auto" }}>
+        <div style={TABLE_SCROLL}>
           {loading
             ? <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
             : (
@@ -4577,20 +4582,20 @@ function MasterTablePage({ data }) {
                           {r.imageUrl ? <span title="Has image">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}
                         </td>
                         <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
-                        <td style={{ padding:"7px 9px", fontWeight:600, color:T.text, maxWidth:180, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.shortDesc}</td>
+                        <td style={{ padding:"7px 9px", fontWeight:600, color:T.text, width:"100%", minWidth:150, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.shortDesc}</td>
                         <td style={{ padding:"7px 9px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
                         <td style={{ padding:"7px 9px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
-                        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted, whiteSpace:"nowrap" }}>{mdl?.label||r.model}</td>
+                        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted, maxWidth:110, lineHeight:1.35 }}>{mdl?.label||r.model}</td>
                         <td style={{ padding:"7px 9px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
                         <td style={{ padding:"7px 9px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
                         <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted }}>{r.partNo||"—"}</td>
                         <td style={{ padding:"7px 9px", textAlign:"center", color:T.muted, fontVariantNumeric:"tabular-nums" }} title="Quantity used per assembly — catalogue reference, not stock">{r.qtyPerAssembly}</td>
                         <td style={{ padding:"7px 9px", textAlign:"center" }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
-                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted }}>{r.loc||"—"}</td>
+                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted, whiteSpace:"nowrap" }}>{r.loc||"—"}</td>
                         <td style={{ padding:"7px 9px" }}>
                           <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
                         </td>
-                        <td style={{ padding:"7px 9px" }} onClick={e=>e.stopPropagation()}>
+                        <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }} onClick={e=>e.stopPropagation()}>
                           <Btn small variant="success" onClick={()=>setMoveTarget(r)}>📦 Move</Btn>
                         </td>
                       </tr>
@@ -4944,7 +4949,7 @@ function StockCountPage({ data }) {
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
         ) : (
           <>
-          <div style={{ overflowX:"auto" }}>
+          <div style={TABLE_SCROLL}>
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
@@ -5360,7 +5365,7 @@ function StockMovementsPage({ data }) {
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading transactions…</div>
         ) : (
           <>
-            <div style={{ overflowX:"auto" }}>
+            <div style={TABLE_SCROLL}>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                 <thead>
                   <tr style={{ background:T.header }}>
@@ -5616,7 +5621,7 @@ function ReorderSettingsPage({ data }) {
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading…</div>
         ) : (
           <>
-          <div style={{ overflowX:"auto" }}>
+          <div style={TABLE_SCROLL}>
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
@@ -6249,7 +6254,7 @@ function StockAlertsPage({ data }) {
       )}
 
       <Card>
-        <div style={{ overflowX:"auto" }}>
+        <div style={TABLE_SCROLL}>
           {loading ? (
             <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading alerts…</div>
           ) : rows.length === 0 ? (
@@ -6533,7 +6538,7 @@ function AssetRegistryPage({ data }) {
         </div>
       ) : (
         <Card>
-          <div style={{ overflowX:"auto" }}>
+          <div style={TABLE_SCROLL}>
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
@@ -7529,7 +7534,7 @@ function AssetDetailPage({ data }) {
 
           {tab === 'parts' && (
             <Card>
-              <div style={{ overflowX:"auto" }}>
+              <div style={TABLE_SCROLL}>
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                   <thead>
                     <tr style={{ background:T.header }}>
