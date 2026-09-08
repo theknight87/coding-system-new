@@ -7680,6 +7680,16 @@ const NAV = [
   { id:"trash",         labelKey:"nav_trash",         label:"Trash",                icon:"🗑️", group:"System",     groupKey:"group_System",       adminOnly:true  },
 ];
 
+// Pages whose main content is a wide table, plus the Dashboard. The
+// sidebar auto-collapses on these: its 228px is exactly the difference
+// between all 14 Master Table columns fitting and the last two hiding
+// behind a horizontal scrollbar on a 1366px screen. Every other page
+// gets the labelled sidebar back.
+const WIDE_PAGES = new Set([
+  'dashboard', 'master', 'ledger', 'stockcount', 'movements', 'reorder',
+  'alerts', 'assets', 'assetdetail', 'auditlog', 'users', 'trash',
+]);
+
 // ═══════════════════════════════════════════════════════════════
 // APP SHELL (rendered after auth check)
 // ═══════════════════════════════════════════════════════════════
@@ -7727,6 +7737,10 @@ function AppShell() {
   const groups = [...new Set(visibleNav.filter(n=>n.group).map(n=>n.group))];
 
   const effectivePage = (NAV.find(n=>n.id===page)?.adminOnly && !isAdmin) ? 'dashboard' : page;
+
+  // Runs on navigation only — a manual collapse/expand stays put until
+  // you move to another page.
+  useEffect(() => { setCollapsed(WIDE_PAGES.has(effectivePage)); }, [effectivePage]);
 
   const pageMap = {
     dashboard:     <Dashboard data={data} />,
