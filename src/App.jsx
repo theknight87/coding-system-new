@@ -909,11 +909,11 @@ function AuditLogPage() {
           ? <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading audit log…</div>
           : (
           <div style={{ overflowX:'auto' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
                   {['Timestamp','User','Action','Table','Record','Details'].map(h=>(
-                    <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding:'8px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4, whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -922,14 +922,14 @@ function AuditLogPage() {
                   ? <tr><td colSpan={6} style={{ textAlign:'center', padding:36, color:T.muted }}>No audit entries yet.</td></tr>
                   : logs.map((log, i) => (
                   <tr key={log.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                    <td style={{ padding:'8px 12px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(log.created_at).toLocaleString()}</td>
-                    <td style={{ padding:'8px 12px', color:T.text, fontSize:12 }}>{log.user?.email ?? log.user_id?.slice(0,8) ?? '—'}</td>
-                    <td style={{ padding:'8px 12px' }}>
+                    <td style={{ padding:'7px 9px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(log.created_at).toLocaleString()}</td>
+                    <td style={{ padding:'7px 9px', color:T.text, fontSize:12 }}>{log.user?.email ?? log.user_id?.slice(0,8) ?? '—'}</td>
+                    <td style={{ padding:'7px 9px' }}>
                       <span style={{ background:AB[log.action]??T.subtle, color:AC[log.action]??T.muted, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{log.action}</span>
                     </td>
-                    <td style={{ padding:'8px 12px', fontFamily:'monospace', color:T.muted, fontSize:11 }}>{log.table_name}</td>
-                    <td style={{ padding:'8px 12px', fontFamily:'monospace', fontWeight:700, color:T.text, fontSize:12 }}>{log.record_id}</td>
-                    <td style={{ padding:'8px 12px', color:T.muted, maxWidth:240, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:11 }}>
+                    <td style={{ padding:'7px 9px', fontFamily:'monospace', color:T.muted, fontSize:12 }}>{log.table_name}</td>
+                    <td style={{ padding:'7px 9px', fontFamily:'monospace', fontWeight:700, color:T.text, fontSize:12 }}>{log.record_id}</td>
+                    <td style={{ padding:'7px 9px', color:T.muted, maxWidth:240, whiteSpace:'normal', wordBreak:'break-word', lineHeight:1.35, fontSize:12 }}>
                       {log.new_values ? JSON.stringify(log.new_values).slice(0,80) : '—'}
                     </td>
                   </tr>
@@ -1027,11 +1027,11 @@ function StockLedgerPage({ data }) {
         ) : (
           <>
             <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
                 <thead>
                   <tr style={{ background:T.header }}>
                     {['Timestamp','Part Code','Type','Qty','Reference','Notes','User'].map(h=>(
-                      <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' }}>{h}</th>
+                      <th key={h} style={{ padding:'8px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4, whiteSpace:'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1040,15 +1040,15 @@ function StockLedgerPage({ data }) {
                     ? <tr><td colSpan={7} style={{ textAlign:'center', padding:36, color:T.muted }}>No stock movements yet.</td></tr>
                     : movements.map((m,i) => (
                     <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                      <td style={{ padding:'8px 12px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(m.createdAt).toLocaleString()}</td>
-                      <td style={{ padding:'8px 12px' }}><CodeTag code={m.partCode}/></td>
-                      <td style={{ padding:'8px 12px' }}>
+                      <td style={{ padding:'7px 9px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(m.createdAt).toLocaleString()}</td>
+                      <td style={{ padding:'7px 9px' }}><CodeTag code={m.partCode}/></td>
+                      <td style={{ padding:'7px 9px' }}>
                         <span style={{ background:TB[m.transactionType]??T.subtle, color:TC[m.transactionType]??T.muted, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{m.transactionType}</span>
                       </td>
-                      <td style={{ padding:'8px 12px', fontWeight:700, color:T.text }}>{signPrefix(m.transactionType)}{m.quantity}</td>
-                      <td style={{ padding:'8px 12px', color:T.muted }}>{m.reference||'—'}</td>
-                      <td style={{ padding:'8px 12px', color:T.muted, maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.notes||'—'}</td>
-                      <td style={{ padding:'8px 12px', color:T.text, fontSize:12 }}>{m.userName || m.userEmail || '—'}</td>
+                      <td style={{ padding:'7px 9px', fontWeight:700, color:T.text }}>{signPrefix(m.transactionType)}{m.quantity}</td>
+                      <td style={{ padding:'7px 9px', color:T.muted }}>{m.reference||'—'}</td>
+                      <td style={{ padding:'7px 9px', color:T.muted, maxWidth:200, whiteSpace:'normal', wordBreak:'break-word', lineHeight:1.35 }}>{m.notes||'—'}</td>
+                      <td style={{ padding:'7px 9px', color:T.text, fontSize:12 }}>{m.userName || m.userEmail || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1125,7 +1125,7 @@ function UsersPage() {
             <thead>
               <tr style={{ background:T.header }}>
                 {['Name','Email','Role','Department','Change Role'].map(h=>(
-                  <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', fontSize:10, textTransform:'uppercase', letterSpacing:0.8 }}>{h}</th>
+                  <th key={h} style={{ padding:'8px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', fontSize:11, textTransform:'uppercase', letterSpacing:0.4 }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1134,13 +1134,13 @@ function UsersPage() {
                 ? <tr><td colSpan={5} style={{ textAlign:'center', padding:36, color:T.muted }}>No users yet.</td></tr>
                 : users.map((u,i)=>(
                 <tr key={u.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                  <td style={{ padding:'8px 12px', fontWeight:600, color:T.text }}>{u.full_name||'—'}</td>
-                  <td style={{ padding:'8px 12px', color:T.muted }}>{u.email}</td>
-                  <td style={{ padding:'8px 12px' }}>
+                  <td style={{ padding:'7px 9px', fontWeight:600, color:T.text }}>{u.full_name||'—'}</td>
+                  <td style={{ padding:'7px 9px', color:T.muted }}>{u.email}</td>
+                  <td style={{ padding:'7px 9px' }}>
                     <span style={{ background:RB[u.role]??T.subtle, color:RC[u.role]??T.muted, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{u.role}</span>
                   </td>
-                  <td style={{ padding:'8px 12px', color:T.muted }}>{u.department||'—'}</td>
-                  <td style={{ padding:'8px 12px' }}>
+                  <td style={{ padding:'7px 9px', color:T.muted }}>{u.department||'—'}</td>
+                  <td style={{ padding:'7px 9px' }}>
                     <select value={u.role||'department_user'} onChange={e=>handleRoleChange(u.id, e.target.value)}
                       style={{ padding:'4px 8px', borderRadius:4, border:`1px solid ${T.border}`, fontSize:12, fontFamily:'inherit', color:T.text }}>
                       <option value="admin">Admin</option>
@@ -1281,7 +1281,7 @@ function TrashPage() {
               <thead>
                 <tr style={{ background:T.header }}>
                   {['Deleted At','Table','Code','Description','Actions'].map(h=>(
-                    <th key={h} style={{ padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding:'8px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4, whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1290,13 +1290,13 @@ function TrashPage() {
                   ? <tr><td colSpan={5} style={{ textAlign:'center', padding:36, color:T.muted }}>Trash is empty.</td></tr>
                   : rows.map((r, i) => (
                     <tr key={`${r.__table}-${rowKey(r)}`} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                      <td style={{ padding:'8px 12px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(r.deleted_at).toLocaleString()}</td>
-                      <td style={{ padding:'8px 12px' }}>
+                      <td style={{ padding:'7px 9px', color:T.muted, whiteSpace:'nowrap' }}>{new Date(r.deleted_at).toLocaleString()}</td>
+                      <td style={{ padding:'7px 9px' }}>
                         <span style={{ background:T.subtle, color:T.text, fontWeight:700, fontSize:11, padding:'2px 8px', borderRadius:4 }}>{r.__label}</span>
                       </td>
-                      <td style={{ padding:'8px 12px', fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code || r.asset_tag}</td>
-                      <td style={{ padding:'8px 12px', color:T.muted, maxWidth:320, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{rowTitle(r)}</td>
-                      <td style={{ padding:'8px 12px' }}>
+                      <td style={{ padding:'7px 9px', fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code || r.asset_tag}</td>
+                      <td style={{ padding:'7px 9px', color:T.muted, maxWidth:320, whiteSpace:'normal', wordBreak:'break-word', lineHeight:1.35 }}>{rowTitle(r)}</td>
+                      <td style={{ padding:'7px 9px' }}>
                         <div style={{ display:'flex', gap:6 }}>
                           <Btn small variant="success" onClick={()=>handleRestore(r)} disabled={busyCode===rowKey(r)}>
                             {busyCode===rowKey(r) ? '…' : '↩ Restore'}
@@ -1719,7 +1719,7 @@ const Table = ({ cols, rows, emptyMsg = "No records found." }) => (
       <thead>
         <tr style={{ background: T.header }}>
           {cols.map(c => (
-            <th key={c.key} style={{ padding: "9px 12px", textAlign: "left", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", fontSize: 10, letterSpacing: 0.8, whiteSpace: "nowrap" }}>{c.label}</th>
+            <th key={c.key} style={{ padding: "8px 9px", textAlign: "left", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", fontSize:11, letterSpacing:0.4, whiteSpace: "nowrap" }}>{c.label}</th>
           ))}
         </tr>
       </thead>
@@ -1729,7 +1729,7 @@ const Table = ({ cols, rows, emptyMsg = "No records found." }) => (
           : rows.map((row, i) => (
             <tr key={i} style={{ borderBottom: `1px solid ${T.border}`, background: i % 2 ? T.subtle : T.card }}>
               {cols.map(c => (
-                <td key={c.key} style={{ padding: "8px 12px", ...c.style }}>{c.render ? c.render(row) : row[c.key]}</td>
+                <td key={c.key} style={{ padding: "7px 9px", ...c.style }}>{c.render ? c.render(row) : row[c.key]}</td>
               ))}
             </tr>
           ))
@@ -2292,7 +2292,7 @@ function CategoriesPage({ data }) {
           <thead>
             <tr style={{ background:T.header }}>
               {["Code","Category","Icon","Parts Coded","Code Format","Actions"].map(h=>(
-                <th key={h} style={{ padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#94a3b8",fontSize:10,textTransform:"uppercase",letterSpacing:0.8,whiteSpace:"nowrap" }}>{h}</th>
+                <th key={h} style={{ padding:"8px 9px",textAlign:"left",fontWeight:700,color:"#94a3b8",fontSize:11,textTransform:"uppercase",letterSpacing:0.4,whiteSpace:"nowrap" }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -2301,16 +2301,16 @@ function CategoriesPage({ data }) {
               const pc = catCounts[cat.code] ?? 0;
               return (
                 <tr key={cat.code} style={{ borderBottom:`1px solid ${T.border}`,background:i%2?T.subtle:T.card }}>
-                  <td style={{ padding:"8px 12px" }}><Pill color={cat.color} bg={cat.bg}>{cat.code}</Pill></td>
-                  <td style={{ padding:"8px 12px",fontWeight:700,color:T.text }}>{cat.label}</td>
-                  <td style={{ padding:"8px 12px",fontSize:18 }}>{cat.icon}</td>
-                  <td style={{ padding:"8px 12px" }}>
+                  <td style={{ padding:"7px 9px" }}><Pill color={cat.color} bg={cat.bg}>{cat.code}</Pill></td>
+                  <td style={{ padding:"7px 9px",fontWeight:700,color:T.text }}>{cat.label}</td>
+                  <td style={{ padding:"7px 9px",fontSize:18 }}>{cat.icon}</td>
+                  <td style={{ padding:"7px 9px" }}>
                     <span style={{ fontWeight:700,color:pc>0?T.accent:T.muted }}>{pc}</span>
                   </td>
-                  <td style={{ padding:"8px 12px",fontFamily:"monospace",fontSize:11,color:T.muted }}>
+                  <td style={{ padding:"7px 9px",fontFamily:"monospace",fontSize:12,color:T.muted }}>
                     <span style={{ color:cat.color,fontWeight:700 }}>{cat.code}</span>-BB-CC-DD-EE-0001
                   </td>
-                  <td style={{ padding:"8px 12px" }}>
+                  <td style={{ padding:"7px 9px" }}>
                     <div style={{ display:"flex",gap:6 }}>
                       <Btn small variant="secondary" onClick={()=>openEdit(cat)}>✏️ Edit</Btn>
                       <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)}>🗑 Delete</Btn>
@@ -4005,25 +4005,25 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                   <div style={{ fontSize:12,color:T.muted,background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:"10px 12px" }}>No movements recorded yet.</div>
                 ) : (
                   <div style={{ overflowX:"auto", maxHeight:260, overflowY:"auto" }}>
-                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                       <thead>
                         <tr style={{ background:T.header }}>
                           {['Date','Type','Qty','Balance','Reference','User'].map(h=>(
-                            <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9, letterSpacing:0.8, position:"sticky", top:0 }}>{h}</th>
+                            <th key={h} style={{ padding:"6px 8px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9, letterSpacing:0.4, position:"sticky", top:0 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {movements.map((m,i)=>(
                           <tr key={m.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:m.is_void?0.5:1 }}>
-                            <td style={{ padding:"6px 10px", color:T.muted, whiteSpace:"nowrap", textDecoration:m.is_void?"line-through":"none" }}>{new Date(m.occurred_at).toLocaleDateString()}</td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text, textDecoration:m.is_void?"line-through":"none" }}>{TXN_LABELS[m.txn_type]||m.txn_type}</td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:m.signed_qty>0?T.success:T.danger, fontVariantNumeric:"tabular-nums" }}>
+                            <td style={{ padding:"6px 8px", color:T.muted, whiteSpace:"nowrap", textDecoration:m.is_void?"line-through":"none" }}>{new Date(m.occurred_at).toLocaleDateString()}</td>
+                            <td style={{ padding:"6px 8px", fontWeight:700, color:T.text, textDecoration:m.is_void?"line-through":"none" }}>{TXN_LABELS[m.txn_type]||m.txn_type}</td>
+                            <td style={{ padding:"6px 8px", fontWeight:700, color:m.signed_qty>0?T.success:T.danger, fontVariantNumeric:"tabular-nums" }}>
                               {m.signed_qty>0?'+':''}{m.signed_qty}
                             </td>
-                            <td style={{ padding:"6px 10px", fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{m.balance_after}</td>
-                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.reference_no||'—'}</td>
-                            <td style={{ padding:"6px 10px", color:T.muted }}>{m.user_full_name||m.user_email||'—'}</td>
+                            <td style={{ padding:"6px 8px", fontWeight:700, color:T.text, fontVariantNumeric:"tabular-nums" }}>{m.balance_after}</td>
+                            <td style={{ padding:"6px 8px", color:T.muted }}>{m.reference_no||'—'}</td>
+                            <td style={{ padding:"6px 8px", color:T.muted }}>{m.user_full_name||m.user_email||'—'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -4551,11 +4551,11 @@ function MasterTablePage({ data }) {
           {loading
             ? <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
             : (
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
                   {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty/Assy","On Hand","Loc","Status","Actions"].map(h=>(
-                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -4573,24 +4573,24 @@ function MasterTablePage({ data }) {
                         style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
                         onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
                         onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
-                        <td style={{ padding:"7px 10px", textAlign:"center" }}>
+                        <td style={{ padding:"7px 9px", textAlign:"center" }}>
                           {r.imageUrl ? <span title="Has image">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}
                         </td>
-                        <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
-                        <td style={{ padding:"7px 10px", fontWeight:600, color:T.text, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.shortDesc}</td>
-                        <td style={{ padding:"7px 10px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
-                        <td style={{ padding:"7px 10px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
-                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted, whiteSpace:"nowrap" }}>{mdl?.label||r.model}</td>
-                        <td style={{ padding:"7px 10px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
-                        <td style={{ padding:"7px 10px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
-                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.partNo||"—"}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center", color:T.muted, fontVariantNumeric:"tabular-nums" }} title="Quantity used per assembly — catalogue reference, not stock">{r.qtyPerAssembly}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center" }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
-                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11, color:T.muted }}>{r.loc||"—"}</td>
-                        <td style={{ padding:"7px 10px" }}>
+                        <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
+                        <td style={{ padding:"7px 9px", fontWeight:600, color:T.text, maxWidth:180, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.shortDesc}</td>
+                        <td style={{ padding:"7px 9px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
+                        <td style={{ padding:"7px 9px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
+                        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted, whiteSpace:"nowrap" }}>{mdl?.label||r.model}</td>
+                        <td style={{ padding:"7px 9px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
+                        <td style={{ padding:"7px 9px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
+                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted }}>{r.partNo||"—"}</td>
+                        <td style={{ padding:"7px 9px", textAlign:"center", color:T.muted, fontVariantNumeric:"tabular-nums" }} title="Quantity used per assembly — catalogue reference, not stock">{r.qtyPerAssembly}</td>
+                        <td style={{ padding:"7px 9px", textAlign:"center" }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
+                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted }}>{r.loc||"—"}</td>
+                        <td style={{ padding:"7px 9px" }}>
                           <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
                         </td>
-                        <td style={{ padding:"7px 10px" }} onClick={e=>e.stopPropagation()}>
+                        <td style={{ padding:"7px 9px" }} onClick={e=>e.stopPropagation()}>
                           <Btn small variant="success" onClick={()=>setMoveTarget(r)}>📦 Move</Btn>
                         </td>
                       </tr>
@@ -4852,7 +4852,7 @@ function StockCountPage({ data }) {
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const T_ = { padding:'9px 12px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:10, letterSpacing:0.8, whiteSpace:'nowrap' };
+  const T_ = { padding:'8px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4, whiteSpace:'nowrap' };
 
   const printCountSheet = async () => {
     if (!dbReady) return flash("Requires a live database connection", "err");
@@ -4945,7 +4945,7 @@ function StockCountPage({ data }) {
         ) : (
           <>
           <div style={{ overflowX:"auto" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
                   {['Code','Description','Location','Current Qty','Counted Qty','Actions'].map(h=>(
@@ -4958,14 +4958,14 @@ function StockCountPage({ data }) {
                   ? <tr><td colSpan={6} style={{ textAlign:"center", padding:36, color:T.muted }}>No parts match these filters.</td></tr>
                   : rows.map((p,i) => (
                     <tr key={p.id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                      <td style={{ padding:"7px 10px" }}><CodeTag code={p.code}/></td>
-                      <td style={{ padding:"7px 10px" }}>{p.shortDesc}</td>
-                      <td style={{ padding:"7px 10px", color:T.muted, fontFamily:"monospace", fontSize:11 }}>{p.loc||"—"}</td>
-                      <td style={{ padding:"7px 10px" }}><StockQtyDisplay qty={p.qtyOnHand} unit={p.unit} stockSource={p.stockSource} small/></td>
-                      <td style={{ padding:"7px 10px" }}>
+                      <td style={{ padding:"7px 9px" }}><CodeTag code={p.code}/></td>
+                      <td style={{ padding:"7px 9px" }}>{p.shortDesc}</td>
+                      <td style={{ padding:"7px 9px", color:T.muted, fontFamily:"monospace", fontSize:12 }}>{p.loc||"—"}</td>
+                      <td style={{ padding:"7px 9px" }}><StockQtyDisplay qty={p.qtyOnHand} unit={p.unit} stockSource={p.stockSource} small/></td>
+                      <td style={{ padding:"7px 9px" }}>
                         <Input type="number" value={counted[p.id] ?? ""} onChange={e=>setCounted(c=>({...c,[p.id]:e.target.value}))} placeholder="qty" style={{ width:90 }}/>
                       </td>
-                      <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
+                      <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>
                         <Btn small disabled={savingId===p.id} onClick={()=>handleConfirm(p, counted[p.id] ?? "")} style={{ marginRight:6 }}>
                           {savingId===p.id ? "…" : "✓ Confirm"}
                         </Btn>
@@ -5075,11 +5075,11 @@ function BulkCountImportModal({ onClose, onDone, flash }) {
 
             {matched.length > 0 && (
               <div style={{ overflowX:"auto", border:`1px solid ${T.border}`, borderRadius:6 }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                   <thead>
                     <tr style={{ background:T.header }}>
                       {['Code','Current','Counted','Adjustment'].map(h=>(
-                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9 }}>{h}</th>
+                        <th key={h} style={{ padding:"6px 8px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:9 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -5088,10 +5088,10 @@ function BulkCountImportModal({ onClose, onDone, flash }) {
                       const diff = Number(r.counted) - (r.part.qty_on_hand ?? 0);
                       return (
                         <tr key={r.code} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
-                          <td style={{ padding:"6px 10px", fontFamily:"monospace" }}>{r.code}</td>
-                          <td style={{ padding:"6px 10px" }}>{r.part.qty_on_hand ?? 0}</td>
-                          <td style={{ padding:"6px 10px" }}>{r.counted}</td>
-                          <td style={{ padding:"6px 10px", fontWeight:700, color:diff===0?T.muted:(diff>0?T.success:T.danger) }}>{diff>0?'+':''}{diff}</td>
+                          <td style={{ padding:"6px 8px", fontFamily:"monospace" }}>{r.code}</td>
+                          <td style={{ padding:"6px 8px" }}>{r.part.qty_on_hand ?? 0}</td>
+                          <td style={{ padding:"6px 8px" }}>{r.counted}</td>
+                          <td style={{ padding:"6px 8px", fontWeight:700, color:diff===0?T.muted:(diff>0?T.success:T.danger) }}>{diff>0?'+':''}{diff}</td>
                         </tr>
                       );
                     })}
@@ -5260,28 +5260,28 @@ function StockMovementsPage({ data }) {
     const dimmed = r.is_void;
     return (
       <tr key={r.id} style={{ borderBottom:`1px solid ${T.border}`, background: nested ? "#fafafa" : (i%2?T.subtle:T.card), opacity: dimmed?0.5:1 }}>
-        <td style={{ padding:"7px 10px", color:T.muted, whiteSpace:"nowrap", fontSize:11, textDecoration:dimmed?"line-through":"none", paddingLeft: nested?28:10 }}>
+        <td style={{ padding:"7px 9px", color:T.muted, whiteSpace:"nowrap", fontSize:12, textDecoration:dimmed?"line-through":"none", paddingLeft: nested?28:10 }}>
           {nested && '↳ '}{new Date(r.occurred_at).toLocaleString()}
         </td>
-        <td style={{ padding:"7px 10px", textDecoration:dimmed?"line-through":"none" }}><CodeTag code={r.part_code}/></td>
-        <td style={{ padding:"7px 10px", fontSize:12, color:T.text, textDecoration:dimmed?"line-through":"none", maxWidth:160, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.part_short_desc}</td>
-        <td style={{ padding:"7px 10px" }}>
+        <td style={{ padding:"7px 9px", textDecoration:dimmed?"line-through":"none" }}><CodeTag code={r.part_code}/></td>
+        <td style={{ padding:"7px 9px", fontSize:12, color:T.text, textDecoration:dimmed?"line-through":"none", maxWidth:160, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.part_short_desc}</td>
+        <td style={{ padding:"7px 9px" }}>
           <span style={{ background:pill.b, color:pill.c, fontWeight:700, fontSize:10, padding:"2px 7px", borderRadius:4, textTransform:"uppercase", letterSpacing:0.3 }}>{TXN_LABELS[r.txn_type]||r.txn_type}</span>
         </td>
-        <td style={{ padding:"7px 10px", fontWeight:700, color:r.signed_qty>0?T.success:T.danger, textDecoration:dimmed?"line-through":"none" }}>
+        <td style={{ padding:"7px 9px", fontWeight:700, color:r.signed_qty>0?T.success:T.danger, textDecoration:dimmed?"line-through":"none" }}>
           {r.signed_qty>0?'+':''}{r.signed_qty}
         </td>
-        <td style={{ padding:"7px 10px", fontWeight:700, color:T.text }}>{r.balance_after}</td>
-        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted, fontFamily:"monospace" }}>{r.location_from||r.location_to ? `${r.location_from||'—'} → ${r.location_to||'—'}` : '—'}</td>
-        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{r.reference_no||'—'}</td>
-        <td style={{ padding:"7px 10px", fontSize:11 }}>
+        <td style={{ padding:"7px 9px", fontWeight:700, color:T.text }}>{r.balance_after}</td>
+        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted, fontFamily:"monospace" }}>{r.location_from||r.location_to ? `${r.location_from||'—'} → ${r.location_to||'—'}` : '—'}</td>
+        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{r.reference_no||'—'}</td>
+        <td style={{ padding:"7px 9px", fontSize:12 }}>
           {r.asset_tag
             ? <span title={r.maintenance_title||''} onClick={()=>navigateTo && navigateTo('assetdetail',{ assetId:r.asset_id })}
                 style={{ fontFamily:"monospace", fontWeight:700, color:T.accent, cursor:"pointer" }}>{r.asset_tag}</span>
             : <span style={{ color:"#d1d5db" }}>—</span>}
         </td>
-        <td style={{ padding:"7px 10px", fontSize:11, color:T.text }}>{r.user_full_name||r.user_email||'—'}</td>
-        <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
+        <td style={{ padding:"7px 9px", fontSize:12, color:T.text }}>{r.user_full_name||r.user_email||'—'}</td>
+        <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>
           {isAdmin && !r.is_void && !r.reverses_txn_id && (
             <Btn small variant="danger" onClick={()=>setVoidTarget(r)}>Void</Btn>
           )}
@@ -5361,11 +5361,11 @@ function StockMovementsPage({ data }) {
         ) : (
           <>
             <div style={{ overflowX:"auto" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                 <thead>
                   <tr style={{ background:T.header }}>
                     {['Date','Part Code','Description','Type','Qty','Balance After','Location','Reference','Asset','User','Actions'].map(h=>(
-                      <th key={h} style={{ padding:"9px 12px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                      <th key={h} style={{ padding:"8px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -5617,11 +5617,11 @@ function ReorderSettingsPage({ data }) {
         ) : (
           <>
           <div style={{ overflowX:"auto" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
                   {['Code','Description','On Hand','Status','Min Stock','Reorder Point','Max Stock','Lead (d)','Critical'].map(h=>(
-                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -5633,25 +5633,25 @@ function ReorderSettingsPage({ data }) {
                     const dirty = !!edits[r.id];
                     return (
                       <tr key={r.id} style={{ borderBottom:`1px solid ${T.border}`, background:dirty?'#fffbeb':(i%2?T.subtle:T.card) }}>
-                        <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
-                        <td style={{ padding:"7px 10px", maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.short_desc}</td>
-                        <td style={{ padding:"7px 10px", fontWeight:700, fontVariantNumeric:"tabular-nums", color:qtyStateColor(r.qty_on_hand) }}>{r.qty_on_hand}</td>
-                        <td style={{ padding:"7px 10px" }}>
+                        <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
+                        <td style={{ padding:"7px 9px", maxWidth:180, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.short_desc}</td>
+                        <td style={{ padding:"7px 9px", fontWeight:700, fontVariantNumeric:"tabular-nums", color:qtyStateColor(r.qty_on_hand) }}>{r.qty_on_hand}</td>
+                        <td style={{ padding:"7px 9px" }}>
                           <span style={{ background:meta.bg, color:meta.color, fontWeight:700, fontSize:10, padding:"2px 8px", borderRadius:4, textTransform:"uppercase" }}>{meta.label}</span>
                         </td>
-                        <td style={{ padding:"7px 10px" }}>
+                        <td style={{ padding:"7px 9px" }}>
                           <input type="number" disabled={!canEdit} value={valueFor(r,'minStock','min_stock')} onChange={e=>editField(r,'minStock',e.target.value)} style={cellInputStyle}/>
                         </td>
-                        <td style={{ padding:"7px 10px" }}>
+                        <td style={{ padding:"7px 9px" }}>
                           <input type="number" disabled={!canEdit} value={valueFor(r,'reorderPoint','reorder_point')} onChange={e=>editField(r,'reorderPoint',e.target.value)} style={cellInputStyle}/>
                         </td>
-                        <td style={{ padding:"7px 10px" }}>
+                        <td style={{ padding:"7px 9px" }}>
                           <input type="number" disabled={!canEdit} value={valueFor(r,'maxStock','max_stock') ?? ''} onChange={e=>editField(r,'maxStock',e.target.value)} placeholder="—" style={cellInputStyle}/>
                         </td>
-                        <td style={{ padding:"7px 10px" }}>
+                        <td style={{ padding:"7px 9px" }}>
                           <input type="number" disabled={!canEdit} value={valueFor(r,'leadTimeDays','lead_time_days') ?? ''} onChange={e=>editField(r,'leadTimeDays',e.target.value)} style={{...cellInputStyle,width:56}}/>
                         </td>
-                        <td style={{ padding:"7px 10px", textAlign:"center" }}>
+                        <td style={{ padding:"7px 9px", textAlign:"center" }}>
                           <input type="checkbox" disabled={!canEdit} checked={!!valueFor(r,'isCritical','is_critical')} onChange={e=>editField(r,'isCritical',e.target.checked)}/>
                         </td>
                       </tr>
@@ -6255,10 +6255,10 @@ function StockAlertsPage({ data }) {
           ) : rows.length === 0 ? (
             <div style={{ textAlign:"center", padding:40, color:T.muted }}>No active alerts — all stock levels are healthy ✅</div>
           ) : (
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
-                  <th style={{ padding:"8px 10px" }}>
+                  <th style={{ padding:"7px 9px" }}>
                     <input type="checkbox" checked={allSelected} onChange={e=>{
                       const next = {};
                       if (e.target.checked) rows.forEach(r=>{ next[r.part_id]=true; });
@@ -6266,7 +6266,7 @@ function StockAlertsPage({ data }) {
                     }}/>
                   </th>
                   {["Severity","Code","Description","Category","Mfr","On Hand","Reorder Pt","Min Stock","Shortage","UoM","Location","Actions"].map(h=>(
-                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -6275,21 +6275,21 @@ function StockAlertsPage({ data }) {
                   const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, label:r.stock_status, dot:'⚪' };
                   return (
                     <tr key={r.part_id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:r.is_acknowledged?0.55:1 }}>
-                      <td style={{ padding:"7px 10px" }}>
+                      <td style={{ padding:"7px 9px" }}>
                         <input type="checkbox" checked={!!selected[r.part_id]} onChange={e=>setSelected(s=>({...s,[r.part_id]:e.target.checked}))}/>
                       </td>
-                      <td style={{ padding:"7px 10px" }}><Pill color={meta.color} bg="#fff" size={11}>{meta.dot} {meta.label}</Pill></td>
-                      <td style={{ padding:"7px 10px" }}><CodeTag code={r.code}/></td>
-                      <td style={{ padding:"7px 10px", maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.short_desc}</td>
-                      <td style={{ padding:"7px 10px" }}><Pill size={11}>{r.cat}</Pill></td>
-                      <td style={{ padding:"7px 10px" }}><Pill color="#b45309" bg="#fef3c7" size={11}>{r.mfr}</Pill></td>
-                      <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700, color:meta.color }}>{r.qty_on_hand}</td>
-                      <td style={{ padding:"7px 10px", textAlign:"center" }}>{r.reorder_point}</td>
-                      <td style={{ padding:"7px 10px", textAlign:"center" }}>{r.min_stock}</td>
-                      <td style={{ padding:"7px 10px", textAlign:"center", fontWeight:700 }}>{r.shortage_qty}</td>
-                      <td style={{ padding:"7px 10px" }}>{r.unit||"—"}</td>
-                      <td style={{ padding:"7px 10px", fontFamily:"monospace", fontSize:11 }}>{r.location||"—"}</td>
-                      <td style={{ padding:"7px 10px", whiteSpace:"nowrap" }}>
+                      <td style={{ padding:"7px 9px" }}><Pill color={meta.color} bg="#fff" size={11}>{meta.dot} {meta.label}</Pill></td>
+                      <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
+                      <td style={{ padding:"7px 9px", maxWidth:180, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.short_desc}</td>
+                      <td style={{ padding:"7px 9px" }}><Pill size={11}>{r.cat}</Pill></td>
+                      <td style={{ padding:"7px 9px" }}><Pill color="#b45309" bg="#fef3c7" size={11}>{r.mfr}</Pill></td>
+                      <td style={{ padding:"7px 9px", textAlign:"center", fontWeight:700, color:meta.color }}>{r.qty_on_hand}</td>
+                      <td style={{ padding:"7px 9px", textAlign:"center" }}>{r.reorder_point}</td>
+                      <td style={{ padding:"7px 9px", textAlign:"center" }}>{r.min_stock}</td>
+                      <td style={{ padding:"7px 9px", textAlign:"center", fontWeight:700 }}>{r.shortage_qty}</td>
+                      <td style={{ padding:"7px 9px" }}>{r.unit||"—"}</td>
+                      <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12 }}>{r.location||"—"}</td>
+                      <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>
                         {!r.is_acknowledged ? (
                           <>
                             <Btn small variant="success" onClick={()=>doAcknowledge(r)}>✓ Ack</Btn>{' '}
@@ -6534,11 +6534,11 @@ function AssetRegistryPage({ data }) {
       ) : (
         <Card>
           <div style={{ overflowX:"auto" }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
                 <tr style={{ background:T.header }}>
                   {["","Asset Tag","Model / Mfr","Location","Status","Running Hours","Last Service","Open Items"].map(h=>(
-                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, letterSpacing:0.8, whiteSpace:"nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -6550,17 +6550,17 @@ function AssetRegistryPage({ data }) {
                       style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
                       onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
-                      <td style={{ padding:"7px 10px", textAlign:"center" }}>{a.photoUrl ? <span title="Has photo">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}</td>
-                      <td style={{ padding:"7px 10px" }}>
+                      <td style={{ padding:"7px 9px", textAlign:"center" }}>{a.photoUrl ? <span title="Has photo">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}</td>
+                      <td style={{ padding:"7px 9px" }}>
                         <div style={{ fontFamily:'monospace', fontWeight:800, color:T.text }}>{a.assetTag}</div>
                         <div style={{ fontSize:11, color:T.muted }}>{a.modelLabel}</div>
                       </td>
-                      <td style={{ padding:"7px 10px" }}>{a.modelLabel} <span style={{ color:T.muted }}>· {a.mfrLabel}</span></td>
-                      <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{a.location || "—"}{a.subLocation?` / ${a.subLocation}`:''}</td>
-                      <td style={{ padding:"7px 10px" }}><Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.label}</Pill></td>
-                      <td style={{ padding:"7px 10px" }}><HoursBar asset={a}/></td>
-                      <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{a.lastPmDate || "—"}</td>
-                      <td style={{ padding:"7px 10px" }}>
+                      <td style={{ padding:"7px 9px" }}>{a.modelLabel} <span style={{ color:T.muted }}>· {a.mfrLabel}</span></td>
+                      <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{a.location || "—"}{a.subLocation?` / ${a.subLocation}`:''}</td>
+                      <td style={{ padding:"7px 9px" }}><Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.label}</Pill></td>
+                      <td style={{ padding:"7px 9px" }}><HoursBar asset={a}/></td>
+                      <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{a.lastPmDate || "—"}</td>
+                      <td style={{ padding:"7px 9px" }}>
                         {a.pmDue
                           ? <Pill color="#b45309" bg="#fef3c7" mono={false} size={11}>🛠️ PM Due</Pill>
                           : a.openEventCount > 0
@@ -7530,11 +7530,11 @@ function AssetDetailPage({ data }) {
           {tab === 'parts' && (
             <Card>
               <div style={{ overflowX:"auto" }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                   <thead>
                     <tr style={{ background:T.header }}>
                       {['Code','Description','Func Group','Times Replaced','Total Qty','First','Last','Avg Days Between','Total Cost'].map((h,i)=>(
-                        <th key={h} onClick={i===3?()=>setPartsSortDesc(s=>!s):undefined} style={{ padding:"8px 10px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:10, cursor:i===3?"pointer":"default" }}>
+                        <th key={h} onClick={i===3?()=>setPartsSortDesc(s=>!s):undefined} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, cursor:i===3?"pointer":"default" }}>
                           {h}{i===3?(partsSortDesc?' ↓':' ↑'):''}
                         </th>
                       ))}
@@ -7545,15 +7545,15 @@ function AssetDetailPage({ data }) {
                       <tr><td colSpan={9} style={{ textAlign:"center", padding:30, color:T.muted }}>No parts logged against this asset yet.</td></tr>
                     ) : [...partsAgg].sort((a,b)=>partsSortDesc?b.timesReplaced-a.timesReplaced:a.timesReplaced-b.timesReplaced).map(p => (
                       <tr key={p.code} style={{ borderBottom:`1px solid ${T.border}` }}>
-                        <td style={{ padding:"7px 10px", fontFamily:"monospace", fontWeight:700 }}>{p.code}</td>
-                        <td style={{ padding:"7px 10px" }}>{p.shortDesc}</td>
-                        <td style={{ padding:"7px 10px" }}>{p.fg||"—"}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center" }}>{p.timesReplaced}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center" }}>{p.totalQty}</td>
-                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{p.first}</td>
-                        <td style={{ padding:"7px 10px", fontSize:11, color:T.muted }}>{p.last}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"center" }}>{p.avgDaysBetween ?? "—"}</td>
-                        <td style={{ padding:"7px 10px", textAlign:"right" }}>{p.totalCost ? p.totalCost.toFixed(2) : "—"}</td>
+                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontWeight:700 }}>{p.code}</td>
+                        <td style={{ padding:"7px 9px" }}>{p.shortDesc}</td>
+                        <td style={{ padding:"7px 9px" }}>{p.fg||"—"}</td>
+                        <td style={{ padding:"7px 9px", textAlign:"center" }}>{p.timesReplaced}</td>
+                        <td style={{ padding:"7px 9px", textAlign:"center" }}>{p.totalQty}</td>
+                        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{p.first}</td>
+                        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{p.last}</td>
+                        <td style={{ padding:"7px 9px", textAlign:"center" }}>{p.avgDaysBetween ?? "—"}</td>
+                        <td style={{ padding:"7px 9px", textAlign:"right" }}>{p.totalCost ? p.totalCost.toFixed(2) : "—"}</td>
                       </tr>
                     ))}
                   </tbody>
