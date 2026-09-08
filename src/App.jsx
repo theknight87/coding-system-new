@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef, createContext, useContext } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, createContext, useContext, Fragment } from "react";
 import { supabase } from './lib/supabase.js';
 import * as db from './lib/db.js';
 
@@ -298,7 +298,7 @@ const TRANSLATIONS = {
     nav_disciplines: "Disciplines", nav_manufacturers: "Manufacturers", nav_models: "Equipment Models",
     nav_funcgroups: "Functional Groups", nav_generator: "Code Generator", nav_tree: "Hierarchy Tree",
     nav_master: "Master Parts Table", nav_ledger: "Stock Ledger", nav_stockcount: "Stock Count",
-    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_assets: "Asset Registry", nav_admin: "Administration",
+    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_assets: "Asset Registry", nav_reports: "Reliability Reports", nav_admin: "Administration",
     nav_auditlog: "Audit Log", nav_users: "User Management", nav_trash: "Trash",
     group_Reference: "Reference", group_MasterData: "Master Data", group_Tools: "Tools",
     group_Inventory: "Inventory", group_System: "System", group_Assets: "Assets",
@@ -312,7 +312,7 @@ const TRANSLATIONS = {
     nav_disciplines: "التخصصات", nav_manufacturers: "الشركات المصنعة", nav_models: "موديلات المعدات",
     nav_funcgroups: "المجموعات الوظيفية", nav_generator: "مولد الأكواد", nav_tree: "الشجرة الهرمية",
     nav_master: "جدول قطع الغيار الرئيسي", nav_ledger: "دفتر المخزون", nav_stockcount: "جرد المخزون",
-    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_assets: "سجل الأصول", nav_admin: "الإدارة",
+    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_assets: "سجل الأصول", nav_reports: "تقارير الاعتمادية", nav_admin: "الإدارة",
     nav_auditlog: "سجل التدقيق", nav_users: "إدارة المستخدمين", nav_trash: "المهملات",
     group_Reference: "مرجع", group_MasterData: "البيانات الرئيسية", group_Tools: "أدوات",
     group_Inventory: "المخزون", group_System: "النظام", group_Assets: "الأصول",
@@ -1689,6 +1689,20 @@ const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false, reorderPo
 // Card: cancels the card's horizontal padding so the columns get the
 // card's whole width.
 const TABLE_SCROLL = { overflowX: "auto", margin: "0 -20px" };
+
+// ─── CSV export helpers (shared) ──────────────────────────────────
+// The BOM keeps Excel from mangling non-ASCII, and CRLF keeps it from
+// treating the file as one long line on Windows.
+const csvEsc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+const csvRow = arr => arr.map(csvEsc).join(',');
+const downloadCsv = (lines, filename) => {
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
 
 // Pins a table's last (actions) column to the right edge, so its
 // buttons stay reachable on a table too wide to fit. A sticky cell is
@@ -6196,15 +6210,6 @@ function StockAlertsPage({ data }) {
     load();
   };
 
-  const csvEsc = v => `"${String(v??'').replace(/"/g,'""')}"`;
-  const downloadCsv = (lines, filename) => {
-    const blob = new Blob(['﻿'+lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
 
   const exportAlertsCsv = async () => {
     if (!dbReady) return flash('Requires a live database connection', 'err');
@@ -6462,7 +6467,6 @@ function AssetRegistryPage({ data }) {
   const totalPages = Math.ceil(total / ASSETS_PAGE_SIZE);
   const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
 
-  const csvEsc = v => `"${String(v??'').replace(/"/g,'""')}"`;
   const exportCsv = async () => {
     if (!dbReady) return flash('Requires a live database connection', 'err');
     setExporting(true);
@@ -7690,6 +7694,687 @@ function aggregatePartsUsage(partsUsed, eventsById) {
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// RELIABILITY INDICATORS (Reports page)
+// Backed by migration 030_reliability_views.sql.
+//
+// Framing note, deliberate and load-bearing: nothing here predicts a
+// failure. Every flag is a comparison against the asset's own fleet
+// peers over a fixed window, and every row carries the sample size
+// and the underlying events that produced it. An engineer decides
+// what it means — the UI must never imply the system already has.
+// ═══════════════════════════════════════════════════════════════
+
+const REPORT_TABS = [
+  { id:'fleet',       label:'Fleet Overview' },
+  { id:'flags',       label:'Reliability Indicators' },
+  { id:'consumption', label:'Consumption' },
+  { id:'cost',        label:'Cost' },
+];
+
+const FLAG_SEVERITY_META = {
+  critical:    { label:'Critical',    color:'#991B1B', bg:'#fee2e2', dot:'🔴',
+                 blurb:'5x or more than the fleet median' },
+  investigate: { label:'Investigate', color:'#DC2626', bg:'#fef2f2', dot:'🟠',
+                 blurb:'3-5x the fleet median' },
+  watch:       { label:'Watch',       color:'#D97706', bg:'#fef3c7', dot:'🟡',
+                 blurb:'2-3x the fleet median' },
+};
+
+// Horizontal bar chart — plain SVG, matching HoursLogChart's approach
+// rather than adding a charting dependency. Horizontal because the
+// labels here are part codes and model names, which do not fit under
+// a vertical axis without rotating them.
+function BarChart({ rows, valueKey, labelKey, unit = '', color = T.accent, max = 6, emptyMsg = 'No data for this selection.' }) {
+  const data = rows.slice(0, max);
+  if (data.length === 0) return <div style={{ fontSize:12, color:T.muted, padding:24, textAlign:'center' }}>{emptyMsg}</div>;
+  const top = Math.max(...data.map(d => Number(d[valueKey]) || 0), 1);
+  const ROW_H = 30, LABEL_W = 180, PAD_R = 66;
+  const W = 720, H = data.length * ROW_H + 34;
+  const barW = W - LABEL_W - PAD_R;
+  // Axis ticks at 0 / half / full so the bars can actually be read as
+  // quantities rather than compared only against each other.
+  const ticks = [0, top / 2, top];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H }} role="img">
+      {ticks.map((t,i) => {
+        const x = LABEL_W + (t / top) * barW;
+        return (
+          <g key={i}>
+            <line x1={x} y1={16} x2={x} y2={H-18} stroke={T.border} strokeWidth="1"/>
+            <text x={x} y={H-6} fontSize="10" fill={T.muted} textAnchor="middle">
+              {Number.isInteger(t) ? t : t.toFixed(1)}
+            </text>
+          </g>
+        );
+      })}
+      {data.map((d,i) => {
+        const v = Number(d[valueKey]) || 0;
+        const w = (v / top) * barW;
+        const y = 20 + i * ROW_H;
+        return (
+          <g key={i}>
+            <text x={LABEL_W - 8} y={y + 14} fontSize="11" fill={T.text} textAnchor="end">
+              {String(d[labelKey] ?? '').slice(0, 26)}
+            </text>
+            <rect x={LABEL_W} y={y + 3} width={Math.max(w, 1)} height={ROW_H - 12} fill={color} rx="2"/>
+            <text x={LABEL_W + w + 6} y={y + 14} fontSize="11" fill={T.text} fontWeight="700">
+              {v.toLocaleString(undefined,{maximumFractionDigits:2})}{unit}
+            </text>
+          </g>
+        );
+      })}
+      <text x={LABEL_W + barW/2} y={11} fontSize="10" fill={T.muted} textAnchor="middle">
+        {unit ? `Value (${unit.trim()})` : 'Value'}
+      </text>
+    </svg>
+  );
+}
+
+function ReportsPage({ data }) {
+  const { dbReady, categories, models, funcGroups, navigateTo } = data;
+  const [tab, setTab] = useState('fleet');
+
+  return (
+    <div>
+      <PageHeader title="Reliability Indicators"
+        sub="Maintenance history turned into comparable signals — evidence for an engineer to investigate, not automated conclusions"/>
+
+      <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
+        {REPORT_TABS.map(t => (
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            style={{ padding:'7px 14px', borderRadius:6, fontSize:13, fontWeight:700, cursor:'pointer',
+              fontFamily:'inherit', border:`1px solid ${tab===t.id?T.accent:T.border}`,
+              background: tab===t.id?T.accent:'#fff', color: tab===t.id?'#fff':T.text }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {!dbReady
+        ? <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>🟡 Requires a live database connection.</div></Card>
+        : tab === 'fleet'       ? <FleetOverviewTab navigateTo={navigateTo}/>
+        : tab === 'flags'       ? <ReliabilityFlagsTab models={models} navigateTo={navigateTo}/>
+        : tab === 'consumption' ? <ConsumptionTab categories={categories} models={models} funcGroups={funcGroups}/>
+        :                         <CostTab models={models}/>}
+    </div>
+  );
+}
+
+// ─── TAB 1: FLEET OVERVIEW ────────────────────────────────────────
+function FleetOverviewTab({ navigateTo }) {
+  const [statusCounts, setStatusCounts] = useState({});
+  const [pmDue,   setPmDue]   = useState([]);
+  const [totals,  setTotals]  = useState([]);
+  const [year,    setYear]    = useState(new Date().getFullYear());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      db.fetchAssetsByStatus(),
+      db.fetchPmDueList(),
+      db.fetchAssetYearTotals(year),
+    ]).then(([sc, pm, tt]) => {
+      setStatusCounts(sc.data || {});
+      setPmDue(pm.data || []);
+      setTotals(tt.data || []);
+    }).finally(()=>setLoading(false));
+  }, [year]);
+
+  const years = useMemo(() => {
+    const now = new Date().getFullYear();
+    return [now, now-1, now-2, now-3];
+  }, []);
+
+  const topConsumption = [...totals]
+    .filter(t => Number(t.parts_qty) > 0)
+    .sort((a,b) => Number(b.parts_qty) - Number(a.parts_qty)).slice(0,10);
+  const topDowntime = [...totals]
+    .filter(t => Number(t.downtime_hours) > 0)
+    .sort((a,b) => Number(b.downtime_hours) - Number(a.downtime_hours)).slice(0,10);
+
+  const exportCsv = () => {
+    const lines = [csvRow(['Section','Key','Value'])];
+    Object.entries(statusCounts).forEach(([k,v]) => lines.push(csvRow(['Assets by status', ASSET_STATUS_META[k]?.label || k, v])));
+    pmDue.forEach(a => lines.push(csvRow(['PM due', a.asset_tag, `${a.hours_until_pm ?? '—'} hrs until PM`])));
+    topConsumption.forEach(a => lines.push(csvRow([`Top consumption ${year}`, a.asset_tag, a.parts_qty])));
+    topDowntime.forEach(a => lines.push(csvRow([`Top downtime ${year}`, a.asset_tag, a.downtime_hours])));
+    downloadCsv(lines, `fleet-overview-${year}.csv`);
+  };
+
+  if (loading) return <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading fleet overview…</div></Card>;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <Card>
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          <label style={{ fontSize:12, color:T.muted, fontWeight:700 }}>Year</label>
+          <Select value={year} onChange={e=>setYear(Number(e.target.value))} style={{ width:'auto' }}>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </Select>
+          <div style={{ marginLeft:'auto' }}>
+            <Btn small variant="secondary" onClick={exportCsv}>📥 Export CSV</Btn>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle>Assets by status</SectionTitle>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          {Object.keys(ASSET_STATUS_META).map(k => {
+            const meta = ASSET_STATUS_META[k];
+            const n = statusCounts[k] || 0;
+            return (
+              <div key={k} onClick={()=>navigateTo('assets')} title="Open the Asset Registry"
+                style={{ border:`1px solid ${T.border}`, borderTop:`3px solid ${meta.color}`, borderRadius:8,
+                  padding:'10px 18px', minWidth:120, cursor:'pointer', background:T.card }}>
+                <div style={{ fontSize:24, fontWeight:800, color:meta.color }}>{n}</div>
+                <div style={{ fontSize:11, color:T.muted, fontWeight:700 }}>{meta.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle>PM due ({pmDue.length})</SectionTitle>
+        {pmDue.length === 0
+          ? <div style={{ fontSize:12, color:T.muted, padding:16 }}>Nothing is due — every asset is inside its PM interval.</div>
+          : (
+          <div style={TABLE_SCROLL}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead><tr style={{ background:T.header }}>
+                {['Asset','Model','Running Hours','Hours Until PM','Interval'].map(h=>(
+                  <th key={h} style={{ padding:'7px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4 }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {pmDue.map((a,i)=>(
+                  <tr key={a.id||i} onClick={()=>navigateTo('assetdetail',{ assetId:a.id })}
+                    style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:'pointer' }}>
+                    <td style={{ padding:'7px 9px', fontFamily:'monospace', fontWeight:800, whiteSpace:'nowrap' }}>{a.asset_tag}</td>
+                    <td style={{ padding:'7px 9px', color:T.muted }}>{a.model_label || a.model}</td>
+                    <td style={{ padding:'7px 9px', fontVariantNumeric:'tabular-nums' }}>{a.running_hours}</td>
+                    <td style={{ padding:'7px 9px', fontWeight:700, color:T.warn, fontVariantNumeric:'tabular-nums' }}>{a.hours_until_pm ?? '—'}</td>
+                    <td style={{ padding:'7px 9px', color:T.muted, fontVariantNumeric:'tabular-nums' }}>{a.pm_interval_hours ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))', gap:16 }}>
+        <Card>
+          <SectionTitle>Top 10 by parts consumed — {year}</SectionTitle>
+          <BarChart rows={topConsumption} labelKey="asset_tag" valueKey="parts_qty" max={10}
+            emptyMsg={`No parts were consumed in ${year}.`}/>
+        </Card>
+        <Card>
+          <SectionTitle>Top 10 by downtime — {year}</SectionTitle>
+          <BarChart rows={topDowntime} labelKey="asset_tag" valueKey="downtime_hours" unit=" h"
+            color={T.danger} max={10} emptyMsg={`No downtime was recorded in ${year}.`}/>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+const SectionTitle = ({ children }) => (
+  <div style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:'uppercase',
+    letterSpacing:0.8, marginBottom:12 }}>{children}</div>
+);
+
+// ─── TAB 2: RELIABILITY INDICATORS ────────────────────────────────
+// Every row is expandable to the events that produced it. That is not
+// a nicety: a flag an engineer cannot audit is a flag they will
+// (rightly) ignore.
+function ReliabilityFlagsTab({ models, navigateTo }) {
+  const [flags,    setFlags]    = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [fSev,     setFSev]     = useState('');
+  const [fModel,   setFModel]   = useState('');
+  const [expanded, setExpanded] = useState(null);   // flag key
+  const [evidence, setEvidence] = useState({});     // key -> rows
+  const [loadingEv,setLoadingEv]= useState(false);
+
+  const keyOf = f => `${f.asset_id}|${f.fg}`;
+
+  useEffect(() => {
+    setLoading(true);
+    db.fetchReliabilityFlags({ severity:fSev||undefined, model:fModel||undefined })
+      .then(({ data }) => setFlags(data || []))
+      .finally(()=>setLoading(false));
+  }, [fSev, fModel]);
+
+  const toggle = async (f) => {
+    const k = keyOf(f);
+    if (expanded === k) return setExpanded(null);
+    setExpanded(k);
+    if (evidence[k]) return;
+    setLoadingEv(true);
+    const { data } = await db.fetchFlagEvidence(f.asset_id, f.fg);
+    setEvidence(e => ({ ...e, [k]: data || [] }));
+    setLoadingEv(false);
+  };
+
+  const exportCsv = () => {
+    const lines = [csvRow(['Asset','Model','Functional Group','Replacements (12m)',
+      'Fleet Median (12m)','Fleet Avg (12m)','Peer Assets','Ratio','Severity'])];
+    flags.forEach(f => lines.push(csvRow([f.asset_tag, f.asset_model, f.fg_label || f.fg,
+      f.asset_replacements_12m, f.fleet_median_12m, f.fleet_avg_12m,
+      f.fleet_asset_count, f.ratio_to_fleet_median, f.severity])));
+    downloadCsv(lines, `reliability-indicators-${new Date().toISOString().slice(0,10)}.csv`);
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <Card style={{ background:'#f8fafc', borderLeft:`3px solid ${T.accent}` }}>
+        <div style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>
+          <strong>How to read these.</strong> An asset is listed when it replaced a functional
+          group at least twice as often as other assets of the same model, over the same rolling
+          12 months. They are comparisons against peers, not predictions — a flag means
+          “worth a look”, never “this will fail”.
+          <div style={{ marginTop:8, color:T.muted, fontSize:12 }}>
+            A group is only compared when there are at least 3 assets of the model and the typical
+            asset replaced it at least once; below that there is no basis for a comparison, so
+            nothing is shown rather than a guess. Expand any row for the events behind it.
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <Select value={fSev} onChange={e=>setFSev(e.target.value)} style={{ width:'auto' }}>
+            <option value="">All severities</option>
+            {Object.entries(FLAG_SEVERITY_META).map(([k,m])=><option key={k} value={k}>{m.label}</option>)}
+          </Select>
+          <Select value={fModel} onChange={e=>setFModel(e.target.value)} style={{ width:'auto' }}>
+            <option value="">All models</option>
+            {(models||[]).map(m=><option key={m.code} value={m.code}>{m.label||m.code}</option>)}
+          </Select>
+          <span style={{ fontSize:12, color:T.muted }}>{flags.length} indicator(s)</span>
+          <div style={{ marginLeft:'auto' }}>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={flags.length===0}>📥 Export CSV</Btn>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        {loading ? <div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading…</div>
+        : flags.length === 0 ? (
+          <div style={{ textAlign:'center', padding:40, color:T.muted, fontSize:13 }}>
+            No indicators. Either no asset is an outlier against its peers, or there is not yet
+            enough history — a comparison needs at least 3 assets of a model with replacements
+            recorded against them.
+          </div>
+        ) : (
+          <div style={TABLE_SCROLL}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead><tr style={{ background:T.header }}>
+                {['','Severity','Asset','Model','Functional Group','This Asset (12m)','Fleet Median','Peers','Ratio'].map(h=>(
+                  <th key={h} style={{ padding:'7px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4, lineHeight:1.25 }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {flags.map((f,i) => {
+                  const k = keyOf(f);
+                  const meta = FLAG_SEVERITY_META[f.severity] || {};
+                  const open = expanded === k;
+                  return (
+                    <Fragment key={k}>
+                      <tr onClick={()=>toggle(f)}
+                        style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:'pointer' }}>
+                        <td style={{ padding:'7px 9px', color:T.muted, width:20 }}>{open?'▾':'▸'}</td>
+                        <td style={{ padding:'7px 9px' }}>
+                          <Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.dot} {meta.label}</Pill>
+                        </td>
+                        <td style={{ padding:'7px 9px', fontFamily:'monospace', fontWeight:800, whiteSpace:'nowrap' }}>{f.asset_tag}</td>
+                        <td style={{ padding:'7px 9px', color:T.muted }}>{f.asset_model}</td>
+                        <td style={{ padding:'7px 9px' }}>
+                          <Pill color="#6d28d9" bg="#f5f3ff" size={11}>{f.fg}</Pill>
+                          {f.fg_label && <span style={{ color:T.muted, marginLeft:6, fontSize:12 }}>{f.fg_label}</span>}
+                        </td>
+                        <td style={{ padding:'7px 9px', textAlign:'center', fontWeight:800, color:meta.color, fontVariantNumeric:'tabular-nums' }}>{f.asset_replacements_12m}</td>
+                        <td style={{ padding:'7px 9px', textAlign:'center', color:T.muted, fontVariantNumeric:'tabular-nums' }}>{f.fleet_median_12m}</td>
+                        <td style={{ padding:'7px 9px', textAlign:'center', color:T.muted, fontVariantNumeric:'tabular-nums' }} title="Assets of this model the median is taken over">{f.fleet_asset_count}</td>
+                        <td style={{ padding:'7px 9px', textAlign:'center', fontWeight:700, fontVariantNumeric:'tabular-nums' }}>{f.ratio_to_fleet_median}×</td>
+                      </tr>
+                      {open && (
+                        <tr style={{ background:'#f8fafc' }}>
+                          <td colSpan={9} style={{ padding:'12px 16px', borderBottom:`1px solid ${T.border}` }}>
+                            <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>
+                              Why this fired: <strong style={{ color:T.text }}>{f.asset_tag}</strong> replaced{' '}
+                              <strong style={{ color:T.text }}>{f.fg_label || f.fg}</strong> parts{' '}
+                              <strong style={{ color:T.text }}>{f.asset_replacements_12m}</strong> times in the last 12 months,
+                              against a median of <strong style={{ color:T.text }}>{f.fleet_median_12m}</strong> across{' '}
+                              <strong style={{ color:T.text }}>{f.fleet_asset_count}</strong> assets of model{' '}
+                              <strong style={{ color:T.text }}>{f.asset_model}</strong> — {f.ratio_to_fleet_median}× the median.
+                            </div>
+                            {loadingEv && !evidence[k]
+                              ? <div style={{ fontSize:12, color:T.muted }}>Loading the underlying events…</div>
+                              : (evidence[k] || []).length === 0
+                                ? <div style={{ fontSize:12, color:T.muted }}>No individual events found.</div>
+                                : (
+                              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, background:T.card }}>
+                                <thead><tr style={{ background:T.subtle }}>
+                                  {['Date','Work Order','Event','Part','Qty','Failure Mode'].map(h=>(
+                                    <th key={h} style={{ padding:'6px 8px', textAlign:'left', fontWeight:700, color:T.muted, fontSize:10, textTransform:'uppercase', letterSpacing:0.4 }}>{h}</th>
+                                  ))}
+                                </tr></thead>
+                                <tbody>
+                                  {(evidence[k]||[]).map((e,j)=>(
+                                    <tr key={j} style={{ borderBottom:`1px solid ${T.border}` }}>
+                                      <td style={{ padding:'6px 8px', whiteSpace:'nowrap', color:T.muted }}>{e.event_date}</td>
+                                      <td style={{ padding:'6px 8px', fontFamily:'monospace', fontSize:11 }}>{e.work_order_no||'—'}</td>
+                                      <td style={{ padding:'6px 8px' }}>{e.event_title}</td>
+                                      <td style={{ padding:'6px 8px', fontFamily:'monospace', fontSize:11 }}>{e.part_code}</td>
+                                      <td style={{ padding:'6px 8px', textAlign:'center', fontWeight:700, fontVariantNumeric:'tabular-nums' }}>{e.net_qty}</td>
+                                      <td style={{ padding:'6px 8px', color:T.muted }}>{e.failure_mode||'—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                            <div style={{ marginTop:10 }}>
+                              <Btn small variant="secondary" onClick={(ev)=>{ ev.stopPropagation(); navigateTo('assetdetail',{ assetId:f.asset_id }); }}>
+                                Open {f.asset_tag} →
+                              </Btn>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── TAB 3: CONSUMPTION ───────────────────────────────────────────
+function ConsumptionTab({ categories, models, funcGroups }) {
+  const today = new Date();
+  const yearAgo = new Date(today.getTime() - 365*86400000);
+  const [from,  setFrom]  = useState(yearAgo.toISOString().slice(0,10));
+  const [to,    setTo]    = useState(today.toISOString().slice(0,10));
+  const [groupBy, setGroupBy] = useState('fg');   // fg | part_cat | asset_model | part_code
+  const [fModel, setFModel] = useState('');
+  const [fCat,   setFCat]   = useState('');
+  const [fFg,    setFFg]    = useState('');
+  const [rows,   setRows]   = useState([]);
+  const [loading,setLoading]= useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    db.fetchConsumption({ from, to, model:fModel||undefined, cat:fCat||undefined, fg:fFg||undefined })
+      .then(({ data }) => setRows(data || []))
+      .finally(()=>setLoading(false));
+  }, [from, to, fModel, fCat, fFg]);
+
+  const GROUPS = [
+    { id:'fg',          label:'Functional Group' },
+    { id:'part_cat',    label:'Category' },
+    { id:'asset_model', label:'Equipment Model' },
+    { id:'part_code',   label:'Part' },
+  ];
+
+  // Rolled up here rather than in SQL — see CONSUMPTION_ROW_CAP.
+  const grouped = useMemo(() => {
+    const by = {};
+    rows.forEach(r => {
+      const key = r[groupBy] || '—';
+      if (!by[key]) by[key] = { key, qty:0, cost:0, lines:0, label:key };
+      by[key].qty  += Number(r.net_qty) || 0;
+      by[key].cost += Number(r.line_cost) || 0;
+      by[key].lines += 1;
+    });
+    // Friendlier labels where the code alone is cryptic.
+    Object.values(by).forEach(g => {
+      if (groupBy === 'asset_model') g.label = models?.find(m=>m.code===g.key)?.label || g.key;
+      if (groupBy === 'part_cat')    g.label = categories?.find(c=>c.code===g.key)?.label || g.key;
+      if (groupBy === 'fg')          g.label = funcGroups?.find(f=>f.code===g.key)?.label || g.key;
+    });
+    return Object.values(by).sort((a,b)=>b.qty-a.qty);
+  }, [rows, groupBy, models, categories, funcGroups]);
+
+  const totalQty  = grouped.reduce((s,g)=>s+g.qty,0);
+  const totalCost = grouped.reduce((s,g)=>s+g.cost,0);
+  const capped = rows.length >= db.CONSUMPTION_ROW_CAP;
+
+  const exportCsv = () => {
+    const lines = [csvRow([GROUPS.find(g=>g.id===groupBy).label,'Code','Quantity','Cost','Lines'])];
+    grouped.forEach(g => lines.push(csvRow([g.label, g.key, g.qty, g.cost.toFixed(2), g.lines])));
+    downloadCsv(lines, `consumption-${groupBy}-${from}_to_${to}.csv`);
+  };
+
+  const selStyle = { width:'auto' };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <Card>
+        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <label style={{ fontSize:12, color:T.muted, fontWeight:700 }}>From</label>
+          <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={{ width:'auto' }}/>
+          <label style={{ fontSize:12, color:T.muted, fontWeight:700 }}>To</label>
+          <Input type="date" value={to} onChange={e=>setTo(e.target.value)} style={{ width:'auto' }}/>
+          <Select value={groupBy} onChange={e=>setGroupBy(e.target.value)} style={selStyle}>
+            {GROUPS.map(g=><option key={g.id} value={g.id}>Group by {g.label}</option>)}
+          </Select>
+          <Select value={fModel} onChange={e=>setFModel(e.target.value)} style={selStyle}>
+            <option value="">All models</option>
+            {(models||[]).map(m=><option key={m.code} value={m.code}>{m.label||m.code}</option>)}
+          </Select>
+          <Select value={fCat} onChange={e=>setFCat(e.target.value)} style={selStyle}>
+            <option value="">All categories</option>
+            {(categories||[]).map(c=><option key={c.code} value={c.code}>{c.label||c.code}</option>)}
+          </Select>
+          <Select value={fFg} onChange={e=>setFFg(e.target.value)} style={selStyle}>
+            <option value="">All functional groups</option>
+            {(funcGroups||[]).map(f=><option key={f.code} value={f.code}>{f.label||f.code}</option>)}
+          </Select>
+          <div style={{ marginLeft:'auto' }}>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={grouped.length===0}>📥 Export CSV</Btn>
+          </div>
+        </div>
+        {capped && (
+          <div style={{ marginTop:10, fontSize:12, color:T.warn, background:T.warnBg, padding:'8px 12px', borderRadius:6 }}>
+            ⚠️ This period returned the maximum of {db.CONSUMPTION_ROW_CAP.toLocaleString()} lines, so the
+            totals below cover only part of it. Narrow the date range for an exact figure.
+          </div>
+        )}
+      </Card>
+
+      {loading ? <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading consumption…</div></Card> : (
+      <>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:14 }}>
+          <StatCard label="Parts consumed" value={totalQty.toLocaleString(undefined,{maximumFractionDigits:2})} icon="📦"/>
+          <StatCard label="Total cost" value={totalCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="💰" color={T.success}/>
+          <StatCard label="Distinct groups" value={grouped.length} icon="🧩" color="#6d28d9"/>
+          <StatCard label="Job lines" value={rows.length} icon="🧾" color={T.muted}/>
+        </div>
+
+        <Card>
+          <SectionTitle>Quantity consumed by {GROUPS.find(g=>g.id===groupBy).label.toLowerCase()} — top 6</SectionTitle>
+          <BarChart rows={grouped} labelKey="label" valueKey="qty" max={6}
+            emptyMsg="Nothing was consumed in this period."/>
+        </Card>
+
+        <Card>
+          <SectionTitle>All groups ({grouped.length})</SectionTitle>
+          <div style={TABLE_SCROLL}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead><tr style={{ background:T.header }}>
+                {[GROUPS.find(g=>g.id===groupBy).label,'Code','Quantity','Cost','Job Lines','Share'].map(h=>(
+                  <th key={h} style={{ padding:'7px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4 }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {grouped.length===0
+                  ? <tr><td colSpan={6} style={{ textAlign:'center', padding:36, color:T.muted }}>Nothing consumed in this period.</td></tr>
+                  : grouped.map((g,i)=>(
+                  <tr key={g.key} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                    <td style={{ padding:'7px 9px', fontWeight:600 }}>{g.label}</td>
+                    <td style={{ padding:'7px 9px', fontFamily:'monospace', fontSize:12, color:T.muted }}>{g.key}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontWeight:700, fontVariantNumeric:'tabular-nums' }}>{g.qty.toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontVariantNumeric:'tabular-nums' }}>{g.cost.toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', color:T.muted, fontVariantNumeric:'tabular-nums' }}>{g.lines}</td>
+                    <td style={{ padding:'7px 9px', color:T.muted, fontVariantNumeric:'tabular-nums' }}>
+                      {totalQty ? `${((g.qty/totalQty)*100).toFixed(1)}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </>
+      )}
+    </div>
+  );
+}
+
+// ─── TAB 4: COST ──────────────────────────────────────────────────
+function CostTab({ models }) {
+  const thisYear = new Date().getFullYear();
+  const [year,   setYear]   = useState(thisYear);
+  const [fModel, setFModel] = useState('');
+  const [rows,   setRows]   = useState([]);
+  const [loading,setLoading]= useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    db.fetchAssetYearTotals(null)
+      .then(({ data }) => setRows(data || []))
+      .finally(()=>setLoading(false));
+  }, []);
+
+  const years = useMemo(
+    () => [...new Set(rows.map(r=>r.year))].sort((a,b)=>b-a),
+    [rows]);
+
+  const filtered = rows.filter(r => !fModel || r.asset_model === fModel);
+  const cur  = filtered.filter(r => r.year === year);
+  const prev = filtered.filter(r => r.year === year - 1);
+  const prevByAsset = Object.fromEntries(prev.map(r => [r.asset_id, r]));
+
+  const sum = (list, k) => list.reduce((s,r)=>s+(Number(r[k])||0),0);
+  const curCost = sum(cur,'parts_cost'), prevCost = sum(prev,'parts_cost');
+  const delta = prevCost ? ((curCost - prevCost) / prevCost) * 100 : null;
+
+  const table = [...cur].sort((a,b)=>Number(b.parts_cost)-Number(a.parts_cost));
+
+  const exportCsv = () => {
+    const lines = [csvRow(['Asset','Model','Year','Parts Cost','Parts Qty','Events',
+      'Downtime Hours','Hours Run','Cost / Running Hour',`Parts Cost ${year-1}`,'Change %'])];
+    table.forEach(r => {
+      const p = prevByAsset[r.asset_id];
+      const pc = p ? Number(p.parts_cost) : null;
+      const ch = pc ? (((Number(r.parts_cost)-pc)/pc)*100).toFixed(1) : '';
+      lines.push(csvRow([r.asset_tag, r.asset_model, r.year, r.parts_cost, r.parts_qty,
+        r.event_count, r.downtime_hours, r.hours_run ?? '', r.cost_per_running_hour ?? '',
+        pc ?? '', ch]));
+    });
+    downloadCsv(lines, `cost-${year}.csv`);
+  };
+
+  if (loading) return <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading cost data…</div></Card>;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <Card>
+        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <label style={{ fontSize:12, color:T.muted, fontWeight:700 }}>Year</label>
+          <Select value={year} onChange={e=>setYear(Number(e.target.value))} style={{ width:'auto' }}>
+            {(years.length?years:[thisYear]).map(y=><option key={y} value={y}>{y}</option>)}
+          </Select>
+          <Select value={fModel} onChange={e=>setFModel(e.target.value)} style={{ width:'auto' }}>
+            <option value="">All models</option>
+            {(models||[]).map(m=><option key={m.code} value={m.code}>{m.label||m.code}</option>)}
+          </Select>
+          <div style={{ marginLeft:'auto' }}>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={table.length===0}>📥 Export CSV</Btn>
+          </div>
+        </div>
+      </Card>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:14 }}>
+        <StatCard label={`Parts cost ${year}`} value={curCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="💰"/>
+        <StatCard label={`Parts cost ${year-1}`} value={prevCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="🗓️" color={T.muted}/>
+        <StatCard label="Year over year"
+          value={delta === null ? '—' : `${delta>0?'+':''}${delta.toFixed(1)}%`}
+          icon={delta === null ? '➖' : delta > 0 ? '📈' : '📉'}
+          color={delta === null ? T.muted : delta > 0 ? T.danger : T.success}/>
+        <StatCard label={`Downtime ${year}`} value={`${sum(cur,'downtime_hours').toLocaleString(undefined,{maximumFractionDigits:1})} h`} icon="⏸" color={T.warn}/>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))', gap:16 }}>
+        <Card>
+          <SectionTitle>Parts cost by asset — {year}, top 6</SectionTitle>
+          <BarChart rows={table} labelKey="asset_tag" valueKey="parts_cost" max={6}
+            emptyMsg={`No parts cost recorded in ${year}.`}/>
+        </Card>
+        <Card>
+          <SectionTitle>Cost per running hour — {year}, top 6</SectionTitle>
+          <BarChart
+            rows={table.filter(r=>r.cost_per_running_hour!=null)
+                       .sort((a,b)=>Number(b.cost_per_running_hour)-Number(a.cost_per_running_hour))}
+            labelKey="asset_tag" valueKey="cost_per_running_hour" unit=" /h" color="#6d28d9" max={6}
+            emptyMsg={`No hours were logged in ${year}, so a per-hour rate cannot be computed.`}/>
+        </Card>
+      </div>
+
+      <Card>
+        <SectionTitle>Cost per asset — {year} vs {year-1}</SectionTitle>
+        <div style={TABLE_SCROLL}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <thead><tr style={{ background:T.header }}>
+              {['Asset','Model','Parts Cost','Qty','Events','Downtime','Hours Run','Cost / Hour',`${year-1} Cost`,'Change'].map(h=>(
+                <th key={h} style={{ padding:'7px 9px', textAlign:'left', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', fontSize:11, letterSpacing:0.4, lineHeight:1.25 }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {table.length===0
+                ? <tr><td colSpan={10} style={{ textAlign:'center', padding:36, color:T.muted }}>Nothing recorded for {year}.</td></tr>
+                : table.map((r,i)=>{
+                const p = prevByAsset[r.asset_id];
+                const pc = p ? Number(p.parts_cost) : null;
+                const ch = pc ? ((Number(r.parts_cost)-pc)/pc)*100 : null;
+                return (
+                  <tr key={r.asset_id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card }}>
+                    <td style={{ padding:'7px 9px', fontFamily:'monospace', fontWeight:800, whiteSpace:'nowrap' }}>{r.asset_tag}</td>
+                    <td style={{ padding:'7px 9px', color:T.muted }}>{r.asset_model}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontWeight:700, fontVariantNumeric:'tabular-nums' }}>{Number(r.parts_cost).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontVariantNumeric:'tabular-nums' }}>{r.parts_qty}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontVariantNumeric:'tabular-nums' }}>{r.event_count}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontVariantNumeric:'tabular-nums' }}>{Number(r.downtime_hours).toLocaleString(undefined,{maximumFractionDigits:1})}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', color:T.muted, fontVariantNumeric:'tabular-nums' }}
+                      title={r.hours_run==null?'No hours logged for this asset in this year':''}>
+                      {r.hours_run==null?'—':Number(r.hours_run).toLocaleString(undefined,{maximumFractionDigits:1})}
+                    </td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontVariantNumeric:'tabular-nums' }}>{r.cost_per_running_hour ?? '—'}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', color:T.muted, fontVariantNumeric:'tabular-nums' }}>{pc==null?'—':pc.toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'7px 9px', textAlign:'center', fontWeight:700, fontVariantNumeric:'tabular-nums',
+                      color: ch==null?T.muted: ch>0?T.danger:T.success }}>
+                      {ch==null?'—':`${ch>0?'+':''}${ch.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 const NAV = [
   { id:"dashboard",     labelKey:"nav_dashboard",     label:"Dashboard",           icon:"🏠", group:"",            groupKey:"",            adminOnly:false },
   { id:"framework",     labelKey:"nav_framework",     label:"Coding Framework",    icon:"📐", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
@@ -7707,6 +8392,7 @@ const NAV = [
   { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"🔔", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"assets",        labelKey:"nav_assets",        label:"Asset Registry",      icon:"🏭", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
+  { id:"reports",       labelKey:"nav_reports",       label:"Reliability Reports", icon:"📈", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
   { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"🔑", group:"System",      groupKey:"group_System",       adminOnly:true  },
   { id:"auditlog",      labelKey:"nav_auditlog",      label:"Audit Log",           icon:"📜", group:"System",      groupKey:"group_System",       adminOnly:true  },
   { id:"users",         labelKey:"nav_users",         label:"User Management",     icon:"👥", group:"System",      groupKey:"group_System",       adminOnly:true  },
@@ -7720,7 +8406,7 @@ const NAV = [
 // gets the labelled sidebar back.
 const WIDE_PAGES = new Set([
   'dashboard', 'master', 'ledger', 'stockcount', 'movements', 'reorder',
-  'alerts', 'assets', 'assetdetail', 'auditlog', 'users', 'trash',
+  'alerts', 'assets', 'assetdetail', 'reports', 'auditlog', 'users', 'trash',
 ]);
 
 // ═══════════════════════════════════════════════════════════════
@@ -7804,6 +8490,7 @@ function AppShell() {
     alerts:        <StockAlertsPage data={data} />,
     assets:        <AssetRegistryPage data={data} />,
     assetdetail:   <AssetDetailPage data={data} />,
+    reports:       <ReportsPage data={data} />,
     admin:         <AdminPage data={data} />,
     auditlog:      <AuditLogPage />,
     users:         <UsersPage />,

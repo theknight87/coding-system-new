@@ -1287,3 +1287,88 @@ export async function updateUserProfile(userId, fields) {
   if (!error) await audit('UPDATE', 'user_profiles', userId, before, data);
   return { data, error };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// RELIABILITY ANALYTICS (migration 030_reliability_views.sql)
+//
+// Every one of these reads a view that already nets returns off
+// issued quantities, drops cancelled lines and excludes soft-deleted
+// assets and events — see the migration header. Nothing here should
+// re-derive those rules.
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Fleet overview ───────────────────────────────────────────────
+export async function fetchAssetsByStatus() {
+  const { data, error } = await supabase
+    .from('assets').select('status').is('deleted_at', null);
+  if (error) return { data: null, error };
+  const counts = {};
+  (data || []).forEach(a => { counts[a.status] = (counts[a.status] || 0) + 1; });
+  return { data: counts, error: null };
+}
+
+export const fetchPmDueList = () =>
+  supabase.from('v_asset_pm_due').select('*');
+
+// "Top by consumption" and "top by downtime" both come out of the
+// cost summary, which is already per asset per year.
+export async function fetchAssetYearTotals(year) {
+  let q = supabase.from('v_asset_cost_summary')
+    .select('asset_id,asset_tag,asset_model,status,year,parts_cost,parts_qty,distinct_parts,event_count,downtime_hours,hours_run,cost_per_running_hour');
+  if (year) q = q.eq('year', year);
+  return q;
+}
+
+// ─── Reliability flags ────────────────────────────────────────────
+export function fetchReliabilityFlags({ severity, model } = {}) {
+  let q = supabase.from('v_asset_reliability_flags').select('*');
+  if (severity) q = q.eq('severity', severity);
+  if (model)    q = q.eq('asset_model', model);
+  return q.order('severity_rank', { ascending: false })
+          .order('ratio_to_fleet_median', { ascending: false });
+}
+
+// The evidence behind one flag: every replacement of that functional
+// group on that asset. A flag nobody can audit is a flag nobody
+// trusts, so the UI always has this available.
+export function fetchFlagEvidence(assetId, fg) {
+  return supabase.from('v_part_replacements')
+    .select('maintenance_event_id,event_date,event_type,event_title,work_order_no,part_code,part_short_desc,net_qty,unit_cost,line_cost,failure_mode,root_cause')
+    .eq('asset_id', assetId).eq('fg', fg)
+    .order('event_date', { ascending: false });
+}
+
+export function fetchAssetPartHistory(assetId) {
+  return supabase.from('v_asset_part_history').select('*')
+    .eq('asset_id', assetId)
+    .order('times_replaced', { ascending: false });
+}
+
+export const fetchFleetBaseline = () =>
+  supabase.from('v_fleet_part_baseline').select('*').order('asset_model');
+
+// ─── Consumption ──────────────────────────────────────────────────
+// Rolled up in the browser rather than in SQL because the grouping
+// key is a user choice and the row count is bounded by the date
+// range. CONSUMPTION_ROW_CAP guards the fetch; the page warns when it
+// is reached rather than silently charting a partial period.
+export const CONSUMPTION_ROW_CAP = 5000;
+
+export function fetchConsumption({ from, to, model, cat, fg } = {}) {
+  let q = supabase.from('v_part_replacements')
+    .select('asset_id,asset_tag,asset_model,part_id,part_code,part_short_desc,fg,part_cat,part_mfr,event_date,net_qty,line_cost');
+  if (from)  q = q.gte('event_date', from);
+  if (to)    q = q.lte('event_date', to);
+  if (model) q = q.eq('asset_model', model);
+  if (cat)   q = q.eq('part_cat', cat);
+  if (fg)    q = q.eq('fg', fg);
+  return q.order('event_date', { ascending: false }).limit(CONSUMPTION_ROW_CAP);
+}
+
+// ─── Failure patterns ─────────────────────────────────────────────
+export function fetchFailurePatterns({ model, fg } = {}) {
+  let q = supabase.from('v_part_failure_patterns').select('*');
+  if (model) q = q.eq('asset_model', model);
+  if (fg)    q = q.eq('fg', fg);
+  return q.order('occurrences', { ascending: false });
+}
