@@ -3419,6 +3419,7 @@ function CodeGeneratorPage({ data }) {
   // Auto sequence — queries DB directly since local `parts` state is no longer preloaded
   const [autoSeq,     setAutoSeq]     = useState("0001");
   const [seqLoading,  setSeqLoading]  = useState(false);
+  const [seqError,    setSeqError]    = useState(null);
   const [codeExists,  setCodeExists]  = useState(false);
 
   useEffect(() => {
@@ -3432,11 +3433,15 @@ function CodeGeneratorPage({ data }) {
       return;
     }
     setSeqLoading(true);
-    db.fetchParts({ search: prefix }, 0, 200).then(({ data: rows }) => {
-      const matching = (rows||[]).filter(r => r.code.startsWith(prefix));
-      const nums = matching.map(r => parseInt(r.code.split("-").pop() || "0"));
-      setAutoSeq(String((nums.length?Math.max(...nums):0) + 1).padStart(4, "0"));
-    }).finally(()=>setSeqLoading(false));
+    setSeqError(null);
+    // Server-side (migration 036): the maximum is taken over every part
+    // sharing this prefix, not a client-side page of 200.
+    db.nextPartSequence({ cat: step.cat, mfr: step.mfr, model: step.model, disc: step.disc, fg: step.fg })
+      .then(({ data, error }) => {
+        if (error) { setSeqError(error.message); return; }
+        setAutoSeq(data);
+      })
+      .finally(()=>setSeqLoading(false));
   }, [canGenerate, step.cat, step.mfr, step.model, step.disc, step.fg, dbReady]);
 
   const seqNum = seqMode === "auto"
@@ -3621,6 +3626,10 @@ function CodeGeneratorPage({ data }) {
                 </div>
                 {seqLoading
                   ? <div style={{textAlign:"center",color:T.muted,fontSize:12,marginBottom:10}}>⏳ Checking sequence…</div>
+                  : seqError
+                    ? <div style={{textAlign:"center",color:T.danger,fontSize:12,marginBottom:10}}>
+                        ⚠️ Could not check the next sequence number: {seqError}. Save is disabled — reload and try again, or set the number manually.
+                      </div>
                   : codeExists
                     ? <div style={{textAlign:"center",color:T.danger,fontWeight:700,fontSize:13,marginBottom:10}}>⚠️ This code already exists</div>
                     : <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
@@ -3630,7 +3639,7 @@ function CodeGeneratorPage({ data }) {
                       <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>✅ Saved!</div>
                       <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>＋ New Code</Btn>
                     </div>
-                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists||seqLoading}>
+                  : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists||seqLoading||!!seqError}>
                       {saving?"Saving…":"💾 Save to Master Table"}
                     </Btn>
                 }
@@ -5272,7 +5281,7 @@ function StockMovementsPage({ data }) {
 
   useEffect(() => {
     if (!dbReady) return;
-    db.fetchAssetOptions().then(({ data }) => setAssetOptions(data || []));
+    db.fetchAssetOptions().then(({ data }) => setAssetOptions(data || []));  // filter list only; a failure just leaves it empty
   }, [dbReady]);
 
   useEffect(() => {
@@ -6495,7 +6504,7 @@ function AssetRegistryPage({ data }) {
 
   const loadKpis = useCallback(() => {
     if (!dbReady) { setKpis(null); return; }
-    db.fetchAssetKpis().then(({ data }) => setKpis(data));
+    db.fetchAssetKpis().then(({ data, error }) => { if (!error) setKpis(data); });
   }, [dbReady]);
 
   const load = useCallback(() => {
@@ -7244,7 +7253,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
 
             {canEdit && (
               <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
-                <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑 Remove Event</Btn>
+                {isAdmin && <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑 Remove Event</Btn>}
                 <Btn onClick={()=>setEditing(true)}>✏️ Edit</Btn>
               </div>
             )}
@@ -7474,7 +7483,10 @@ function AssetDetailPage({ data }) {
         return db.fetchMaintenancePartsUsedByEvents((ev||[]).map(e=>e.id));
       }).then(({ data: pu }) => setPartsUsed(pu || []));
     }).finally(()=>setLoading(false));
-    db.fetchAssetHoursLog(assetId).then(({ data }) => setHoursLog(data || []));
+    db.fetchAssetHoursLog(assetId).then(({ data, error }) => {
+      if (error) return flash(`Could not load the hours log: ${error.message}`, 'err');
+      setHoursLog(data || []);
+    });
   }, [assetId]);
 
   useEffect(() => { load(); }, [load]);
@@ -7547,7 +7559,7 @@ function AssetDetailPage({ data }) {
               {canEdit && (
                 <div style={{ display:"flex", gap:6, marginTop:10 }}>
                   <Btn small variant="secondary" onClick={()=>setShowEditModal(true)}>✏️ Edit</Btn>
-                  <Btn small variant="danger" onClick={()=>setShowDeleteConfirm(true)}>🗑 Trash</Btn>
+                  {isAdmin && <Btn small variant="danger" onClick={()=>setShowDeleteConfirm(true)}>🗑 Trash</Btn>}
                 </div>
               )}
             </div>
@@ -8019,6 +8031,17 @@ function FleetOverviewTab({ navigateTo }) {
   );
 }
 
+// A failed fetch and an empty result look identical unless you say so.
+const LoadError = ({ error }) => error ? (
+  <Card style={{ borderLeft:`3px solid ${T.danger}`, background:T.dangerBg }}>
+    <div style={{ fontSize:13, color:T.danger, fontWeight:700 }}>Could not load this data</div>
+    <div style={{ fontSize:12, color:T.text, marginTop:4 }}>{error}</div>
+    <div style={{ fontSize:11, color:T.muted, marginTop:6 }}>
+      This is a loading failure, not an empty result — the figures below are incomplete.
+    </div>
+  </Card>
+) : null;
+
 const SectionTitle = ({ children }) => (
   <div style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:'uppercase',
     letterSpacing:0.8, marginBottom:12 }}>{children}</div>
@@ -8031,6 +8054,7 @@ const SectionTitle = ({ children }) => (
 function ReliabilityFlagsTab({ models, navigateTo }) {
   const [flags,    setFlags]    = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState(null);
   const [fSev,     setFSev]     = useState('');
   const [fModel,   setFModel]   = useState('');
   const [expanded, setExpanded] = useState(null);   // flag key
@@ -8042,7 +8066,7 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
   useEffect(() => {
     setLoading(true);
     db.fetchReliabilityFlags({ severity:fSev||undefined, model:fModel||undefined })
-      .then(({ data }) => setFlags(data || []))
+      .then(({ data, error }) => { setError(error ? error.message : null); setFlags(data || []); })
       .finally(()=>setLoading(false));
   }, [fSev, fModel]);
 
@@ -8068,6 +8092,7 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <LoadError error={error}/>
       <Card style={{ background:'#f8fafc', borderLeft:`3px solid ${T.accent}` }}>
         <div style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>
           <strong>How to read these.</strong> An asset is listed when it replaced a functional
@@ -8078,6 +8103,10 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
             A group is only compared when there are at least 3 assets of the model and the typical
             asset replaced it at least once; below that there is no basis for a comparison, so
             nothing is shown rather than a guess. Expand any row for the events behind it.
+            <div style={{ marginTop:6 }}>
+              Peers counts only assets that are not in Trash — moving an asset to Trash removes its
+              history from the comparison and can change, add or clear a flag on its sisters.
+            </div>
           </div>
         </div>
       </Card>
@@ -8207,11 +8236,12 @@ function ConsumptionTab({ categories, models, funcGroups }) {
   const [fFg,    setFFg]    = useState('');
   const [rows,   setRows]   = useState([]);
   const [loading,setLoading]= useState(true);
+  const [error,  setError]  = useState(null);
 
   useEffect(() => {
     setLoading(true);
     db.fetchConsumption({ from, to, model:fModel||undefined, cat:fCat||undefined, fg:fFg||undefined })
-      .then(({ data }) => setRows(data || []))
+      .then(({ data, error }) => { setError(error ? error.message : null); setRows(data || []); })
       .finally(()=>setLoading(false));
   }, [from, to, fModel, fCat, fFg]);
 
@@ -8255,6 +8285,7 @@ function ConsumptionTab({ categories, models, funcGroups }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <LoadError error={error}/>
       <Card>
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
           <label style={{ fontSize:12, color:T.muted, fontWeight:700 }}>From</label>
@@ -8344,11 +8375,12 @@ function CostTab({ models }) {
   const [fModel, setFModel] = useState('');
   const [rows,   setRows]   = useState([]);
   const [loading,setLoading]= useState(true);
+  const [error,  setError]  = useState(null);
 
   useEffect(() => {
     setLoading(true);
     db.fetchAssetYearTotals(null)
-      .then(({ data }) => setRows(data || []))
+      .then(({ data, error }) => { setError(error ? error.message : null); setRows(data || []); })
       .finally(()=>setLoading(false));
   }, []);
 
@@ -8385,6 +8417,7 @@ function CostTab({ models }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <LoadError error={error}/>
       <Card>
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
           <label style={{ fontSize:12, color:T.muted, fontWeight:700 }}>Year</label>
