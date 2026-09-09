@@ -326,16 +326,27 @@ export async function fetchPartsByCodes(codes) {
     .is('deleted_at', null);
 }
 
-// Lightweight fetch for the Hierarchy Tree — only the columns needed to
-// group/count parts client-side. Avoids pulling long_desc, remarks, dates,
-// etc. for potentially thousands of rows.
-export async function fetchTreeParts(page = 0, pageSize = 1000) {
+// ─── HIERARCHY TREE ───────────────────────────────────────────────
+// The tree only ever needed counts per branch. v_parts_tree_counts
+// (migration 035) returns one row per populated
+// (cat, mfr, model, disc, fg) — 172 rows against the current 5,868
+// parts — so the page makes one small request instead of six 1,000-row
+// pages and no longer holds the whole catalogue in memory.
+export const fetchTreeCounts = () =>
+  supabase.from('v_parts_tree_counts').select('*');
+
+// The parts under one functional group, fetched only when that node is
+// actually expanded. The cap matches what the tree renders; the node
+// tells the user to use the Master Table when a branch exceeds it.
+export function fetchBranchParts({ cat, mfr, model, disc, fg }, limit = 100) {
   return supabase
     .from('spare_parts')
     .select('code,short_desc,cat,mfr,model,disc,fg,image_url,status')
     .is('deleted_at', null)
+    .eq('cat', cat).eq('mfr', mfr).eq('model', model)
+    .eq('disc', disc).eq('fg', fg)
     .order('code', { ascending: true })
-    .range(page * pageSize, (page + 1) * pageSize - 1);
+    .limit(limit);
 }
 
 export async function insertPart(row) {

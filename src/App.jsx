@@ -4177,6 +4177,61 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
 }
 
 
+// The parts under one functional group. Mounted only when its node is
+// expanded (Node renders children behind isOpen), so this is what makes
+// the tree lazy: the page loads branch counts up front and never pulls
+// a part row until someone opens the branch it belongs to.
+function TreeLeafParts({ branch, total, dbReady, localParts, onSelect }) {
+  const LIMIT = 100;
+  const [rows,    setRows]    = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    if (!dbReady) {
+      setRows((localParts || []).filter(p =>
+        p.cat===branch.cat && p.mfr===branch.mfr && p.model===branch.model &&
+        p.disc===branch.disc && p.fg===branch.fg).slice(0, LIMIT));
+      return;
+    }
+    let cancelled = false;
+    setLoading(true); setError(null);
+    db.fetchBranchParts(branch, LIMIT).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (err) { setError(err.message); return; }
+      setRows((data || []).map(mapPart));
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [branch.cat, branch.mfr, branch.model, branch.disc, branch.fg, dbReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rowStyle = { marginLeft:90,padding:"5px 10px",borderRadius:5,marginBottom:3,background:"#f8fafc",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:`1px solid transparent`,transition:"all .15s" };
+
+  if (loading && !rows) return <div style={{ marginLeft:90, fontSize:11, color:T.muted, padding:"4px 0" }}>⏳ Loading parts…</div>;
+  if (error)  return <div style={{ marginLeft:90, fontSize:11, color:T.danger, padding:"4px 0" }}>Could not load these parts: {error}</div>;
+  if (!rows || rows.length === 0) return <div style={{ marginLeft:90, fontSize:11, color:T.muted, padding:"4px 0", fontStyle:"italic" }}>No parts coded yet</div>;
+
+  return (
+    <>
+      {rows.map(p => (
+        <div key={p.code} onClick={()=>onSelect(p)} style={rowStyle}
+          onMouseEnter={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor=T.accent;}}
+          onMouseLeave={e=>{e.currentTarget.style.background="#f8fafc";e.currentTarget.style.borderColor="transparent";}}>
+          <span style={{ fontSize:11,color:"#94a3b8" }}>—</span>
+          <CodeTag code={p.code} />
+          <span style={{ fontSize:12,color:T.muted,flex:1 }}>{p.shortDesc}</span>
+          {p.imageUrl&&<span style={{ fontSize:11 }}>📷</span>}
+          <span style={{ fontSize:11,color:T.accent,fontWeight:600 }}>View →</span>
+        </div>
+      ))}
+      {total > rows.length && (
+        <div style={{ marginLeft:90,fontSize:11,color:T.muted,padding:"4px 0",fontStyle:"italic" }}>
+          …and {total - rows.length} more. Use Master Table to browse all.
+        </div>
+      )}
+    </>
+  );
+}
+
 function HierarchyTreePage({ data }) {
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, dbReady } = data;
   const [expanded,     setExpanded]     = useState({ ROOT:true });
@@ -4187,39 +4242,55 @@ function HierarchyTreePage({ data }) {
 
   const toggle = k => setExpanded(e=>({...e,[k]:!e[k]}));
 
-  // Load ALL parts ONCE, but only the lightweight fields needed for the tree
-  // (code, cat, mfr, model, disc, fg, short_desc, image presence).
-  // This single query replaces hundreds of per-node count queries.
+  // Counts come from v_parts_tree_counts (migration 035) — one row per
+  // populated branch, ~172 rows against 5,868 parts. The tree used to
+  // download every part just to count them; the individual parts under
+  // a functional group are now fetched when that node is expanded.
+  const [counts, setCounts] = useState([]);
   useEffect(() => {
-    if (!dbReady) { setTreeParts(data.parts || []); return; }
+    if (!dbReady) {
+      // Offline/seed mode still has the whole array in memory, so roll
+      // it up locally into the same shape the view returns.
+      const local = {};
+      (data.parts || []).forEach(p => {
+        const k = `${p.cat}|${p.mfr}|${p.model}|${p.disc}|${p.fg}`;
+        local[k] = local[k] || { cat:p.cat, mfr:p.mfr, model:p.model, disc:p.disc, fg:p.fg, part_count:0 };
+        local[k].part_count += 1;
+      });
+      setCounts(Object.values(local));
+      setTreeParts(data.parts || []);
+      return;
+    }
     let cancelled = false;
     setLoadingTree(true);
     setLoadError(null);
-
-    (async () => {
-      try {
-        const PAGE = 1000;
-        let all = [];
-        let page = 0;
-        // Pull pages of lightweight rows until exhausted (safety cap 20 pages = 20k parts)
-        while (page < 20) {
-          const { data: rows, error } = await db.fetchTreeParts(page, PAGE);
-          if (error) throw error;
-          if (!rows || rows.length === 0) break;
-          all = all.concat(rows);
-          if (rows.length < PAGE) break;
-          page++;
-        }
-        if (!cancelled) setTreeParts(all.map(mapPart));
-      } catch (e) {
-        if (!cancelled) setLoadError(e.message || "Failed to load hierarchy data");
-      } finally {
-        if (!cancelled) setLoadingTree(false);
-      }
-    })();
-
+    db.fetchTreeCounts().then(({ data: rows, error }) => {
+      if (cancelled) return;
+      if (error) { setLoadError(error.message || 'Failed to load hierarchy data'); return; }
+      setCounts(rows || []);
+    }).finally(() => { if (!cancelled) setLoadingTree(false); });
     return () => { cancelled = true; };
   }, [dbReady]);
+
+  // Roll the branch counts up once, into the shapes each tree level asks
+  // for, instead of re-filtering a 5,868-row array at every node.
+  const countIndex = useMemo(() => {
+    const byCat = {}, byMfr = {}, byModel = {}, bySec = {}, byFg = {};
+    let total = 0;
+    (counts || []).forEach(r => {
+      const n = Number(r.part_count) || 0;
+      total += n;
+      byCat[r.cat] = (byCat[r.cat] || 0) + n;
+      const mfrKey   = `${r.cat}|${r.mfr}`;
+      const modelKey = `${mfrKey}|${r.model}`;
+      const secKey   = `${modelKey}|${r.disc}`;
+      byMfr[mfrKey]     = (byMfr[mfrKey] || 0) + n;
+      byModel[modelKey] = (byModel[modelKey] || 0) + n;
+      bySec[secKey]     = (bySec[secKey] || 0) + n;
+      byFg[`${secKey}|${r.fg}`] = n;
+    });
+    return { byCat, byMfr, byModel, bySec, byFg, total };
+  }, [counts]);
 
   const parts = treeParts || [];
 
@@ -4265,10 +4336,9 @@ function HierarchyTreePage({ data }) {
   const renderSectionLevel = (cat, mfr, mod, sections, isEngine) => {
     return sections.map(sec=>{
       const secKey = `${cat.code}-${mfr.code}-${mod.code}-${sec.code}`;
-      const partsInSec = parts.filter(p=>p.cat===cat.code&&p.mfr===mfr.code&&p.model===mod.code&&p.disc===sec.code);
-      const usedFGs = funcGroups.filter(fg=>
-        partsInSec.some(p=>p.fg===fg.code)
-      );
+      const secIdxKey = `${cat.code}|${mfr.code}|${mod.code}|${sec.code}`;
+      const secCount  = countIndex.bySec[secIdxKey] || 0;
+      const usedFGs = funcGroups.filter(fg => countIndex.byFg[`${secIdxKey}|${fg.code}`] > 0);
       return (
         <Node
           key={sec.code}
@@ -4278,33 +4348,19 @@ function HierarchyTreePage({ data }) {
           pillBg={sec.bg}
           nodeKey={secKey}
           depth={4}
-          count={partsInSec.length}
+          count={secCount}
           alwaysExpandable={true}
           tag={isEngine ? "Engine System" : null}
         >
           {usedFGs.map(fg=>{
-            const fgParts = partsInSec.filter(p=>p.fg===fg.code);
+            const fgCount = countIndex.byFg[`${secIdxKey}|${fg.code}`] || 0;
             const fgKey = `${secKey}-${fg.code}`;
             return (
-              <Node key={fg.code} label={fg.label} pill={fg.code} pillColor="#6d28d9" pillBg="#f5f3ff" nodeKey={fgKey} depth={5} count={fgParts.length}>
-                {fgParts.slice(0, 100).map(p=>(
-                  <div key={p.code}
-                    onClick={()=>setSelectedPart({ ...p, _isLightweight: true })}
-                    style={{ marginLeft:90,padding:"5px 10px",borderRadius:5,marginBottom:3,background:"#f8fafc",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:`1px solid transparent`,transition:"all .15s" }}
-                    onMouseEnter={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor=T.accent;}}
-                    onMouseLeave={e=>{e.currentTarget.style.background="#f8fafc";e.currentTarget.style.borderColor="transparent";}}>
-                    <span style={{ fontSize:11,color:"#94a3b8" }}>—</span>
-                    <CodeTag code={p.code} />
-                    <span style={{ fontSize:12,color:T.muted,flex:1 }}>{p.shortDesc}</span>
-                    {p.imageUrl&&<span style={{ fontSize:11 }}>📷</span>}
-                    <span style={{ fontSize:11,color:T.accent,fontWeight:600 }}>View →</span>
-                  </div>
-                ))}
-                {fgParts.length > 100 && (
-                  <div style={{ marginLeft:90,fontSize:11,color:T.muted,padding:"4px 0",fontStyle:"italic" }}>
-                    …and {fgParts.length - 100} more. Use Master Table to browse all.
-                  </div>
-                )}
+              <Node key={fg.code} label={fg.label} pill={fg.code} pillColor="#6d28d9" pillBg="#f5f3ff" nodeKey={fgKey} depth={5} count={fgCount}>
+                <TreeLeafParts
+                  branch={{ cat:cat.code, mfr:mfr.code, model:mod.code, disc:sec.code, fg:fg.code }}
+                  total={fgCount} dbReady={dbReady} localParts={parts}
+                  onSelect={p=>setSelectedPart({ ...p, _isLightweight: true })}/>
               </Node>
             );
           })}
@@ -4343,7 +4399,7 @@ function HierarchyTreePage({ data }) {
 
       {loadingTree && (
         <Card style={{ marginBottom:16, textAlign:"center", padding:24 }}>
-          <div style={{ color:T.muted, fontSize:13 }}>⏳ Loading hierarchy data ({parts.length.toLocaleString()} loaded so far)…</div>
+          <div style={{ color:T.muted, fontSize:13 }}>⏳ Loading hierarchy…</div>
         </Card>
       )}
       {loadError && (
@@ -4357,25 +4413,22 @@ function HierarchyTreePage({ data }) {
           <div style={{ display:"flex",gap:10,marginBottom:16,alignItems:"center" }}>
             <Btn small variant="secondary" onClick={()=>setExpanded({ROOT:true})}>Collapse All</Btn>
             <Btn small onClick={expandAll}>Expand All</Btn>
-            <span style={{ fontSize:12, color:T.muted, marginLeft:"auto" }}>{parts.length.toLocaleString()} parts loaded</span>
+            <span style={{ fontSize:12, color:T.muted, marginLeft:"auto" }}>{countIndex.total.toLocaleString()} parts</span>
           </div>
-          <Node label="Engineering Spare Parts" nodeKey="ROOT" depth={0} count={parts.length}>
+          <Node label="Engineering Spare Parts" nodeKey="ROOT" depth={0} count={countIndex.total}>
             {categories.map(cat=>{
               const isEngine = cat.code === "EN";
               const catMfrs = manufacturers.filter(m=>(m.catCodes||[]).includes(cat.code));
-              const catParts = parts.filter(p=>p.cat===cat.code);
               return (
-                <Node key={cat.code} label={cat.label} pill={cat.code} pillColor={cat.color} pillBg={cat.bg} nodeKey={cat.code} depth={1} count={catParts.length}>
+                <Node key={cat.code} label={cat.label} pill={cat.code} pillColor={cat.color} pillBg={cat.bg} nodeKey={cat.code} depth={1} count={countIndex.byCat[cat.code] || 0}>
                   {catMfrs.map(mfr=>{
                     const mfrModels = models.filter(m=>m.mfrCode===mfr.code);
-                    const mfrParts = catParts.filter(p=>p.mfr===mfr.code);
                     return (
-                      <Node key={mfr.code} label={mfr.label} pill={mfr.code} pillColor="#b45309" pillBg="#fef3c7" nodeKey={`${cat.code}-${mfr.code}`} depth={2} count={mfrParts.length}>
+                      <Node key={mfr.code} label={mfr.label} pill={mfr.code} pillColor="#b45309" pillBg="#fef3c7" nodeKey={`${cat.code}-${mfr.code}`} depth={2} count={countIndex.byMfr[`${cat.code}|${mfr.code}`] || 0}>
                         {mfrModels.map(mod=>{
-                          const modParts = mfrParts.filter(p=>p.model===mod.code);
                           const sections = isEngine ? engineSystems : disciplines;
                           return (
-                            <Node key={mod.code} label={mod.label} pill={mod.code} pillColor="#047857" pillBg="#d1fae5" nodeKey={`${cat.code}-${mfr.code}-${mod.code}`} depth={3} count={modParts.length} alwaysExpandable={true}>
+                            <Node key={mod.code} label={mod.label} pill={mod.code} pillColor="#047857" pillBg="#d1fae5" nodeKey={`${cat.code}-${mfr.code}-${mod.code}`} depth={3} count={countIndex.byModel[`${cat.code}|${mfr.code}|${mod.code}`] || 0} alwaysExpandable={true}>
                               {renderSectionLevel(cat, mfr, mod, sections, isEngine)}
                             </Node>
                           );
@@ -7061,6 +7114,8 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
   const [returnQty,     setReturnQty]     = useState('');
   const [returnReason,  setReturnReason]  = useState('');
   const [returning,     setReturning]     = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting,      setDeleting]      = useState(false);
 
   const [form, setForm] = useState({
     title: event.title || '', description: event.description || '',
@@ -7109,8 +7164,10 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
   };
 
   const handleDeleteEvent = async () => {
+    setDeleting(true);
     const { error: err } = await db.softDeleteMaintenanceEvent(event.id);
-    if (err) return onError(err.message);
+    setDeleting(false);
+    if (err) { setConfirmDelete(false); return onError(err.message); }
     onChanged('Maintenance event removed — any issued parts were returned to stock');
   };
 
@@ -7187,7 +7244,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
 
             {canEdit && (
               <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
-                <Btn variant="danger" onClick={handleDeleteEvent}>🗑 Remove Event</Btn>
+                <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑 Remove Event</Btn>
                 <Btn onClick={()=>setEditing(true)}>✏️ Edit</Btn>
               </div>
             )}
@@ -7254,6 +7311,46 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={()=>{ setConfirmCancel(null); setCancelReason(''); }}>Back</Btn>
               <Btn variant="danger" onClick={handleCancelPart}>Cancel Part</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDelete && (
+        <Modal title="Remove Maintenance Event" onClose={()=>{ if(!deleting) setConfirmDelete(false); }} maxWidth={460}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, color:T.text }}>
+              Remove <strong>{event.title}</strong>{event.work_order_no ? ` (${event.work_order_no})` : ''}?
+              It moves to Trash, where an admin can restore it.
+            </div>
+            {(() => {
+              // Removing the event reverses every stock movement it
+              // posted, so say exactly what goes back on the shelf —
+              // this is the part a storekeeper needs to see before
+              // agreeing, not after.
+              const returning = parts.filter(p => !isPartLineCancelled(p) && partLineNetQty(p) > 0);
+              return returning.length === 0 ? (
+                <div style={{ fontSize:12, color:T.muted }}>No parts are still issued against it, so stock is unaffected.</div>
+              ) : (
+                <div style={{ background:T.warnBg, border:`1px solid ${T.warn}`, borderRadius:6, padding:"10px 12px" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.warn, marginBottom:6 }}>
+                    ⚠️ This returns {returning.length} part line{returning.length>1?'s':''} to stock:
+                  </div>
+                  {returning.map(p => (
+                    <div key={p.id} style={{ fontSize:12, color:T.text, display:"flex", gap:8, padding:"2px 0" }}>
+                      <span style={{ fontFamily:"monospace", fontWeight:700 }}>{p.part?.code}</span>
+                      <span style={{ color:T.muted, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.part?.short_desc}</span>
+                      <span style={{ fontWeight:700, whiteSpace:"nowrap" }}>+{partLineNetQty(p)}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+              <Btn variant="secondary" onClick={()=>setConfirmDelete(false)} disabled={deleting}>Cancel</Btn>
+              <Btn variant="danger" onClick={handleDeleteEvent} disabled={deleting}>
+                {deleting ? 'Removing…' : '🗑 Remove Event'}
+              </Btn>
             </div>
           </div>
         </Modal>
