@@ -54,9 +54,11 @@ dependency without asking.
 src/App.jsx          ~8,800 lines — every page and component
 src/lib/db.js        ~1,390 lines — all Supabase access
 src/lib/supabase.js  client creation
-supabase/migrations/ 001 … 037
+supabase/migrations/ 001 … 038
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
-supabase/scripts/    remove_demo_assets.sql (manual, optional)
+supabase/scripts/    seed_demo_dataset.sql, remove_demo_assets.sql (manual)
+docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md
+CHANGELOG.md         what each phase added, and why
 ```
 
 `App.jsx` is one large file **on purpose**. Do not split it up.
