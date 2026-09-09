@@ -143,6 +143,13 @@ or removing an event, reverses the stock.
 Every table uses `deleted_at`. **Never hard-delete.** The ledger's foreign
 keys will refuse it anyway. A part holding stock cannot be trashed (036).
 
+A trashed record that anything still references can **never** be purged —
+`stock_transactions.part_id` is `ON DELETE RESTRICT`, and removing the part
+would leave movements pointing at nothing. `v_trash_purge_blockers` (038)
+reports what blocks each row so the Trash page can say so up front instead
+of surfacing a foreign-key error. Such records stay in Trash indefinitely;
+that is correct, not a bug to work around.
+
 ---
 
 # 6. Tables and views
@@ -154,13 +161,13 @@ keys will refuse it anyway. A part holding stock cannot be trashed (036).
 `spare_parts`, `stock_movements` *(legacy, superseded by
 `stock_transactions`)*, `stock_transactions`, `user_profiles`.
 
-**Views (18):** stock — `v_stock_status`, `v_stock_status_summary`,
+**Views (19):** stock — `v_stock_status`, `v_stock_status_summary`,
 `v_stock_transactions_detail`, `v_stock_confidence`, `v_negative_stock`,
 `v_active_alerts`; assets — `v_assets_overview`, `v_asset_pm_due`,
 `v_asset_kpis`, `v_maintenance_parts_used`; reliability (030) —
 `v_part_replacements` (base), `v_asset_part_history`, `v_fleet_part_baseline`,
 `v_asset_reliability_flags`, `v_asset_cost_summary`,
-`v_part_failure_patterns`; plus `v_parts_tree_counts` (035),
+`v_part_failure_patterns`; plus `v_parts_tree_counts` (035), `v_trash_purge_blockers` (038),
 `audit_logs_with_user`.
 
 ⚠ Reference tables key on **`code TEXT`**, not uuid. There is no
@@ -251,7 +258,7 @@ below that, rows are omitted rather than shown as weak signals.
    (`DO $$ … RAISE EXCEPTION 'results >> % <<' … $$`) before running it live.
 4. **One numbered migration per change**, with DDL, indexes, RLS policies,
    triggers, `COMMENT ON`, and a commented-out rollback block at the bottom.
-   Next number: **038**.
+   Next number: **039**.
 5. **Frontend edits:** complete replacement files or anchored, asserted
    patches. A careless `str.replace` with an empty needle once ballooned
    `db.js` to 9.4 MB.
@@ -271,7 +278,7 @@ tables, but eight of them were found with RLS off in production (fixed in
 Landmarks: `011` ledger · `015` reorder points · `017`–`019` alerts and push ·
 `020`–`022` assets · `023` maintenance↔stock link · `024` void double-count fix ·
 `026` partial returns + work-order numbers · `029` privilege-escalation fix ·
-`030` reliability views · `031`–`037` review fixes.
+`030` reliability views · `031`–`037` review fixes · `038` trash purge blockers.
 
 ---
 
@@ -291,7 +298,9 @@ All CRITICAL and HIGH findings fixed and verified. Current state:
    decision.
 2. **`CP-FN-F30-AC-PRV-0001` is in Trash holding 2 units** (trashed
    2026-09-09 06:16, before the guard existed). Either restore it or write the
-   stock off with an adjustment — the ledger still counts those 2.
+   stock off with an adjustment — the ledger still counts those 2. It cannot
+   be purged (1 stock movement), and neither can `CP-FN-F03-AC-SOV-0001`
+   (4 legacy `stock_movements` rows). Both correctly stay in Trash.
 3. **Demo data** — `TEST-G04-002/003/004` and 18 `DEMO` maintenance events
    exist so the Indicators page has something to show. Remove with
    `supabase/scripts/remove_demo_assets.sql` (returns the parts to stock).
