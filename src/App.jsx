@@ -1216,10 +1216,18 @@ function TrashPage() {
 
   const flash = (t, type='ok') => { setToast({text:t,type}); setTimeout(()=>setToast(null),3200); };
 
+  const [blockers, setBlockers] = useState({});   // "table|key" -> { canPurge, reasons }
+
   const reload = () => {
     setLoading(true);
-    return db.fetchAllTrash(100).then(res => { setGroups(res); setLoading(false); });
+    return Promise.all([db.fetchAllTrash(100), db.fetchTrashBlockers()])
+      .then(([res, blk]) => { setGroups(res); setBlockers(blk.data || {}); setLoading(false); });
   };
+
+  // A row is blocked when something still references it. The database
+  // refuses the delete either way (the ledger's part_id is ON DELETE
+  // RESTRICT); this just lets us say so before the user clicks.
+  const blockerFor = (r) => blockers[`${r.__table}|${rowKey(r)}`] || { canPurge: true, reasons: [] };
 
   useEffect(() => { reload(); }, []);
 
@@ -1249,6 +1257,11 @@ function TrashPage() {
 
   const handlePurge = async (r) => {
     const key = rowKey(r);
+    const blk = blockerFor(r);
+    if (!blk.canPurge) {
+      setConfirmPurge(null);
+      return flash(`"${key}" cannot be permanently deleted — ${blk.reasons.join(' and ')} still reference it.`, 'err');
+    }
     setBusyCode(key);
     const { error } = await db.hardDeleteRecord(r.__table, key);
     setBusyCode(null);
@@ -1258,11 +1271,28 @@ function TrashPage() {
     reload();
   };
 
+  // Purgeable rows grouped by table, so Empty Trash never attempts a
+  // delete the foreign keys will refuse.
+  const purgeableByTable = useMemo(() => {
+    const out = {};
+    rows.forEach(r => {
+      if (!blockerFor(r).canPurge) return;
+      (out[r.__table] ||= []).push(rowKey(r));
+    });
+    return out;
+  }, [rows, blockers]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const blockedRows = rows.filter(r => !blockerFor(r).canPurge);
+
   const handleEmptyTrash = async () => {
-    const { count, errors } = await db.emptyTrash(filterTable || null);
+    const { count, errors } = await db.emptyTrash(filterTable || null, purgeableByTable);
     setConfirmEmpty(false);
-    if (errors) return flash(`Some deletions failed — see console`, 'err');
-    flash(`Permanently deleted ${count} record(s)`);
+    if (errors) {
+      return flash(`Deleted ${count}, but ${errors.length} table(s) failed: ${errors.map(e=>`${e.table} — ${e.message}`).join('; ')}`, 'err');
+    }
+    flash(blockedRows.length
+      ? `Permanently deleted ${count}. Kept ${blockedRows.length} that still have history.`
+      : `Permanently deleted ${count} record(s)`);
     reload();
   };
 
@@ -1319,9 +1349,17 @@ function TrashPage() {
                           <Btn small variant="success" onClick={()=>handleRestore(r)} disabled={busyCode===rowKey(r)}>
                             {busyCode===rowKey(r) ? '…' : '↩ Restore'}
                           </Btn>
+                          {!blockerFor(r).canPurge ? (
+                            <span title={`Cannot be permanently deleted — ${blockerFor(r).reasons.join(' and ')} still reference it. Its history would lose what it points to.`}
+                              style={{ fontSize:11, fontWeight:700, color:T.muted, background:T.subtle,
+                                border:`1px solid ${T.border}`, padding:"4px 10px", borderRadius:6, whiteSpace:"nowrap" }}>
+                              🔒 Has history
+                            </span>
+                          ) : (
                           <Btn small variant="danger" onClick={()=>setConfirmPurge(r)} disabled={busyCode===rowKey(r)}>
                             🗑 Purge
                           </Btn>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1339,13 +1377,23 @@ function TrashPage() {
           <div style={{ padding:14, background:T.dangerBg, borderRadius:8, marginBottom:16 }}>
             <div style={{ fontWeight:800, color:T.danger }}>{rowKey(confirmPurge)}</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{confirmPurge.__label} — {rowTitle(confirmPurge)}</div>
+            {!blockerFor(confirmPurge).canPurge && (
+              <div style={{ marginTop:10, background:T.dangerBg, border:`1px solid ${T.danger}`, borderRadius:6, padding:"10px 12px" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:T.danger }}>This record cannot be permanently deleted.</div>
+                <div style={{ fontSize:12, color:T.text, marginTop:4 }}>
+                  {blockerFor(confirmPurge).reasons.join(' and ')} still reference it. The stock ledger is permanent —
+                  deleting this would leave those entries pointing at nothing. It can stay in Trash indefinitely, or be restored.
+                </div>
+              </div>
+            )}
           </div>
           <p style={{ fontSize:13, color:T.text, marginBottom:16, lineHeight:1.6 }}>
             <strong style={{ color:T.danger }}>This cannot be undone.</strong> The record will be permanently removed from the database.
           </p>
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <Btn variant="secondary" onClick={()=>setConfirmPurge(null)}>Cancel</Btn>
-            <Btn variant="danger" onClick={()=>handlePurge(confirmPurge)} disabled={busyCode===rowKey(confirmPurge)}>
+            <Btn variant="danger" onClick={()=>handlePurge(confirmPurge)}
+              disabled={busyCode===rowKey(confirmPurge) || !blockerFor(confirmPurge).canPurge}>
               {busyCode===rowKey(confirmPurge) ? 'Deleting…' : '🗑 Delete Permanently'}
             </Btn>
           </div>
@@ -1359,11 +1407,32 @@ function TrashPage() {
             <div style={{ fontWeight:800, color:T.danger }}>
               {filterTable ? `Empty trash for ${groups.find(g=>g.table===filterTable)?.label}` : 'Empty ALL trash'}
             </div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>{rows.length} record(s) will be permanently deleted</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:4 }}>
+              {rows.length - blockedRows.length} of {rows.length} record(s) will be permanently deleted
+            </div>
           </div>
           <p style={{ fontSize:13, color:T.text, marginBottom:16, lineHeight:1.6 }}>
-            <strong style={{ color:T.danger }}>This cannot be undone.</strong> All soft-deleted records {filterTable ? 'in this table' : 'across every table'} will be permanently removed.
+            <strong style={{ color:T.danger }}>This cannot be undone.</strong> Soft-deleted records {filterTable ? 'in this table' : 'across every table'} will be permanently removed.
           </p>
+          {blockedRows.length > 0 && (
+            <div style={{ marginBottom:16, background:T.subtle, border:`1px solid ${T.border}`, borderRadius:6, padding:"10px 12px" }}>
+              <div style={{ fontSize:12, fontWeight:700, color:T.text, marginBottom:6 }}>
+                🔒 {blockedRows.length} record(s) will be kept — they still have history:
+              </div>
+              {blockedRows.slice(0, 8).map(r => (
+                <div key={`${r.__table}|${rowKey(r)}`} style={{ fontSize:12, color:T.muted, padding:"2px 0" }}>
+                  <span style={{ fontFamily:"monospace", color:T.text }}>{rowKey(r)}</span>
+                  {' — '}{blockerFor(r).reasons.join(' and ')}
+                </div>
+              ))}
+              {blockedRows.length > 8 && (
+                <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>…and {blockedRows.length - 8} more.</div>
+              )}
+              <div style={{ fontSize:11, color:T.muted, marginTop:6 }}>
+                The stock ledger is permanent, so a record its entries point at cannot be removed. These stay in Trash.
+              </div>
+            </div>
+          )}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <Btn variant="secondary" onClick={()=>setConfirmEmpty(false)}>Cancel</Btn>
             <Btn variant="danger" onClick={handleEmptyTrash}>🗑 Empty Trash</Btn>
