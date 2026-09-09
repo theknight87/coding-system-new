@@ -7061,6 +7061,8 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
   const [returnQty,     setReturnQty]     = useState('');
   const [returnReason,  setReturnReason]  = useState('');
   const [returning,     setReturning]     = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting,      setDeleting]      = useState(false);
 
   const [form, setForm] = useState({
     title: event.title || '', description: event.description || '',
@@ -7109,8 +7111,10 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
   };
 
   const handleDeleteEvent = async () => {
+    setDeleting(true);
     const { error: err } = await db.softDeleteMaintenanceEvent(event.id);
-    if (err) return onError(err.message);
+    setDeleting(false);
+    if (err) { setConfirmDelete(false); return onError(err.message); }
     onChanged('Maintenance event removed — any issued parts were returned to stock');
   };
 
@@ -7187,7 +7191,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
 
             {canEdit && (
               <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
-                <Btn variant="danger" onClick={handleDeleteEvent}>🗑 Remove Event</Btn>
+                <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑 Remove Event</Btn>
                 <Btn onClick={()=>setEditing(true)}>✏️ Edit</Btn>
               </div>
             )}
@@ -7254,6 +7258,46 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={()=>{ setConfirmCancel(null); setCancelReason(''); }}>Back</Btn>
               <Btn variant="danger" onClick={handleCancelPart}>Cancel Part</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDelete && (
+        <Modal title="Remove Maintenance Event" onClose={()=>{ if(!deleting) setConfirmDelete(false); }} maxWidth={460}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, color:T.text }}>
+              Remove <strong>{event.title}</strong>{event.work_order_no ? ` (${event.work_order_no})` : ''}?
+              It moves to Trash, where an admin can restore it.
+            </div>
+            {(() => {
+              // Removing the event reverses every stock movement it
+              // posted, so say exactly what goes back on the shelf —
+              // this is the part a storekeeper needs to see before
+              // agreeing, not after.
+              const returning = parts.filter(p => !isPartLineCancelled(p) && partLineNetQty(p) > 0);
+              return returning.length === 0 ? (
+                <div style={{ fontSize:12, color:T.muted }}>No parts are still issued against it, so stock is unaffected.</div>
+              ) : (
+                <div style={{ background:T.warnBg, border:`1px solid ${T.warn}`, borderRadius:6, padding:"10px 12px" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.warn, marginBottom:6 }}>
+                    ⚠️ This returns {returning.length} part line{returning.length>1?'s':''} to stock:
+                  </div>
+                  {returning.map(p => (
+                    <div key={p.id} style={{ fontSize:12, color:T.text, display:"flex", gap:8, padding:"2px 0" }}>
+                      <span style={{ fontFamily:"monospace", fontWeight:700 }}>{p.part?.code}</span>
+                      <span style={{ color:T.muted, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.part?.short_desc}</span>
+                      <span style={{ fontWeight:700, whiteSpace:"nowrap" }}>+{partLineNetQty(p)}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
+              <Btn variant="secondary" onClick={()=>setConfirmDelete(false)} disabled={deleting}>Cancel</Btn>
+              <Btn variant="danger" onClick={handleDeleteEvent} disabled={deleting}>
+                {deleting ? 'Removing…' : '🗑 Remove Event'}
+              </Btn>
             </div>
           </div>
         </Modal>
