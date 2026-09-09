@@ -332,6 +332,17 @@ export async function fetchPartsByCodes(codes) {
 // (cat, mfr, model, disc, fg) — 172 rows against the current 5,868
 // parts — so the page makes one small request instead of six 1,000-row
 // pages and no longer holds the whole catalogue in memory.
+// Next sequence number for a part-code prefix. Computed server-side
+// over every matching part under an advisory lock (migration 036) —
+// the old client-side max over 200 rows ordered by created_at could
+// hand out a number that was already taken.
+export async function nextPartSequence({ cat, mfr, model, disc, fg }) {
+  const { data, error } = await supabase.rpc('next_part_sequence', {
+    p_cat: cat, p_mfr: mfr, p_model: model, p_disc: disc, p_fg: fg,
+  });
+  return { data, error };
+}
+
 export const fetchTreeCounts = () =>
   supabase.from('v_parts_tree_counts').select('*');
 
@@ -1081,17 +1092,6 @@ export async function softDeleteMaintenanceEvent(id) {
   return { data, error };
 }
 
-export async function insertMaintenancePartsUsed(eventId, rows) {
-  const userId = await uid();
-  const payload = rows.map(r => ({
-    maintenance_event_id: eventId, part_id: r.partId,
-    quantity: Number(r.quantity), unit_cost: r.unitCost===''||r.unitCost==null?null:Number(r.unitCost),
-    notes: r.notes || null, created_by: userId,
-  }));
-  const { data, error } = await supabase.from('maintenance_parts_used').insert(payload).select('*');
-  if (!error) await audit('CREATE', 'maintenance_parts_used', eventId, null, { count: data.length });
-  return { data, error };
-}
 
 // ─── ASSET DOCUMENTS ───────────────────────────────────────────────
 export async function fetchAssetDocuments(assetId) {
