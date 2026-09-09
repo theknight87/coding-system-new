@@ -1186,17 +1186,42 @@ export async function hardDeleteRecord(table, key) {
 }
 
 // Permanently empty the trash for one table (or all tables if omitted).
-export async function emptyTrash(table = null) {
+// What still references each trashed row and would make a permanent
+// delete fail (migration 038). The Trash page uses this to disable
+// Purge with a reason instead of letting the foreign key raise.
+export async function fetchTrashBlockers() {
+  const { data, error } = await supabase.from('v_trash_purge_blockers').select('*');
+  if (error) return { data: {}, error };
+  const map = {};
+  (data || []).forEach(r => {
+    const reasons = [];
+    if (r.ledger_rows > 0)      reasons.push(`${r.ledger_rows} stock movement${r.ledger_rows>1?'s':''}`);
+    if (r.maintenance_rows > 0) reasons.push(`${r.maintenance_rows} maintenance record${r.maintenance_rows>1?'s':''}`);
+    if (r.legacy_rows > 0)      reasons.push(`${r.legacy_rows} legacy movement${r.legacy_rows>1?'s':''}`);
+    if (r.child_rows > 0)       reasons.push(`${r.child_rows} part${r.child_rows>1?'s':''}/asset${r.child_rows>1?'s':''} still using it`);
+    map[`${r.table_name}|${r.record_key}`] = { canPurge: reasons.length === 0, reasons };
+  });
+  return { data: map, error: null };
+}
+
+// Purges only the rows that can actually be purged, and says what it
+// skipped. Previously it deleted what it could and returned a bare
+// error list, so the user saw "some deletions failed" with no idea
+// which row or why.
+export async function emptyTrash(table = null, purgeableKeys = null) {
   const tables = table ? [table] : TRASH_TABLES.map(t => t.table);
   let totalDeleted = 0;
   const errors = [];
   for (const t of tables) {
-    const { data, error } = await supabase
-      .from(t)
-      .delete()
-      .not('deleted_at', 'is', null)
-      .select(keyColFor(t));
-    if (error) errors.push({ table: t, error });
+    const keyCol = keyColFor(t);
+    let q = supabase.from(t).delete().not('deleted_at', 'is', null);
+    if (purgeableKeys) {
+      const keys = purgeableKeys[t] || [];
+      if (keys.length === 0) continue;          // nothing purgeable in this table
+      q = q.in(keyCol, keys);
+    }
+    const { data, error } = await q.select(keyCol);
+    if (error) errors.push({ table: t, message: error.message });
     else totalDeleted += (data?.length ?? 0);
   }
   if (totalDeleted > 0) await audit('PURGE_ALL', table ?? 'all_tables', 'bulk', null, { count: totalDeleted });
