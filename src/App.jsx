@@ -1692,22 +1692,28 @@ const INIT_PARTS = [
 // Breaking that rule is what made a genuine stock-out the twelfth red
 // thing on screen in the previous design.
 const T = {
-  // navigation chrome (dark) — frames the light working surface
-  sidebar: "#151c27",
-  sidebarBorder: "#26313f",
-  sidebarActive: "#233248",
-  sidebarHover: "#1f2937",
-  sidebarText: "#9aa6b7",
-  sidebarTextActive: "#f0f5fb",
-  sidebarMarker: "#3fa9c4",
-  sidebarGroup: "#5e6b7e",
+  // ── CarGas brand ────────────────────────────────────────────────
+  // Sampled from the company mark: green #009048 and yellow #F8E800.
+  // Those two are marketing values — vivid, high-chroma, and unusable
+  // for hours of tabular reading. So the brand enters where brand
+  // belongs, in the CHROME: a deep forest green frames the work, and
+  // the yellow appears once, as the active-item marker, which is the
+  // logo's own green-and-yellow pairing at UI scale.
+  sidebar: "#0d3323",
+  sidebarBorder: "#1c4a35",
+  sidebarActive: "#1c5f42",
+  sidebarHover: "#144632",
+  sidebarText: "#9fb8ac",
+  sidebarTextActive: "#f2f8f4",
+  sidebarMarker: "#f5d21a",   // the logo's yellow, held back for this one job
+  sidebarGroup: "#8aa89a",   // 5.38:1 on the rail; 9.5px caps need the full ratio
 
-  // interactive
-  accent: "#15497f",
-  accentHover: "#0f3862",
-  accentLight: "#e6eef8",
+  // interactive — the brand green darkened to 5.4:1 on white
+  accent: "#0a6b3d",
+  accentHover: "#08542f",
+  accentLight: "#e6f3ec",
 
-  header: "#151c27",
+  header: "#0d3323",
 
   // surfaces
   bg: "#f4f6f8",
@@ -1719,12 +1725,20 @@ const T = {
   // ink — all four pass 4.5:1 on `card`
   text: "#171c24",
   textSecondary: "#4a5567",
-  muted: "#7a8598",
+  // 4.59:1 on white. The previous #7a8598 measured 3.73:1 and was
+  // carrying real text — labels, units, timestamps — not just hints.
+  muted: "#6b7688",
 
-  // STATE ONLY — never decoration
-  success: "#0f6b45",
-  successBg: "#e3f1ea",
-  successBorder: "#bfdccc",
+  // STATE ONLY — never decoration.
+  // Note on green: the brand green above is now the interactive colour,
+  // so "healthy" no longer competes for it. That is deliberate and
+  // follows the same rule as the Active badge — the normal case is not
+  // an exception and does not need colour. `success` survives for
+  // transient confirmations (a toast after a save), which are a moment
+  // rather than a row state, so the two can never be confused.
+  success: "#0a6b3d",
+  successBg: "#e6f3ec",
+  successBorder: "#c1e0cf",
   warn: "#9a5b06",
   warnBg: "#fbf0da",
   warnBorder: "#e8d5a8",
@@ -1750,7 +1764,7 @@ const T = {
   // colour in it. Three hues mapped to real domains, not eight mapped
   // to tile position.
   brand: {
-    inventory: { c:"#15497f", bg:"#e9f0f9", br:"#cddef0" }, // parts, stock
+    inventory: { c:"#0a6b3d", bg:"#e6f3ec", br:"#c1e0cf" }, // parts, stock — the house green
     reference: { c:"#0e6b74", bg:"#e4f2f3", br:"#c2e0e2" }, // the code vocabulary
     activity:  { c:"#4c4a8f", bg:"#eeedf7", br:"#d6d4ea" }, // movements, events
   },
@@ -1765,17 +1779,19 @@ const T = {
 
 // A single-hue ramp, deep to light, for ranked chart series. Colour
 // still carries information (rank) rather than decorating a label.
-const CAT_RAMP = ["#12406f", "#175593", "#1c6ab0", "#2a83c9", "#4b9dd8", "#75b7e4", "#a2cfee", "#c9e2f5"];
+const CAT_RAMP = ["#053d22", "#0a5c33", "#0d7a44", "#159a58", "#35b673", "#6bcd9a", "#a3e0c2", "#cdeeda"];
 
 // The same idea for the six code segments: one journey from the
 // broadest segment to the narrowest, so the strip reads as a sequence.
 // Every ink here clears 4.5:1 on its own tint.
+// Green through to the mark's yellow — the logo's own two colours as
+// the two ends of the code, with the middle segments bridging them.
 const SEG_RAMP = [
-  { c:"#123f6d", bg:"#e8eff7", br:"#c7dbee" },
-  { c:"#14556f", bg:"#e6f1f5", br:"#c2dde6" },
-  { c:"#0f6b6a", bg:"#e3f2f1", br:"#bfe0de" },
-  { c:"#3a6540", bg:"#eaf2e9", br:"#cbe0c8" },
-  { c:"#6a5a2a", bg:"#f4f0e2", br:"#e0d8bd" },
+  { c:"#053d22", bg:"#e4f1e9", br:"#c0dccd" },
+  { c:"#0a5c33", bg:"#e6f3ec", br:"#c1e0cf" },
+  { c:"#0f6b5a", bg:"#e4f2ef", br:"#bfe0d9" },
+  { c:"#356a3a", bg:"#ecf2ea", br:"#cee0ca" },
+  { c:"#6b6212", bg:"#f6f2dd", br:"#e4dcb4" },
   { c:"#5a5566", bg:"#f0eff3", br:"#d8d5de" },
 ];
 
@@ -1789,7 +1805,7 @@ const TYPE = {
   ui:        { fontSize: 13, fontWeight: 400, lineHeight: 1.5 },
   cell:      { fontSize: 12.5, fontWeight: 400, lineHeight: 1.4 },
   button:    { fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 },
-  helper:    { fontSize: 11.5, fontWeight: 400, lineHeight: 1.45, color: "#7a8598" },
+  helper:    { fontSize: 11.5, fontWeight: 400, lineHeight: 1.45, color: "#6b7688" },
   // uppercase micro-labels and table headers, both monospaced
   label:     { fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" },
   th:        { fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase" },
@@ -1857,6 +1873,16 @@ const ICON_PATHS = {
 
 // `title` present → labelled image. Absent → decorative, hidden from
 // assistive tech, because the surrounding control carries the label.
+// The rail's single alignment rule. The logo and every nav icon sit in
+// an identical 32px box at a 12px gutter, so all their centres land on
+// the same vertical line (12 + 16 = 28px) whether the sidebar is open
+// or collapsed. Before this the logo was 28px at a 14px pad while the
+// icons were 15px at a 14px pad, putting the mark 6.5px off the column
+// it was supposed to head.
+const RAIL_GUTTER = 12;
+const RAIL_ICON_BOX = 32;
+const RAIL_COLLAPSED = RAIL_GUTTER * 2 + RAIL_ICON_BOX;  // 56
+
 const Icon = ({ name, size = 15, stroke = 1.6, title, style }) => {
   const d = ICON_PATHS[name];
   if (!d) return null;
@@ -1899,7 +1925,10 @@ const Tag = ({ children, title, mono = true }) => (
 // State, and only state. Semantic colour lives here and nowhere else.
 const StatusTag = ({ children, tone = "neutral" }) => {
   const tones = {
-    ok:      { c:T.success, b:T.successBg, br:T.successBorder },
+    // The healthy case reads as neutral on purpose: in a table of 5,867
+    // rows, colouring the normal state means colouring almost every row,
+    // which is what left a genuine stock-out with nothing to shout with.
+    ok:      { c:T.textSecondary, b:T.subtle, br:T.border },
     warn:    { c:T.warn,    b:T.warnBg,    br:T.warnBorder },
     danger:  { c:T.danger,  b:T.dangerBg,  br:T.dangerBorder },
     neutral: { c:T.textSecondary, b:T.subtle, br:T.border },
@@ -2129,7 +2158,11 @@ const Table = ({ cols, rows, emptyMsg = "No records found." }) => (
 // the Dashboard rendered eight tiles in eight unrelated colours — the
 // clearest instance of colour meaning nothing. A catalogue count is not
 // a state, so it reads as plain ink; an out-of-stock count still shouts.
-const STATE_COLORS = new Set([T.success, T.warn, T.danger]);
+// Membership, not identity: the brand green and `success` are the same
+// hex now, so a tile that passes no colour at all must not be mistaken
+// for a "healthy" state tile. The default is therefore null — plain
+// ink — and only a colour a caller explicitly chose can mark a state.
+const STATE_COLORS = new Set([T.warn, T.danger, T.success]);
 
 // Counts up to the value on mount. A number that lands rather than
 // appears tells you it was just measured — and it draws the eye to the
@@ -2165,8 +2198,8 @@ function useCountUp(target, ms = 620) {
 // `color` stays reserved for the three status colours. A tile is one or
 // the other, never both, so a red "Out of stock" is never sitting next
 // to a red "Manufacturers".
-const StatCard = ({ label, value, color = T.accent, icon, tone, onClick, title, hint }) => {
-  const isState = STATE_COLORS.has(color);
+const StatCard = ({ label, value, color = null, icon, tone, onClick, title, hint }) => {
+  const isState = color !== null && STATE_COLORS.has(color);
   const brand   = (!isState && tone && T.brand[tone]) || null;
   const chip    = isState ? { c: color, bg: color === T.danger ? T.dangerBg : color === T.warn ? T.warnBg : T.successBg, br: color === T.danger ? T.dangerBorder : color === T.warn ? T.warnBorder : T.successBorder }
                           : (brand || { c: T.muted, bg: T.subtle, br: T.border });
@@ -9089,12 +9122,19 @@ function AppShell() {
     <div style={{ display:"flex",height:"100vh",fontFamily:T.sans,background:T.bg,overflow:"hidden" }}>
 
       {/* ── SIDEBAR ── */}
-      <div style={{ width:collapsed?56:224,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden" }}>
-        <div style={{ padding:"16px 14px",borderBottom:`1px solid ${T.sidebarBorder}`,display:"flex",alignItems:"center",gap:10,minHeight:60 }}>
-          <img src="/logo.png" alt="CarGas" style={{ width:28,height:28,objectFit:"contain",flexShrink:0 }}/>
+      <div style={{ width:collapsed?RAIL_COLLAPSED:224,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden" }}>
+        {/* The mark sits in the same 32px box at the same 12px gutter as
+            every nav icon below it, so it heads the column instead of
+            floating beside it. It also gets a light disc behind it: the
+            logo's own green is close to the rail's, and without the disc
+            the leaf loses its edge against the dark chrome. */}
+        <div style={{ padding:`14px ${RAIL_GUTTER}px`,borderBottom:`1px solid ${T.sidebarBorder}`,borderLeft:"3px solid transparent",display:"flex",alignItems:"center",gap:8,minHeight:60,flexShrink:0 }}>
+          <span style={{ width:RAIL_ICON_BOX,height:RAIL_ICON_BOX,flexShrink:0,borderRadius:8,background:"#ffffff",display:"grid",placeItems:"center" }}>
+            <img src="/logo.png" alt="CarGas" style={{ width:28,height:28,objectFit:"contain",display:"block" }}/>
+          </span>
           {!collapsed&&(
-            <div>
-              <div style={{ color:T.sidebarTextActive,fontWeight:600,fontSize:13,lineHeight:1.2 }}>{t('appName')}</div>
+            <div style={{ minWidth:0 }}>
+              <div style={{ color:T.sidebarTextActive,fontWeight:600,fontSize:13,lineHeight:1.25,whiteSpace:"nowrap" }}>{t('appName')}</div>
               <div style={{ color:T.sidebarGroup,fontFamily:T.mono,fontSize:10 }}>{t('appVersion')}</div>
             </div>
           )}
@@ -9220,14 +9260,14 @@ function SidebarNav({ visibleNav, groups, collapsed, effectivePage, setPage, t }
   const alerts = useAlerts();
   const badgeFor = id => (id === 'alerts' ? (alerts?.badgeCount || 0) : 0);
   return (
-    <nav aria-label="Main" style={{ flex:1,padding:"8px 0" }}>
+    <nav aria-label="Main" style={{ flex:1,padding:"8px 0",overflowY:"auto",overflowX:"hidden",scrollbarWidth:"thin" }}>
       {[visibleNav[0]].map(n=>(
         <NavItem key={n.id} n={n} active={effectivePage===n.id} onClick={()=>setPage(n.id)} collapsed={collapsed} badge={badgeFor(n.id)} />
       ))}
       {groups.map(g=>(
         <div key={g}>
           {!collapsed&&(
-            <div style={{ ...TYPE.label,fontSize:9.5,letterSpacing:"0.13em",color:T.sidebarGroup,padding:"16px 14px 6px" }}>
+            <div style={{ ...TYPE.label,fontSize:9.5,letterSpacing:"0.13em",color:T.sidebarGroup,padding:`16px ${RAIL_GUTTER}px 6px` }}>
               {t('group_'+g.replace(/\s+/g,''))}
             </div>
           )}
@@ -9256,20 +9296,22 @@ function NavItem({ n, active, onClick, collapsed, badge = 0 }) {
       aria-label={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
       style={{
-        display:"flex", alignItems:"center", gap:10,
-        padding:"7px 14px", minHeight:34, cursor:"pointer",
+        display:"flex", alignItems:"center", gap:8,
+        padding:`7px ${RAIL_GUTTER}px`, minHeight:34, cursor:"pointer",
         background: active ? T.sidebarActive : hover ? T.sidebarHover : "transparent",
-        borderLeft: `2px solid ${active ? T.sidebarMarker : "transparent"}`,
+        borderLeft: `3px solid ${active ? T.sidebarMarker : "transparent"}`,
         color: active ? T.sidebarTextActive : T.sidebarText,
         transition:"background .12s",
         position:"relative",
       }}>
-      <Icon name={n.icon} size={15} />
+      <span style={{ width:RAIL_ICON_BOX, display:"flex", justifyContent:"center", flexShrink:0 }}>
+        <Icon name={n.icon} size={16} />
+      </span>
       {!collapsed && <span style={{ fontSize:12.5,fontWeight:active?600:400,whiteSpace:"nowrap" }}>{label}</span>}
       {/* Alert count. Collapsed, it shrinks to a dot on the icon so the
           rail still signals that something needs attention. */}
       {badge > 0 && (collapsed ? (
-        <span aria-hidden="true" style={{ position:"absolute",top:6,right:8,width:7,height:7,borderRadius:"50%",background:T.danger,border:`1px solid ${T.sidebar}` }}/>
+        <span aria-hidden="true" style={{ position:"absolute",top:5,right:6,width:7,height:7,borderRadius:"50%",background:T.danger,border:`1px solid ${T.sidebar}` }}/>
       ) : (
         <span style={{ marginLeft:"auto",background:T.danger,color:"#fff",fontFamily:T.mono,fontSize:10,fontWeight:600,padding:"2px 5px",borderRadius:8,lineHeight:1 }}>
           {badgeLabel}
