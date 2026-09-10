@@ -25,8 +25,45 @@
       /* Keyboard operation was invisible before this. */
       :focus-visible { outline: 2px solid #15497f; outline-offset: 2px; }
       #root { height: 100vh; overflow: hidden; }
+
+      /* ── Motion ────────────────────────────────────────────────
+         Deliberately small: a 10px rise and a fade, 150-300ms. Motion
+         here marks arrival and response, it does not decorate. Every
+         rule below is switched off by prefers-reduced-motion. */
+      @keyframes cg-rise {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: none; }
+      }
+      @keyframes cg-shimmer {
+        0%   { background-position: -180px 0; }
+        100% { background-position: 180px 0; }
+      }
+      .cg-rise { animation: cg-rise .34s cubic-bezier(.22,.61,.36,1) both; }
+      /* Tiles arrive in sequence rather than all at once, which reads as
+         the page assembling instead of blinking into place. */
+      .cg-stagger > * { animation: cg-rise .34s cubic-bezier(.22,.61,.36,1) both; }
+      .cg-stagger > *:nth-child(1){animation-delay:.02s}
+      .cg-stagger > *:nth-child(2){animation-delay:.06s}
+      .cg-stagger > *:nth-child(3){animation-delay:.10s}
+      .cg-stagger > *:nth-child(4){animation-delay:.14s}
+      .cg-stagger > *:nth-child(5){animation-delay:.18s}
+      .cg-stagger > *:nth-child(6){animation-delay:.22s}
+      .cg-stagger > *:nth-child(7){animation-delay:.26s}
+      .cg-stagger > *:nth-child(8){animation-delay:.30s}
+      /* Lift on hover — the tile is a link to a filtered list, so it
+         should feel like one. */
+      .cg-lift { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+      .cg-lift:hover { transform: translateY(-2px); box-shadow: 0 6px 20px -8px rgba(20,25,34,.28); }
+      .cg-bar { transition: width .7s cubic-bezier(.22,.61,.36,1); }
+      .cg-skeleton {
+        background: linear-gradient(90deg, #eef1f5 0%, #f7f9fb 50%, #eef1f5 100%);
+        background-size: 360px 100%;
+        animation: cg-shimmer 1.4s linear infinite;
+        border-radius: 4px;
+      }
       @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+        *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+        .cg-lift:hover { transform: none; }
       }
     </style>
   </head>

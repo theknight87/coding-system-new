@@ -1741,6 +1741,20 @@ const T = {
     AC: { c:"#4a5567", b:"#f8fafb" },
   },
 
+  // ── BRAND FAMILY — identity, never state ────────────────────────
+  // Two separate colour systems, and keeping them separate is the whole
+  // point. Status (success/warn/danger above) answers "is this a
+  // problem?". Brand answers "what kind of thing is this?" — inventory,
+  // reference data, or activity. They never overlap, so a red balance
+  // still reads as the only alarm on the page even when the page has
+  // colour in it. Three hues mapped to real domains, not eight mapped
+  // to tile position.
+  brand: {
+    inventory: { c:"#15497f", bg:"#e9f0f9", br:"#cddef0" }, // parts, stock
+    reference: { c:"#0e6b74", bg:"#e4f2f3", br:"#c2e0e2" }, // the code vocabulary
+    activity:  { c:"#4c4a8f", bg:"#eeedf7", br:"#d6d4ea" }, // movements, events
+  },
+
   // type
   mono: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
   sans: "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif",
@@ -1748,6 +1762,22 @@ const T = {
   radiusLg: 6,      // containers
   shadow: "0 1px 2px rgba(20,25,34,.06), 0 8px 24px -12px rgba(20,25,34,.18)",
 };
+
+// A single-hue ramp, deep to light, for ranked chart series. Colour
+// still carries information (rank) rather than decorating a label.
+const CAT_RAMP = ["#12406f", "#175593", "#1c6ab0", "#2a83c9", "#4b9dd8", "#75b7e4", "#a2cfee", "#c9e2f5"];
+
+// The same idea for the six code segments: one journey from the
+// broadest segment to the narrowest, so the strip reads as a sequence.
+// Every ink here clears 4.5:1 on its own tint.
+const SEG_RAMP = [
+  { c:"#123f6d", bg:"#e8eff7", br:"#c7dbee" },
+  { c:"#14556f", bg:"#e6f1f5", br:"#c2dde6" },
+  { c:"#0f6b6a", bg:"#e3f2f1", br:"#bfe0de" },
+  { c:"#3a6540", bg:"#eaf2e9", br:"#cbe0c8" },
+  { c:"#6a5a2a", bg:"#f4f0e2", br:"#e0d8bd" },
+  { c:"#5a5566", bg:"#f0eff3", br:"#d8d5de" },
+];
 
 // Type scale — seven steps with distinct roles, replacing the eight
 // near-identical sizes measured on the old Master Parts Table.
@@ -2017,16 +2047,21 @@ const stickyActionsTd = (bg) => ({
   boxShadow: "-6px 0 6px -6px rgba(15,23,42,0.18)",
 });
 
-const Card = ({ children, style, pad = 20, onClick, title }) => (
-  <div onClick={onClick} title={title}
-    style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, padding: pad, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", ...style }}>
+// className is forwarded so callers can attach the motion utilities
+// (cg-lift, cg-rise). This component takes an explicit prop list — it
+// does NOT spread ...props — so any new prop must be added here. Three
+// separate bugs in this codebase came from a prop being silently
+// dropped by a shared component.
+const Card = ({ children, style, pad = 20, onClick, title, className }) => (
+  <div onClick={onClick} title={title} className={className}
+    style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radiusLg, padding: pad, boxShadow: "0 1px 2px rgba(20,25,34,.05)", ...style }}>
     {children}
   </div>
 );
 
 const SectionHeader = ({ children, accent = T.accent }) => (
-  <div style={{ borderLeft: `4px solid ${accent}`, paddingLeft: 12, marginBottom: 18 }}>
-    <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.text }}>{children}</h2>
+  <div style={{ borderLeft: `3px solid ${accent}`, paddingLeft: 11, marginBottom: 16 }}>
+    <h2 style={{ margin: 0, ...TYPE.h3, color: T.text }}>{children}</h2>
   </div>
 );
 
@@ -2096,14 +2131,76 @@ const Table = ({ cols, rows, emptyMsg = "No records found." }) => (
 // a state, so it reads as plain ink; an out-of-stock count still shouts.
 const STATE_COLORS = new Set([T.success, T.warn, T.danger]);
 
-const StatCard = ({ label, value, color = T.accent, icon, onClick, title }) => {
+// Counts up to the value on mount. A number that lands rather than
+// appears tells you it was just measured — and it draws the eye to the
+// figure instead of to the tile's decoration.
+function useCountUp(target, ms = 620) {
+  const numeric = typeof target === "number" ? target
+    : (typeof target === "string" && /^[\d,]+$/.test(target)) ? Number(target.replace(/,/g, ""))
+    : null;
+  // Starts at null and is only ever set to a number by the effect
+  // below. A tile that mounts as "…" and later resolves to a count
+  // would otherwise still hold the initial null on the render where
+  // `numeric` first becomes a number — useState's initial value applies
+  // once, not on every change — and formatting null throws.
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (numeric === null) return;
+    // Respect the OS setting: no animation, just the final number.
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || numeric === 0) { setN(numeric); return; }
+    let raf, start;
+    const tick = t => {
+      start ??= t;
+      const p = Math.min(1, (t - start) / ms);
+      setN(Math.round(numeric * (1 - Math.pow(1 - p, 3))));   // ease-out cubic
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [numeric, ms]);
+  return numeric === null ? target : (n ?? 0).toLocaleString();
+}
+
+// `tone` is a brand family (identity — what kind of figure this is).
+// `color` stays reserved for the three status colours. A tile is one or
+// the other, never both, so a red "Out of stock" is never sitting next
+// to a red "Manufacturers".
+const StatCard = ({ label, value, color = T.accent, icon, tone, onClick, title, hint }) => {
   const isState = STATE_COLORS.has(color);
-  const valueColor = isState ? color : T.text;
+  const brand   = (!isState && tone && T.brand[tone]) || null;
+  const chip    = isState ? { c: color, bg: color === T.danger ? T.dangerBg : color === T.warn ? T.warnBg : T.successBg, br: color === T.danger ? T.dangerBorder : color === T.warn ? T.warnBorder : T.successBorder }
+                          : (brand || { c: T.muted, bg: T.subtle, br: T.border });
+  const shown = useCountUp(value);
+  const loading = value === "…";
   return (
     <Card onClick={onClick} title={title}
-      style={{ borderTop: `2px solid ${isState ? color : T.border}`, textAlign: "left", cursor: onClick ? "pointer" : undefined }}>
-      <div style={{ ...TYPE.label, fontSize: 9.5, color: T.muted }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: valueColor, fontVariantNumeric: "tabular-nums", marginTop: 8 }}>{value}</div>
+      className={onClick ? "cg-lift" : undefined}
+      style={{
+        // A hairline of the tile's own colour along the top: enough to
+        // give the row rhythm and warmth, not enough to shout.
+        borderTop: `2px solid ${chip.c}`,
+        textAlign: "left", cursor: onClick ? "pointer" : undefined,
+        display: "flex", alignItems: "flex-start", gap: 12,
+      }}>
+      {icon && (
+        <span style={{
+          width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+          background: chip.bg, border: `1px solid ${chip.br}`, color: chip.c,
+          display: "grid", placeItems: "center",
+        }}>
+          <Icon name={icon} size={17} />
+        </span>
+      )}
+      <span style={{ minWidth: 0, flex: 1 }}>
+        {/* Two lines are reserved whether or not the label needs them,
+            so a wrapping label cannot push its number out of line with
+            the tile beside it. */}
+        <span style={{ ...TYPE.label, fontSize: 9.5, color: T.muted, display: "block", minHeight: 22, lineHeight: 1.25 }}>{label}</span>
+        {loading
+          ? <span className="cg-skeleton" style={{ display: "block", width: 56, height: 28, marginTop: 6 }} aria-label="Loading" />
+          : <span style={{ display: "block", fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: isState ? color : T.text, fontVariantNumeric: "tabular-nums", marginTop: 4, lineHeight: 1.15 }}>{shown}</span>}
+        {hint && <span style={{ ...TYPE.helper, display: "block", marginTop: 2 }}>{hint}</span>}
+      </span>
     </Card>
   );
 };
@@ -2299,35 +2396,44 @@ function Dashboard({ data }) {
       <PageHeader title="Dashboard" sub="CarGas Coding System — Overview" />
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 12, marginBottom: 24 }}>
-        <StatCard label="Total Parts" value={loadingStats?"…":totalParts.toLocaleString()} color={T.accent} icon="" />
-        <StatCard label="Categories" value={categories.length} color="#047857" icon="" />
-        <StatCard label="Manufacturers" value={manufacturers.length} color="#b45309" icon="🏭" />
-        <StatCard label="Models" value={models.length} color="#7c3aed" icon="📐" />
-        <StatCard label="Functional Groups" value={funcGroups.length} color="#be123c" icon="" />
-        <StatCard label="Disciplines" value={disciplines.length} color="#0e7490" icon="🔬" />
-        <div onClick={()=>navigateTo && navigateTo('master', { inStock: 'in' })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Parts in Stock" value={partsInStock===null?"…":partsInStock.toLocaleString()} color="#0891b2" icon="📥" />
-        </div>
-        <div onClick={()=>navigateTo && navigateTo('movements')} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Movements (30d)" value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} color="#7c3aed" icon="🚚" />
-        </div>
+      {/* Tone is the DOMAIN the figure belongs to, not its position in
+          the row: inventory (blue), the coding vocabulary (teal),
+          activity (indigo). Three hues that mean something, instead of
+          eight that meant nothing. */}
+      <div className="cg-stagger" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(292px,1fr))", gap: 12, marginBottom: 24 }}>
+        <StatCard label="Total Parts"       value={loadingStats?"…":totalParts.toLocaleString()} tone="inventory" icon="master"
+          onClick={()=>navigateTo && navigateTo('master')} title="Open the Master Parts Table" />
+        <StatCard label="Categories"        value={categories.length}   tone="reference" icon="category"
+          onClick={()=>navigateTo && navigateTo('categories')} title="Open Main Categories" />
+        <StatCard label="Manufacturers"     value={manufacturers.length} tone="reference" icon="manufacturer"
+          onClick={()=>navigateTo && navigateTo('manufacturers')} title="Open Manufacturers" />
+        <StatCard label="Models"            value={models.length}       tone="reference" icon="model"
+          onClick={()=>navigateTo && navigateTo('models')} title="Open Equipment Models" />
+        <StatCard label="Functional Groups" value={funcGroups.length}   tone="reference" icon="funcgroup"
+          onClick={()=>navigateTo && navigateTo('funcgroups')} title="Open Functional Groups" />
+        <StatCard label="Disciplines"       value={disciplines.length}  tone="reference" icon="discipline"
+          onClick={()=>navigateTo && navigateTo('disciplines')} title="Open Disciplines" />
+        <StatCard label="Parts in Stock"    value={partsInStock===null?"…":partsInStock.toLocaleString()} tone="inventory" icon="stockcount"
+          onClick={()=>navigateTo && navigateTo('master', { inStock: 'in' })} title="Parts with stock on hand" />
+        <StatCard label="Movements (30d)"   value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} tone="activity" icon="movements"
+          onClick={()=>navigateTo && navigateTo('movements')} title="Open Stock Movements" />
       </div>
 
       {/* Stock Alerts */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 24 }}>
-        <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['out'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Out of Stock" value={alerts.loading?"…":alerts.counts.out.toLocaleString()} color={T.danger} />
-        </div>
-        <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['critical'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Critical" value={alerts.loading?"…":alerts.counts.critical.toLocaleString()} color={T.danger} />
-        </div>
-        <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['low'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color={T.warn} />
-        </div>
-        <div onClick={()=>navigateTo && navigateTo('reorder', { filter:'unconfigured' })} style={{ cursor: navigateTo?"pointer":"default", opacity: alerts.unconfigured===0?0.6:1 }}>
-          <StatCard label="No reorder point" title="These parts can never raise an alert" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} color={T.muted} />
-        </div>
+      {/* These four keep the status colours. Because the row above is
+          brand-toned rather than rainbow, a red figure here is still the
+          most urgent thing on the page. */}
+      <div className="cg-stagger" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(292px,1fr))", gap: 12, marginBottom: 24 }}>
+        <StatCard label="Out of Stock" value={alerts.loading?"…":alerts.counts.out.toLocaleString()} color={T.danger} icon="warning"
+          hint={alerts.counts.out>0?"Needs ordering now":"Nothing out of stock"}
+          onClick={()=>navigateTo && navigateTo('alerts', { severity: ['out'] })} title="Show parts that are out of stock" />
+        <StatCard label="Critical" value={alerts.loading?"…":alerts.counts.critical.toLocaleString()} color={T.danger} icon="alerts"
+          onClick={()=>navigateTo && navigateTo('alerts', { severity: ['critical'] })} title="Show critical parts" />
+        <StatCard label="Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color={T.warn} icon="reorder"
+          onClick={()=>navigateTo && navigateTo('alerts', { severity: ['low'] })} title="Show parts below their reorder point" />
+        <StatCard label="No reorder point" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} icon="lock"
+          hint="These can never raise an alert"
+          onClick={()=>navigateTo && navigateTo('reorder', { filter:'unconfigured' })} title="Parts with no reorder point set" />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
@@ -2338,7 +2444,9 @@ function Dashboard({ data }) {
             <div style={{ fontWeight: 800, color: T.accent }}>Engineering Spare Parts</div>
             {categories.map((c, i) => (
               <div key={c.code} style={{ marginLeft: 20, color: T.text }}>
-                {i < categories.length - 1 ? "├──" : "└──"} {c.icon} {c.label} <span style={{ color: "#94a3b8" }}>({c.code})</span>
+                {i < categories.length - 1 ? "├──" : "└──"}{" "}
+                <span style={{ display:"inline-block",width:9,height:9,borderRadius:2,background:CAT_RAMP[Math.min(i,CAT_RAMP.length-1)],verticalAlign:"baseline",marginRight:6 }} aria-hidden="true"/>
+                {c.label} <span style={{ color: T.muted }}>({c.code})</span>
               </div>
             ))}
           </div>
@@ -2347,17 +2455,22 @@ function Dashboard({ data }) {
         {/* Category bars */}
         <Card>
           <SectionHeader>Parts by Category</SectionHeader>
-          {catCounts.map(c => (
+          {catCounts.map((c, i) => (
             <div key={c.code} style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                {/* One series, one colour. Eight hues here encoded
-                    nothing the category name did not already say, and
-                    three zeroes rendered blue, red and purple. */}
+                {/* One hue, stepped by rank. Reads as a colourful
+                    chart, but the colour still encodes something real —
+                    how big the category is — instead of eight unrelated
+                    hues repeating the label. */}
                 <span style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{c.label}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 12.5, fontWeight: 600, color: T.text, fontVariantNumeric: "tabular-nums" }}>{loadingStats?"…":c.count}</span>
               </div>
-              <div style={{ background: T.border, borderRadius: 2, height: 6 }}>
-                <div style={{ background: T.accent, height: 6, borderRadius: 2, width: `${totalParts ? (c.count / totalParts) * 100 : 0}%`, transition: "width .5s" }} />
+              <div style={{ background: T.subtle, border:`1px solid ${T.border}`, borderRadius: 3, height: 7, overflow:"hidden" }}>
+                <div className="cg-bar" style={{
+                  background: `linear-gradient(90deg, ${CAT_RAMP[Math.min(i, CAT_RAMP.length-1)]}, ${CAT_RAMP[Math.min(i+1, CAT_RAMP.length-1)]})`,
+                  height: "100%", borderRadius: 2,
+                  width: `${totalParts ? (c.count / totalParts) * 100 : 0}%`,
+                }} />
               </div>
             </div>
           ))}
@@ -4016,7 +4129,7 @@ function CodeGeneratorPage({ data }) {
           {generatedCode && (
             <Card style={{borderLeft:"3px solid #0e7490"}}>
               <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>
-                📷 Part Image (Optional)
+                Part Image (Optional)
               </div>
               {dbReady
                 ? <FileUpload
@@ -4188,14 +4301,18 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
     : disciplines.find(d => d.code === partView.disc);
   const fg   = funcGroups.find(f => f.code === partView.fg);
 
+  // The six segments read left to right as one code, so they are
+  // coloured as one ramp — deep at the broadest segment (category),
+  // light at the narrowest (sequence). Colourful, but the gradient
+  // follows the grammar instead of assigning six unrelated pastels.
   const segments = [
-    { seg:partView.cat,   label:"Category",              val:cat?.label,  color:cat?.color||T.accent, bg:cat?.bg||T.accentLight },
-    { seg:partView.mfr,   label:"Manufacturer",           val:mfr?.label,  color:"#b45309", bg:"#fef3c7" },
-    { seg:partView.model, label:"Model",                  val:mdl?.label,  color:"#047857", bg:"#d1fae5" },
-    { seg:partView.disc,  label:isEng?"Engine System":"Discipline", val:disc?.label, color:disc?.color||"#374151", bg:disc?.bg||"#f3f4f6" },
-    { seg:partView.fg,    label:"Functional Group",       val:fg?.label,   color:"#6d28d9", bg:"#f5f3ff" },
-    { seg:partView.code.split("-").pop(), label:"Sequence", val:`Item #${parseInt(partView.code.split("-").pop())}`, color:"#475569", bg:"#f1f5f9" },
-  ];
+    { seg:partView.cat,   label:"Category",              val:cat?.label,  i:0 },
+    { seg:partView.mfr,   label:"Manufacturer",           val:mfr?.label,  i:1 },
+    { seg:partView.model, label:"Model",                  val:mdl?.label,  i:2 },
+    { seg:partView.disc,  label:isEng?"Engine System":"Discipline", val:disc?.label, i:3 },
+    { seg:partView.fg,    label:"Functional Group",       val:fg?.label,   i:4 },
+    { seg:partView.code.split("-").pop(), label:"Sequence", val:`Item #${parseInt(partView.code.split("-").pop())}`, i:5 },
+  ].map(x => ({ ...x, color: SEG_RAMP[x.i].c, bg: SEG_RAMP[x.i].bg, br: SEG_RAMP[x.i].br }));
 
   const handleSave = async () => {
     setSaving(true);
@@ -4237,7 +4354,12 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         {/* Header */}
         <div style={{ padding:"18px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"flex-start",justifyContent:"space-between",position:"sticky",top:0,background:T.card,zIndex:1 }}>
           <div>
-            <div style={{ marginBottom:6 }}><CodeTag code={partView.code}/></div>
+            <div style={{ marginBottom:6 }}>
+              <span style={{ display:"inline-block", background:T.accentLight, border:`1px solid ${SEG_RAMP[0].br}`, color:T.accent,
+                fontFamily:T.mono, fontWeight:600, fontSize:12, letterSpacing:"0.02em", padding:"3px 9px", borderRadius:T.radius }}>
+                {partView.code}
+              </span>
+            </div>
             <div style={{ fontWeight:800,fontSize:16,color:T.text }}>{partView.shortDesc}</div>
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
@@ -4283,25 +4405,27 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
               {partView.imageUrl
                 ? <img src={partView.imageUrl} alt={partView.shortDesc} style={{ maxWidth:"100%",maxHeight:280,borderRadius:10,border:`1px solid ${T.border}`,objectFit:"contain",background:"#f8fafc" }} onError={e=>e.target.style.display="none"}/>
                 : <div style={{ padding:"28px 0",background:T.subtle,borderRadius:10,border:`1px dashed ${T.border}` }}>
-                    <div style={{ fontSize:32,marginBottom:4 }}>📷</div>
+                    <div style={{ display:"flex",justifyContent:"center",marginBottom:6,color:T.muted }}><Icon name="camera" size={26} /></div>
                     <div style={{ fontSize:12,color:T.muted }}>No image — click Edit to add one</div>
                   </div>
               }
             </div>
             {/* Segments */}
             <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:20 }}>
-              {segments.map(s=>(
-                <div key={s.seg} style={{ background:s.bg,borderRadius:7,padding:"8px 14px",textAlign:"center",minWidth:80 }}>
-                  <div style={{ fontFamily:"monospace",fontWeight:800,fontSize:13,color:s.color }}>{s.seg}</div>
-                  <div style={{ fontSize:10,color:s.color,marginTop:2,fontWeight:600 }}>{s.label}</div>
-                  <div style={{ fontSize:11,color:T.text,marginTop:2 }}>{s.val||"—"}</div>
+              {segments.map((s,idx)=>(
+                <div key={s.seg} className="cg-rise" style={{ background:s.bg,border:`1px solid ${s.br}`,borderRadius:T.radiusLg,padding:"9px 14px",textAlign:"center",minWidth:86,animationDelay:`${idx*0.04}s` }}>
+                  <div style={{ fontFamily:T.mono,fontWeight:600,fontSize:14,color:s.color,letterSpacing:"0.02em" }}>{s.seg}</div>
+                  <div style={{ ...TYPE.label,fontSize:9,color:s.color,opacity:.85,marginTop:3 }}>{s.label}</div>
+                  <div style={{ fontSize:11.5,color:T.textSecondary,marginTop:3 }}>{s.val||"—"}</div>
                 </div>
               ))}
             </div>
             {/* ═══ STOCK PANEL ═══ */}
-            <div style={{ border:`1px solid ${T.border}`, borderRadius:8, padding:16, marginBottom:20, background:T.subtle }}>
+            <div style={{ border:`1px solid ${T.brand.inventory.br}`, borderRadius:T.radiusLg, padding:16, marginBottom:20, background:T.brand.inventory.bg }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-                <div style={{ fontSize:12, fontWeight:800, color:T.text, textTransform:"uppercase", letterSpacing:0.6 }}>📊 Stock</div>
+                <div style={{ ...TYPE.label, fontSize:10.5, color:T.textSecondary, display:"flex", alignItems:"center", gap:7 }}>
+                  <Icon name="stockcount" size={13} /> Stock
+                </div>
                 {dbReady && (
                   <div style={{ display:"flex", gap:6 }}>
                     <Btn small variant="success" onClick={()=>{setQuickActionType('receipt'); setShowRecordModal(true);}}>+ Receive</Btn>
