@@ -66,7 +66,7 @@ function StockMovementModal({ partCode, ops, onClose, onSaved }) {
         </div>
         <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn onClick={handleSubmit} disabled={saving}>{saving?"Saving…":"💾 Record Transaction"}</Btn>
+          <Btn onClick={handleSubmit} disabled={saving}>{saving?"Saving…":"Record Transaction"}</Btn>
         </div>
       </div>
     </Modal>
@@ -236,8 +236,7 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
           </div>
         </div>
         {selectedPart && qtyNum > 0 && (
-          <div style={{ fontSize:12, color:T.muted, background:T.subtle, borderRadius:6, padding:"8px 12px" }}>
-            On hand {currentQty} → <strong style={{ color:T.text }}>{resultQty}</strong> after this {TXN_LABELS[txnType].toLowerCase()}
+          <div style={{ fontSize:12, color:T.muted, background:T.subtle, borderRadius:6, padding:"8px 12px" }}> On hand {currentQty} → <strong style={{ color:T.text }}>{resultQty}</strong> after this {TXN_LABELS[txnType].toLowerCase()}
           </div>
         )}
         {goesNegative && (
@@ -267,7 +266,7 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
         <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
           {canPost && (
-            <Btn onClick={handleSubmit} disabled={saving}>{saving?"Posting…":"💾 Post Movement"}</Btn>
+            <Btn onClick={handleSubmit} disabled={saving}>{saving?"Posting…":"Post Movement"}</Btn>
           )}
         </div>
         {!canPost && (
@@ -298,7 +297,7 @@ const TRANSLATIONS = {
     nav_disciplines: "Disciplines", nav_manufacturers: "Manufacturers", nav_models: "Equipment Models",
     nav_funcgroups: "Functional Groups", nav_generator: "Code Generator", nav_tree: "Hierarchy Tree",
     nav_master: "Master Parts Table", nav_ledger: "Stock Ledger", nav_stockcount: "Stock Count",
-    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_assets: "Asset Registry", nav_reports: "Reliability Reports", nav_admin: "Administration",
+    nav_movements: "Stock Movements", nav_reorder: "Reorder Settings", nav_alerts: "Stock Alerts", nav_assets: "Asset Registry", nav_reports: "Reliability Indicators", nav_admin: "Administration",
     nav_auditlog: "Audit Log", nav_users: "User Management", nav_trash: "Trash",
     group_Reference: "Reference", group_MasterData: "Master Data", group_Tools: "Tools",
     group_Inventory: "Inventory", group_System: "System", group_Assets: "Assets",
@@ -312,7 +311,7 @@ const TRANSLATIONS = {
     nav_disciplines: "التخصصات", nav_manufacturers: "الشركات المصنعة", nav_models: "موديلات المعدات",
     nav_funcgroups: "المجموعات الوظيفية", nav_generator: "مولد الأكواد", nav_tree: "الشجرة الهرمية",
     nav_master: "جدول قطع الغيار الرئيسي", nav_ledger: "دفتر المخزون", nav_stockcount: "جرد المخزون",
-    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_assets: "سجل الأصول", nav_reports: "تقارير الاعتمادية", nav_admin: "الإدارة",
+    nav_movements: "حركات المخزون", nav_reorder: "إعدادات إعادة الطلب", nav_alerts: "تنبيهات المخزون", nav_assets: "سجل الأصول", nav_reports: "مؤشرات الاعتمادية", nav_admin: "الإدارة",
     nav_auditlog: "سجل التدقيق", nav_users: "إدارة المستخدمين", nav_trash: "المهملات",
     group_Reference: "مرجع", group_MasterData: "البيانات الرئيسية", group_Tools: "أدوات",
     group_Inventory: "المخزون", group_System: "النظام", group_Assets: "الأصول",
@@ -1002,9 +1001,20 @@ function StockLedgerPage({ data }) {
   return (
     <div>
       <Toast msg={toast}/>
-      <PageHeader title="Stock Ledger" sub="Every Receipt, Issue, Consumption, Return and Transfer — the movements behind each part's quantity on hand"/>
-      <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:7, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#92400e", fontWeight:600 }}>
-        ⚠️ Superseded by the Stock Count page's transaction ledger — entries recorded here no longer affect any part's quantity on hand. Kept for historical reference only.
+      <PageHeader title="Stock Ledger" sub="Legacy movement history — read only. Kept for reference; it no longer affects any balance."/>
+      {/* The primary "New Transaction" button used to sit directly
+          under this warning. The loudest control on the page recorded a
+          movement that, by the page's own notice, changes no balance —
+          a storekeeper skimming the banner would believe they had
+          issued stock when they had not. Warnings never beat buttons,
+          so the button is gone and the page routes to the live one. */}
+      <div style={{ background:T.warnBg, border:`1px solid ${T.warnBorder}`, borderLeft:`3px solid ${T.warn}`, borderRadius:T.radius, padding:"12px 16px", marginBottom:16, display:"flex", alignItems:"flex-start", gap:10, color:T.warn }}>
+        <Icon name="warning" size={15} style={{ marginTop:1 }} />
+        <div style={{ fontSize:13, lineHeight:1.5 }}>
+          <strong>Superseded by Stock Count.</strong>{' '}
+          <span style={{ color:T.textSecondary }}> Entries recorded here no longer affect any part's quantity on hand. This page is kept for historical reference only — post new movements from Stock Count.
+          </span>
+        </div>
       </div>
       <Card style={{ marginBottom:20 }}>
         <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center' }}>
@@ -1014,16 +1024,13 @@ function StockLedgerPage({ data }) {
             {db.STOCK_TRANSACTION_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
           </Select>
           <span style={{ fontSize:13, color:T.muted }}>{total} transaction{total===1?'':'s'}</span>
-          <div style={{ marginLeft:'auto' }}>
-            <Btn onClick={()=>setShowModal(true)}>＋ New Transaction</Btn>
-          </div>
         </div>
       </Card>
       <Card>
         {!dbReady ? (
           <div style={{ textAlign:'center', padding:40, color:T.muted }}>🟡 Stock Ledger requires a live database connection.</div>
         ) : loading ? (
-          <div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading transactions…</div>
+          <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading transactions…</div>
         ) : (
           <>
             <div style={TABLE_SCROLL}>
@@ -1134,7 +1141,7 @@ function UsersPage() {
       <PageHeader title="User Management" sub="Manage system users and role assignments — admin only"/>
       <Card style={{ marginBottom:20 }}>
         <div style={{ display:'flex', justifyContent:'flex-end' }}>
-          <Btn onClick={()=>setShowModal(true)}>＋ Invite User</Btn>
+          <Btn onClick={()=>setShowModal(true)}>Invite User</Btn>
         </div>
       </Card>
       <Card>
@@ -1314,7 +1321,7 @@ function TrashPage() {
           <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
             <Btn small variant="secondary" onClick={reload}>↻ Refresh</Btn>
             {rows.length > 0 && (
-              <Btn small variant="danger" onClick={()=>setConfirmEmpty(true)}>🗑 Empty Trash</Btn>
+              <Btn small variant="danger" onClick={()=>setConfirmEmpty(true)}>Empty Trash</Btn>
             )}
           </div>
         </div>
@@ -1347,7 +1354,7 @@ function TrashPage() {
                       <td style={{ padding:'7px 9px' }}>
                         <div style={{ display:'flex', gap:6 }}>
                           <Btn small variant="success" onClick={()=>handleRestore(r)} disabled={busyCode===rowKey(r)}>
-                            {busyCode===rowKey(r) ? '…' : '↩ Restore'}
+                            {busyCode===rowKey(r) ? '…' : 'Restore'}
                           </Btn>
                           {!blockerFor(r).canPurge ? (
                             <span title={`Cannot be permanently deleted — ${blockerFor(r).reasons.join(' and ')} still reference it. Its history would lose what it points to.`}
@@ -1394,7 +1401,7 @@ function TrashPage() {
             <Btn variant="secondary" onClick={()=>setConfirmPurge(null)}>Cancel</Btn>
             <Btn variant="danger" onClick={()=>handlePurge(confirmPurge)}
               disabled={busyCode===rowKey(confirmPurge) || !blockerFor(confirmPurge).canPurge}>
-              {busyCode===rowKey(confirmPurge) ? 'Deleting…' : '🗑 Delete Permanently'}
+              {busyCode===rowKey(confirmPurge) ? 'Deleting…' : 'Delete Permanently'}
             </Btn>
           </div>
         </Modal>
@@ -1428,14 +1435,13 @@ function TrashPage() {
               {blockedRows.length > 8 && (
                 <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>…and {blockedRows.length - 8} more.</div>
               )}
-              <div style={{ fontSize:11, color:T.muted, marginTop:6 }}>
-                The stock ledger is permanent, so a record its entries point at cannot be removed. These stay in Trash.
+              <div style={{ fontSize:11, color:T.muted, marginTop:6 }}> The stock ledger is permanent, so a record its entries point at cannot be removed. These stay in Trash.
               </div>
             </div>
           )}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <Btn variant="secondary" onClick={()=>setConfirmEmpty(false)}>Cancel</Btn>
-            <Btn variant="danger" onClick={handleEmptyTrash}>🗑 Empty Trash</Btn>
+            <Btn variant="danger" onClick={handleEmptyTrash}>Empty Trash</Btn>
           </div>
         </Modal>
       )}
@@ -1508,14 +1514,14 @@ function FileUpload({ partCode, bucket, label, currentUrl, onUploaded }) {
         <div style={{ marginBottom:8 }}>
           {bucket==='part-images'
             ? <img src={currentUrl} alt="part" style={{ height:56, borderRadius:5, border:`1px solid ${T.border}`, objectFit:'cover' }}/>
-            : <StoredFileLink bucket={bucket} url={currentUrl}>📎 View file</StoredFileLink>
+            : <StoredFileLink bucket={bucket} url={currentUrl}>View file</StoredFileLink>
           }
         </div>
       )}
       <input type="file" onChange={handleFile} disabled={uploading}
         accept={bucket==='part-images' ? 'image/jpeg,image/png,image/webp' : 'application/pdf'}
         style={{ fontSize:12, color:T.muted }}/>
-      {uploading && <div style={{ fontSize:12, color:T.accent, marginTop:4 }}>⏳ Uploading…</div>}
+      {uploading && <div style={{ fontSize:12, color:T.accent, marginTop:4 }}>Uploading…</div>}
       {err       && <div style={{ fontSize:12, color:T.danger, marginTop:4 }}>⚠️ {err}</div>}
     </div>
   );
@@ -1525,14 +1531,14 @@ function FileUpload({ partCode, bucket, label, currentUrl, onUploaded }) {
 // ═══════════════════════════════════════════════════════════════
 
 const INIT_CATEGORIES = [
-  { code: "CP", label: "Compressors",        icon: "⚙️",  color: "#1d4ed8", bg: "#dbeafe" },
+  { code: "CP", label: "Compressors",        icon: "",  color: "#1d4ed8", bg: "#dbeafe" },
   { code: "EN", label: "Engines",             icon: "🔧", color: "#b45309", bg: "#fef3c7" },
   { code: "ST", label: "Storage",             icon: "🗄️", color: "#047857", bg: "#d1fae5" },
   { code: "DI", label: "Dispensers",          icon: "⛽", color: "#7c3aed", bg: "#ede9fe" },
   { code: "IN", label: "Instrumentation",     icon: "📡", color: "#be123c", bg: "#ffe4e6" },
   { code: "LC", label: "Lubricants & Coolants",icon: "🛢️",color: "#0e7490", bg: "#cffafe" },
-  { code: "TL", label: "Tools",               icon: "🔩", color: "#6d28d9", bg: "#f5f3ff" },
-  { code: "OT", label: "Others",              icon: "📦", color: "#374151", bg: "#f3f4f6" },
+  { code: "TL", label: "Tools",               icon: "", color: "#6d28d9", bg: "#f5f3ff" },
+  { code: "OT", label: "Others",              icon: "", color: "#374151", bg: "#f3f4f6" },
 ];
 
 const INIT_MANUFACTURERS = [
@@ -1677,27 +1683,164 @@ const INIT_PARTS = [
 // DESIGN TOKENS
 // ═══════════════════════════════════════════════════════════════
 
+// ─── Direction B — "Engineering Console" ──────────────────────────
+// The load-bearing rule of this palette: `success`, `warn` and
+// `danger` communicate the STATE of a record and nothing else. They
+// are not available for category identity, chart series or tile
+// accents. Anything that is identity rather than state uses `subtle`
+// with a `border` outline — see the `tag` / `statusTag` helpers below.
+// Breaking that rule is what made a genuine stock-out the twelfth red
+// thing on screen in the previous design.
 const T = {
-  sidebar: "#0c1526",
-  sidebarBorder: "#1e2d45",
-  sidebarActive: "#1a3460",
-  sidebarHover: "#132039",
-  accent: "#2563eb",
-  accentLight: "#dbeafe",
-  header: "#0f172a",
-  border: "#e2e8f0",
-  bg: "#f0f4f8",
+  // navigation chrome (dark) — frames the light working surface
+  sidebar: "#151c27",
+  sidebarBorder: "#26313f",
+  sidebarActive: "#233248",
+  sidebarHover: "#1f2937",
+  sidebarText: "#9aa6b7",
+  sidebarTextActive: "#f0f5fb",
+  sidebarMarker: "#3fa9c4",
+  sidebarGroup: "#5e6b7e",
+
+  // interactive
+  accent: "#15497f",
+  accentHover: "#0f3862",
+  accentLight: "#e6eef8",
+
+  header: "#151c27",
+
+  // surfaces
+  bg: "#f4f6f8",
   card: "#ffffff",
-  text: "#0f172a",
-  muted: "#64748b",
-  subtle: "#f8fafc",
-  success: "#15803d",
-  successBg: "#dcfce7",
-  warn: "#b45309",
-  warnBg: "#fef3c7",
-  danger: "#dc2626",
-  dangerBg: "#fee2e2",
-  disc: { ME: { c:"#1d4ed8", b:"#dbeafe" }, EL: { c:"#b45309", b:"#fef3c7" }, AC: { c:"#047857", b:"#d1fae5" } },
+  subtle: "#f8fafb",
+  border: "#dfe4ea",
+  borderStrong: "#c3cbd5",
+
+  // ink — all four pass 4.5:1 on `card`
+  text: "#171c24",
+  textSecondary: "#4a5567",
+  muted: "#7a8598",
+
+  // STATE ONLY — never decoration
+  success: "#0f6b45",
+  successBg: "#e3f1ea",
+  successBorder: "#bfdccc",
+  warn: "#9a5b06",
+  warnBg: "#fbf0da",
+  warnBorder: "#e8d5a8",
+  danger: "#a32b18",
+  dangerBg: "#f9e7e3",
+  dangerBorder: "#e9c6be",
+
+  // Disciplines are IDENTITY, not state, so they are deliberately all
+  // one neutral now. The shape is kept so the ~40 call sites that read
+  // T.disc[x] keep working without a rewrite.
+  disc: {
+    ME: { c:"#4a5567", b:"#f8fafb" },
+    EL: { c:"#4a5567", b:"#f8fafb" },
+    AC: { c:"#4a5567", b:"#f8fafb" },
+  },
+
+  // type
+  mono: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+  sans: "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif",
+  radius: 4,        // controls
+  radiusLg: 6,      // containers
+  shadow: "0 1px 2px rgba(20,25,34,.06), 0 8px 24px -12px rgba(20,25,34,.18)",
+};
+
+// Type scale — seven steps with distinct roles, replacing the eight
+// near-identical sizes measured on the old Master Parts Table.
+const TYPE = {
+  pageTitle: { fontSize: 27, fontWeight: 600, lineHeight: 1.2, letterSpacing: "-0.015em" },
+  h2:        { fontSize: 19, fontWeight: 600, lineHeight: 1.3 },
+  h3:        { fontSize: 15, fontWeight: 600, lineHeight: 1.4 },
+  body:      { fontSize: 15, fontWeight: 400, lineHeight: 1.6 },
+  ui:        { fontSize: 13, fontWeight: 400, lineHeight: 1.5 },
+  cell:      { fontSize: 12.5, fontWeight: 400, lineHeight: 1.4 },
+  button:    { fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 },
+  helper:    { fontSize: 11.5, fontWeight: 400, lineHeight: 1.45, color: "#7a8598" },
+  // uppercase micro-labels and table headers, both monospaced
+  label:     { fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" },
+  th:        { fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 600, letterSpacing: "0.09em", textTransform: "uppercase" },
+  // codes, quantities, timestamps — always tabular so digits line up
+  data:      { fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11.5, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// ICONS
+// ═══════════════════════════════════════════════════════════════
+// One stroke-based set replacing the emoji that used to carry the
+// navigation. Emoji render differently on every OS, cannot inherit
+// colour or weight, and gave the collapsed 52px rail — where the icon
+// IS the only navigation — no accessible name. Two nav items also
+// shared the same 🏭.
+//
+// Paths are 24×24, stroked with `currentColor`, so an icon takes the
+// colour and weight of whatever it sits in. `title` makes it a labelled
+// image; without one it is decorative and hidden from screen readers.
+
+const ICON_PATHS = {
+  dashboard:   "M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z",
+  framework:   "M4 20h16M4 20V8l8-5 8 5v12M9 20v-6h6v6",
+  category:    "M21 8l-9-5-9 5 9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5",
+  discipline:  "M9 3v6l-5 9a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-9V3M9 3h6M7.5 14h9",
+  manufacturer:"M2 20h20M4 20V9l5 3V9l5 3V9l5 3v8M8 20v-4h3v4",
+  model:       "M9 3h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2V4a1 1 0 0 1 1-1zM9 12h6M9 16h4",
+  funcgroup:   "M4 4h6v6H4zM14 14h6v6h-6zM7 10v4h7",
+  generator:   "M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5",
+  tree:        "M12 3v5M12 8H6v4M12 8h6v4M6 12v2M12 8v6M18 12v2M3 14h6v4H3zM9 18h6M9 14h6v4H9zM15 14h6v4h-6z",
+  master:      "M3 3h18v18H3zM3 9h18M9 21V9",
+  ledger:      "M5 3h11l3 3v15H5zM8 8h6M8 12h8M8 16h5",
+  stockcount:  "M4 3h16v18H4zM8 7h8M8 11h2M12 11h2M16 11h.01M8 15h2M12 15h2M16 15h.01",
+  movements:   "M1 3h15v13H1zM16 8h4l3 3v5h-7z M5.5 18.5a2 2 0 1 0 0-.1M18.5 18.5a2 2 0 1 0 0-.1",
+  reorder:     "M2 3h2.5l2.2 11.4a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 2-1.6L21 7H5.2M9 21a1 1 0 1 0 0-.1M18 21a1 1 0 1 0 0-.1",
+  alerts:      "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
+  assets:      "M2 20h20M4 20V8l5-4 5 4v12M14 20v-7h6v7M7 12h2M7 16h2",
+  reports:     "M3 3v18h18M7 15l4-5 3 3 5-7",
+  admin:       "M12 2l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6zM9 12l2 2 4-4",
+  auditlog:    "M5 3h11l3 3v15H5zM9 9h6M9 13h6M9 17h3",
+  users:       "M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-.1M22 20v-2a4 4 0 0 0-3-3.9",
+  trash:       "M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 15H6L5 6M10 11v6M14 11v6",
+  // actions
+  search:      "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.6-3.6",
+  menu:        "M4 7h16M4 12h16M4 17h16",
+  plus:        "M12 5v14M5 12h14",
+  minus:       "M5 12h14",
+  adjust:      "M4 8h16M4 16h16M9 4v8M15 12v8",
+  download:    "M12 3v12M7 10l5 5 5-5M4 21h16",
+  upload:      "M12 21V9M7 14l5-5 5 5M4 3h16",
+  save:        "M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7",
+  edit:        "M4 20h4L19 9a2 2 0 0 0-3-3L5 17z M14 5l3 3",
+  close:       "M6 6l12 12M18 6L6 18",
+  check:       "M20 6L9 17l-5-5",
+  more:        "M12 5.5a1 1 0 1 0 0-.1M12 12a1 1 0 1 0 0-.1M12 18.5a1 1 0 1 0 0-.1",
+  globe:       "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18",
+  warning:     "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01",
+  clock:       "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
+  lock:        "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4",
+  undo:        "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3",
+  refresh:     "M20 11a8 8 0 1 0-2 6M20 5v6h-6",
+  camera:      "M3 7h4l2-2h6l2 2h4v13H3zM12 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z",
+  chevron:     "M9 6l6 6-6 6",
+};
+
+// `title` present → labelled image. Absent → decorative, hidden from
+// assistive tech, because the surrounding control carries the label.
+const Icon = ({ name, size = 15, stroke = 1.6, title, style }) => {
+  const d = ICON_PATHS[name];
+  if (!d) return null;
+  return (
+    <svg
+      viewBox="0 0 24 24" width={size} height={size} fill="none"
+      stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round"
+      role={title ? "img" : undefined} aria-label={title} aria-hidden={title ? undefined : true}
+      style={{ flexShrink: 0, display: "block", ...style }}
+    >
+      {title && <title>{title}</title>}
+      {d.split(" M").map((seg, i) => <path key={i} d={i === 0 ? seg : "M" + seg} />)}
+    </svg>
+  );
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1710,8 +1853,91 @@ const Pill = ({ children, color = T.accent, bg = T.accentLight, mono = true, siz
   </span>
 );
 
+// Identity, not state: category, manufacturer, discipline and
+// functional group are all reference labels. They used to be six
+// coloured chips per row, which left nothing for a real stock-out to
+// shout with. They are neutral now — still chips, no longer competing.
+const Tag = ({ children, title, mono = true }) => (
+  <span title={title} style={{
+    display:"inline-block", background:T.subtle, border:`1px solid ${T.border}`,
+    color:T.textSecondary, fontFamily: mono ? T.mono : "inherit",
+    fontSize:10.5, fontWeight:600, letterSpacing: mono ? "0.04em" : 0,
+    padding:"2px 6px", borderRadius:3, whiteSpace:"nowrap",
+  }}>{children}</span>
+);
+
+// State, and only state. Semantic colour lives here and nowhere else.
+const StatusTag = ({ children, tone = "neutral" }) => {
+  const tones = {
+    ok:      { c:T.success, b:T.successBg, br:T.successBorder },
+    warn:    { c:T.warn,    b:T.warnBg,    br:T.warnBorder },
+    danger:  { c:T.danger,  b:T.dangerBg,  br:T.dangerBorder },
+    neutral: { c:T.textSecondary, b:T.subtle, br:T.border },
+  };
+  const x = tones[tone] || tones.neutral;
+  return (
+    <span style={{
+      display:"inline-block", background:x.b, border:`1px solid ${x.br}`, color:x.c,
+      ...TYPE.label, fontSize:10, letterSpacing:"0.07em",
+      padding:"3px 7px", borderRadius:3, whiteSpace:"nowrap",
+    }}>{children}</span>
+  );
+};
+
+// Destructive actions live behind this, never beside the action people
+// use most. Delete used to sit ~8px from Edit in the part-detail header
+// with no separator — a misclick risk on a dialog opened dozens of
+// times a day.
+const OverflowMenu = ({ items, label = "More actions" }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc  = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const visible = items.filter(Boolean);
+  if (!visible.length) return null;
+  return (
+    <div ref={ref} style={{ position:"relative" }}>
+      <button onClick={()=>setOpen(o=>!o)} aria-label={label} aria-haspopup="menu" aria-expanded={open}
+        style={{ background:T.card,border:`1px solid ${T.borderStrong}`,borderRadius:T.radius,height:28,padding:"0 8px",cursor:"pointer",color:T.textSecondary,display:"flex",alignItems:"center" }}>
+        <Icon name="more" size={14} />
+      </button>
+      {open && (
+        <div role="menu" style={{ position:"absolute",top:"calc(100% + 6px)",right:0,minWidth:190,background:T.card,border:`1px solid ${T.border}`,borderRadius:T.radiusLg,boxShadow:T.shadow,zIndex:60,padding:4 }}>
+          {visible.map((it,i)=>(
+            <button key={i} role="menuitem"
+              onClick={()=>{ setOpen(false); it.onClick(); }}
+              style={{
+                display:"flex",alignItems:"center",gap:8,width:"100%",textAlign:"left",
+                background:"none",border:"none",cursor:"pointer",padding:"8px 10px",borderRadius:T.radius,
+                fontSize:12.5,color: it.danger ? T.danger : T.text,
+                // A rule separates destructive items from the rest.
+                borderTop: it.danger && i > 0 ? `1px solid ${T.border}` : "none",
+                marginTop:  it.danger && i > 0 ? 4 : 0,
+                paddingTop: it.danger && i > 0 ? 10 : 8,
+              }}
+              onMouseEnter={e=>e.currentTarget.style.background = it.danger ? T.dangerBg : T.subtle}
+              onMouseLeave={e=>e.currentTarget.style.background = "none"}>
+              {it.icon && <Icon name={it.icon} size={13} />}{it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CodeTag = ({ code }) => (
-  <span style={{ background: T.header, color: "#38bdf8", fontWeight: 800, fontSize: 12, padding: "3px 7px", borderRadius: 5, fontFamily: "monospace", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
+  // Was a dark navy pill with cyan text — the single loudest object in
+  // every table row, competing with genuine status colour. The code is
+  // still the row's anchor, so it keeps mono + weight, but it no longer
+  // needs a filled badge to say so.
+  <span style={{ color: T.text, fontFamily: T.mono, fontSize: 11.5, fontWeight: 600, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
     {code}
   </span>
 );
@@ -1740,13 +1966,17 @@ const StockQtyDisplay = ({ qty, unit = "", stockSource, small = false, reorderPo
   if (stockSource === 'estimated') {
     return (
       <span title="Estimated starting balance — not yet physically counted" style={{ display:"inline-flex", alignItems:"center", gap:5, cursor:"help" }}>
-        <span style={{ color: stateColor===T.text?T.muted:stateColor, fontSize:size, fontWeight:stateColor!==T.text?700:400, ...numStyle }}>~{qty}{unit?` ${unit}`:''}</span>
-        <span style={{ fontSize:9, fontWeight:800, color:T.warn, background:T.warnBg, padding:"1px 5px", borderRadius:4, textTransform:"uppercase", letterSpacing:0.4 }}>est.</span>
+        <span style={{ fontFamily:T.mono, color: stateColor===T.text?T.muted:stateColor, fontSize:size, fontWeight:600, ...numStyle }}>~{qty}{unit?<span style={{ color:T.muted, fontWeight:400, fontSize:size-1.5 }}>{` ${unit}`}</span>:null}</span>
+        <span style={{ ...TYPE.label, fontSize:9, color:T.warn, background:T.warnBg, border:`1px solid ${T.warnBorder}`, padding:"1px 4px", borderRadius:3 }}>est.</span>
       </span>
     );
   }
   if (stockSource === 'counted') {
-    return <span style={{ fontSize:size, color:stateColor, fontWeight:stateColor!==T.text?700:400, ...numStyle }}>{qty}{unit?` ${unit}`:''}</span>;
+    return (
+      <span style={{ fontFamily:T.mono, fontSize:size, color:stateColor, fontWeight:600, ...numStyle }}>
+        {qty}{unit?<span style={{ color:T.muted, fontWeight:400, fontSize:size-1.5 }}>{` ${unit}`}</span>:null}
+      </span>
+    );
   }
   return <span title="No stock data recorded yet" style={{ fontSize:size, color:T.muted, cursor:"help" }}>— {unit}</span>;
 };
@@ -1859,17 +2089,28 @@ const Table = ({ cols, rows, emptyMsg = "No records found." }) => (
   </div>
 );
 
-const StatCard = ({ label, value, color = T.accent, icon }) => (
-  <Card style={{ borderTop: `3px solid ${color}`, textAlign: "center" }}>
-    <div style={{ fontSize: 28, marginBottom: 4 }}>{icon}</div>
-    <div style={{ fontSize: 30, fontWeight: 800, color }}>{value}</div>
-    <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>{label}</div>
-  </Card>
-);
+// `color` is now honoured ONLY when it is one of the three state
+// colours. Before, every caller passed a different decorative hue and
+// the Dashboard rendered eight tiles in eight unrelated colours — the
+// clearest instance of colour meaning nothing. A catalogue count is not
+// a state, so it reads as plain ink; an out-of-stock count still shouts.
+const STATE_COLORS = new Set([T.success, T.warn, T.danger]);
+
+const StatCard = ({ label, value, color = T.accent, icon, onClick, title }) => {
+  const isState = STATE_COLORS.has(color);
+  const valueColor = isState ? color : T.text;
+  return (
+    <Card onClick={onClick} title={title}
+      style={{ borderTop: `2px solid ${isState ? color : T.border}`, textAlign: "left", cursor: onClick ? "pointer" : undefined }}>
+      <div style={{ ...TYPE.label, fontSize: 9.5, color: T.muted }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: valueColor, fontVariantNumeric: "tabular-nums", marginTop: 8 }}>{value}</div>
+    </Card>
+  );
+};
 
 const Toast = ({ msg }) => msg ? (
-  <div style={{ position: "fixed", top: 20, right: 24, zIndex: 9999, background: msg.type === "ok" ? T.successBg : T.dangerBg, color: msg.type === "ok" ? T.success : T.danger, border: `1px solid ${msg.type === "ok" ? "#86efac" : "#fca5a5"}`, borderRadius: 8, padding: "12px 20px", fontWeight: 700, fontSize: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }}>
-    {msg.type === "ok" ? "✅" : "⚠️"} {msg.text}
+  <div role="status" style={{ position: "fixed", top: 20, right: 24, zIndex: 9999, background: msg.type === "ok" ? T.successBg : T.dangerBg, color: msg.type === "ok" ? T.success : T.danger, border: `1px solid ${msg.type === "ok" ? T.successBorder : T.dangerBorder}`, borderRadius: T.radiusLg, padding: "11px 16px", fontWeight: 600, fontSize: 13, boxShadow: T.shadow, display: "flex", alignItems: "center", gap: 8 }}>
+    <Icon name={msg.type === "ok" ? "check" : "warning"} size={15} /> {msg.text}
   </div>
 ) : null;
 
@@ -1953,7 +2194,7 @@ function CrudPage({ title, sub, items, setItems, fields, renderRow, emptyMsg, le
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search…" style={{ maxWidth: 300, width: "auto" }} />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…" style={{ maxWidth: 300, width: "auto" }} />
           <span style={{ color: T.muted, fontSize: 13 }}>{filtered.length} records</span>
           <div style={{ marginLeft: "auto" }}>
             <Btn onClick={openAdd}>+ Add New</Btn>
@@ -2059,33 +2300,33 @@ function Dashboard({ data }) {
 
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 12, marginBottom: 24 }}>
-        <StatCard label="Total Parts" value={loadingStats?"…":totalParts.toLocaleString()} color={T.accent} icon="🔩" />
-        <StatCard label="Categories" value={categories.length} color="#047857" icon="📦" />
+        <StatCard label="Total Parts" value={loadingStats?"…":totalParts.toLocaleString()} color={T.accent} icon="" />
+        <StatCard label="Categories" value={categories.length} color="#047857" icon="" />
         <StatCard label="Manufacturers" value={manufacturers.length} color="#b45309" icon="🏭" />
         <StatCard label="Models" value={models.length} color="#7c3aed" icon="📐" />
-        <StatCard label="Functional Groups" value={funcGroups.length} color="#be123c" icon="⚙️" />
+        <StatCard label="Functional Groups" value={funcGroups.length} color="#be123c" icon="" />
         <StatCard label="Disciplines" value={disciplines.length} color="#0e7490" icon="🔬" />
         <div onClick={()=>navigateTo && navigateTo('master', { inStock: 'in' })} style={{ cursor: navigateTo?"pointer":"default" }}>
           <StatCard label="Parts in Stock" value={partsInStock===null?"…":partsInStock.toLocaleString()} color="#0891b2" icon="📥" />
         </div>
         <div onClick={()=>navigateTo && navigateTo('movements')} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="Movements This Month" value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} color="#7c3aed" icon="🚚" />
+          <StatCard label="Movements (30d)" value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} color="#7c3aed" icon="🚚" />
         </div>
       </div>
 
       {/* Stock Alerts */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 24 }}>
         <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['out'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="🔴 Out of Stock" value={alerts.loading?"…":alerts.counts.out.toLocaleString()} color="#991B1B" icon="🔴" />
+          <StatCard label="Out of Stock" value={alerts.loading?"…":alerts.counts.out.toLocaleString()} color={T.danger} />
         </div>
         <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['critical'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="🟠 Critical" value={alerts.loading?"…":alerts.counts.critical.toLocaleString()} color="#DC2626" icon="🟠" />
+          <StatCard label="Critical" value={alerts.loading?"…":alerts.counts.critical.toLocaleString()} color={T.danger} />
         </div>
         <div onClick={()=>navigateTo && navigateTo('alerts', { severity: ['low'] })} style={{ cursor: navigateTo?"pointer":"default" }}>
-          <StatCard label="🟡 Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color="#D97706" icon="🟡" />
+          <StatCard label="Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color={T.warn} />
         </div>
         <div onClick={()=>navigateTo && navigateTo('reorder', { filter:'unconfigured' })} style={{ cursor: navigateTo?"pointer":"default", opacity: alerts.unconfigured===0?0.6:1 }}>
-          <StatCard label="⚪ Not Configured" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} color={T.muted} icon="⚪" />
+          <StatCard label="No reorder point" title="These parts can never raise an alert" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} color={T.muted} />
         </div>
       </div>
 
@@ -2094,7 +2335,7 @@ function Dashboard({ data }) {
         <Card>
           <SectionHeader>Equipment Hierarchy</SectionHeader>
           <div style={{ fontFamily: "monospace", fontSize: 13, lineHeight: 2.2 }}>
-            <div style={{ fontWeight: 800, color: T.accent }}>📦 Engineering Spare Parts</div>
+            <div style={{ fontWeight: 800, color: T.accent }}>Engineering Spare Parts</div>
             {categories.map((c, i) => (
               <div key={c.code} style={{ marginLeft: 20, color: T.text }}>
                 {i < categories.length - 1 ? "├──" : "└──"} {c.icon} {c.label} <span style={{ color: "#94a3b8" }}>({c.code})</span>
@@ -2109,11 +2350,14 @@ function Dashboard({ data }) {
           {catCounts.map(c => (
             <div key={c.code} style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{c.icon} {c.label}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: c.color }}>{loadingStats?"…":c.count}</span>
+                {/* One series, one colour. Eight hues here encoded
+                    nothing the category name did not already say, and
+                    three zeroes rendered blue, red and purple. */}
+                <span style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{c.label}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 12.5, fontWeight: 600, color: T.text, fontVariantNumeric: "tabular-nums" }}>{loadingStats?"…":c.count}</span>
               </div>
-              <div style={{ background: "#e2e8f0", borderRadius: 4, height: 6 }}>
-                <div style={{ background: c.color, height: 6, borderRadius: 4, width: `${totalParts ? (c.count / totalParts) * 100 : 0}%`, transition: "width .5s" }} />
+              <div style={{ background: T.border, borderRadius: 2, height: 6 }}>
+                <div style={{ background: T.accent, height: 6, borderRadius: 2, width: `${totalParts ? (c.count / totalParts) * 100 : 0}%`, transition: "width .5s" }} />
               </div>
             </div>
           ))}
@@ -2126,12 +2370,12 @@ function Dashboard({ data }) {
           <div style={{ fontSize: 11, color: "#64748b", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10, fontWeight: 700 }}>Mandatory Code Format — 6 Segments</div>
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
             {[
-              { seg: "AA", name: "Category",   c: "#60a5fa" },
-              { seg: "BB", name: "Manufacturer",c: "#fbbf24" },
-              { seg: "CC", name: "Model",       c: "#34d399" },
-              { seg: "DD", name: "Discipline",  c: "#f87171" },
-              { seg: "EE", name: "Func. Group", c: "#a78bfa" },
-              { seg: "0001",name:"Sequence",    c: "#94a3b8" },
+              { seg: "AA", name: "Category",   c: "#cbd5e1" },
+              { seg: "BB", name: "Manufacturer",c: "#cbd5e1" },
+              { seg: "CC", name: "Model",       c: "#cbd5e1" },
+              { seg: "DD", name: "Discipline",  c: "#cbd5e1" },
+              { seg: "EE", name: "Func. Group", c: "#cbd5e1" },
+              { seg: "0001",name:"Sequence",    c: "#cbd5e1" },
             ].map((s, i, arr) => (
               <span key={s.seg}>
                 <span style={{ fontFamily:"monospace",fontWeight:800,fontSize:18,color:s.c }}>
@@ -2271,12 +2515,12 @@ const COLOR_PRESETS = [
   { color:"#831843", bg:"#fdf2f8", name:"Pink"   },
 ];
 
-const ICON_PRESETS = ["⚙️","🔧","🗄️","⛽","📡","🛢️","🔩","📦","🏭","🔬","⚡","🛠️","🔑","📋","💡","🧰","🔄","⚗️"];
+const ICON_PRESETS = ["","🔧","🗄️","⛽","📡","🛢️","","","🏭","🔬","⚡","️","🔑","📋","💡","🧰","🔄","⚗️"];
 
 function CategoriesPage({ data }) {
   const { categories, parts, ops } = data;
 
-  const EMPTY = { code:"", label:"", icon:"📦", color:"#1d4ed8", bg:"#dbeafe" };
+  const EMPTY = { code:"", label:"", icon:"", color:"#1d4ed8", bg:"#dbeafe" };
   const [form,        setForm]        = useState(EMPTY);
   const [editingCode, setEditingCode] = useState(null);
   const [showForm,    setShowForm]    = useState(false);
@@ -2353,10 +2597,10 @@ function CategoriesPage({ data }) {
       {/* Toolbar */}
       <Card style={{ marginBottom:20 }}>
         <div style={{ display:"flex",gap:12,alignItems:"center",flexWrap:"wrap" }}>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search categories…" style={{ maxWidth:260,width:"auto" }} />
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search categories…" style={{ maxWidth:260,width:"auto" }} />
           <span style={{ fontSize:13,color:T.muted }}>{filtered.length} of {categories.length}</span>
           <div style={{ marginLeft:"auto" }}>
-            <Btn onClick={openAdd}>＋ Add Category</Btn>
+            <Btn onClick={openAdd}>Add Category</Btn>
           </div>
         </div>
       </Card>
@@ -2386,8 +2630,8 @@ function CategoriesPage({ data }) {
               </div>
               {/* Actions */}
               <div style={{ display:"flex",gap:8,marginTop:14,paddingTop:12,borderTop:`1px solid ${T.border}` }}>
-                <Btn small variant="secondary" onClick={()=>openEdit(cat)} style={{ flex:1 }}>✏️ Edit</Btn>
-                <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)} style={{ flex:1 }}>🗑 Delete</Btn>
+                <Btn small variant="secondary" onClick={()=>openEdit(cat)} style={{ flex:1 }}>Edit</Btn>
+                <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)} style={{ flex:1 }}>Delete</Btn>
               </div>
             </Card>
           );
@@ -2400,7 +2644,7 @@ function CategoriesPage({ data }) {
           onMouseEnter={e=>{e.currentTarget.style.borderColor=T.accent;e.currentTarget.style.background="#f0f9ff";}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}
         >
-          <span style={{ fontSize:32 }}>＋</span>
+          <span style={{ fontSize:32 }}></span>
           <span style={{ fontSize:13,fontWeight:700 }}>Add New Category</span>
         </div>
       </div>
@@ -2432,8 +2676,8 @@ function CategoriesPage({ data }) {
                   </td>
                   <td style={{ padding:"7px 9px" }}>
                     <div style={{ display:"flex",gap:6 }}>
-                      <Btn small variant="secondary" onClick={()=>openEdit(cat)}>✏️ Edit</Btn>
-                      <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)}>🗑 Delete</Btn>
+                      <Btn small variant="secondary" onClick={()=>openEdit(cat)}>Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(cat)}>Delete</Btn>
                     </div>
                   </td>
                 </tr>
@@ -2503,7 +2747,7 @@ function CategoriesPage({ data }) {
               <div style={{ fontSize:11,fontWeight:700,color:T.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:0.8 }}>Preview</div>
               <div style={{ display:"flex",alignItems:"center",gap:12 }}>
                 <div style={{ width:44,height:44,borderRadius:8,background:form.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,border:`2px solid ${form.color}22` }}>
-                  {form.icon||"📦"}
+                  {form.icon||""}
                 </div>
                 <div>
                   <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:3 }}>
@@ -2521,7 +2765,7 @@ function CategoriesPage({ data }) {
 
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4 }}>
               <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
-              <Btn onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editingCode ? "💾 Save Changes" : "＋ Add Category"}</Btn>
+              <Btn onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editingCode ? "Save Changes" : "Add Category"}</Btn>
             </div>
           </div>
         </Modal>
@@ -2550,7 +2794,7 @@ function CategoriesPage({ data }) {
           <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
             <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
-              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete Category + ${deleteCount} Part(s)` : "🗑 Delete Category"}
+              {saving ? "Deleting…" : deleteCount>0 ? `Delete Category + ${deleteCount} Part(s)` : "Delete Category"}
             </Btn>
           </div>
         </Modal>
@@ -2643,9 +2887,9 @@ function ManufacturersPage({ data }) {
 
       <Card style={{marginBottom:20}}>
         <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search manufacturers…" style={{maxWidth:260,width:"auto"}}/>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search manufacturers…" style={{maxWidth:260,width:"auto"}}/>
           <span style={{fontSize:13,color:T.muted}}>{filtered.length} of {manufacturers.length}</span>
-          <div style={{marginLeft:"auto"}}><Btn onClick={openAdd}>＋ Add Manufacturer</Btn></div>
+          <div style={{marginLeft:"auto"}}><Btn onClick={openAdd}>Add Manufacturer</Btn></div>
         </div>
       </Card>
 
@@ -2673,8 +2917,8 @@ function ManufacturersPage({ data }) {
                     <div style={{fontWeight:700,fontSize:15,color:T.text,marginBottom:4}}>{mfr.label}</div>
                     <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginBottom:12}}>{cat.code}-{mfr.code}-CC-DD-EE-0001</div>
                     <div style={{display:"flex",gap:8,paddingTop:10,borderTop:`1px solid ${T.border}`}}>
-                      <Btn small variant="secondary" onClick={()=>openEdit(mfr)} style={{flex:1}}>✏️ Edit</Btn>
-                      <Btn small variant="danger" onClick={()=>setDeleteTarget(mfr)} style={{flex:1}}>🗑 Delete</Btn>
+                      <Btn small variant="secondary" onClick={()=>openEdit(mfr)} style={{flex:1}}>Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(mfr)} style={{flex:1}}>Delete</Btn>
                     </div>
                   </Card>
                 );
@@ -2684,7 +2928,7 @@ function ManufacturersPage({ data }) {
                 style={{border:`2px dashed ${T.border}`,borderRadius:8,padding:16,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:120,color:T.muted,transition:"all .15s"}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor=cat.color;e.currentTarget.style.background=cat.bg+"44";}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}>
-                <span style={{fontSize:26}}>＋</span>
+                <span style={{fontSize:26}}></span>
                 <span style={{fontSize:12,fontWeight:700}}>Add to {cat.label}</span>
               </div>
             </div>
@@ -2727,7 +2971,7 @@ function ManufacturersPage({ data }) {
             </div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
-              <Btn onClick={handleSave}>{editingCode?"💾 Save Changes":"＋ Add Manufacturer"}</Btn>
+              <Btn onClick={handleSave}>{editingCode?"Save Changes":"Add Manufacturer"}</Btn>
             </div>
           </div>
         </Modal>
@@ -2752,7 +2996,7 @@ function ManufacturersPage({ data }) {
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
             <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
-              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete Manufacturer + ${deleteCount} Part(s)` : "🗑 Delete"}
+              {saving ? "Deleting…" : deleteCount>0 ? `Delete Manufacturer + ${deleteCount} Part(s)` : "Delete"}
             </Btn>
           </div>
         </Modal>
@@ -2841,9 +3085,9 @@ function ModelsPage({ data }) {
 
       <Card style={{marginBottom:20}}>
         <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search models…" style={{maxWidth:260,width:"auto"}}/>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search models…" style={{maxWidth:260,width:"auto"}}/>
           <span style={{fontSize:13,color:T.muted}}>{filtered.length} of {models.length}</span>
-          <div style={{marginLeft:"auto"}}><Btn onClick={()=>openAdd()}>＋ Add Model</Btn></div>
+          <div style={{marginLeft:"auto"}}><Btn onClick={()=>openAdd()}>Add Model</Btn></div>
         </div>
       </Card>
 
@@ -2854,7 +3098,7 @@ function ModelsPage({ data }) {
         const isEngine = (mfr.catCodes||[]).includes("EN");
         const color = isEngine?"#b45309":"#1d4ed8";
         const bg    = isEngine?"#fef3c7":"#dbeafe";
-        const icon  = isEngine?"🔧":"⚙️";
+        const icon  = isEngine?"🔧":"";
         return (
           <div key={mfr.code} style={{marginBottom:24}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
@@ -2874,12 +3118,11 @@ function ModelsPage({ data }) {
                       <span style={{fontSize:11,color:T.muted,background:T.subtle,padding:"2px 6px",borderRadius:4,fontWeight:600}}>{pc} part{pc!==1?"s":""}</span>
                     </div>
                     <div style={{fontWeight:700,fontSize:14,color:T.text,marginBottom:4}}>{model.label}</div>
-                    <div style={{fontFamily:"monospace",fontSize:10,color:T.muted,marginBottom:10}}>
-                      AA-{mfr.code}-<span style={{color,fontWeight:800}}>{model.code}</span>-DD-EE-0001
+                    <div style={{fontFamily:"monospace",fontSize:10,color:T.muted,marginBottom:10}}> AA-{mfr.code}-<span style={{color,fontWeight:800}}>{model.code}</span>-DD-EE-0001
                     </div>
                     <div style={{display:"flex",gap:6,paddingTop:8,borderTop:`1px solid ${T.border}`}}>
-                      <Btn small variant="secondary" onClick={()=>openEdit(model)} style={{flex:1}}>✏️ Edit</Btn>
-                      <Btn small variant="danger" onClick={()=>setDeleteTarget(model)} style={{flex:1}}>🗑 Delete</Btn>
+                      <Btn small variant="secondary" onClick={()=>openEdit(model)} style={{flex:1}}>Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(model)} style={{flex:1}}>Delete</Btn>
                     </div>
                   </Card>
                 );
@@ -2889,7 +3132,7 @@ function ModelsPage({ data }) {
                 style={{border:`2px dashed ${T.border}`,borderRadius:8,padding:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:110,color:T.muted,transition:"all .15s"}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.background=bg+"44";}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}>
-                <span style={{fontSize:24}}>＋</span>
+                <span style={{fontSize:24}}></span>
                 <span style={{fontSize:12,fontWeight:700}}>Add {mfr.label} Model</span>
               </div>
             </div>
@@ -2928,13 +3171,12 @@ function ModelsPage({ data }) {
                 </span>
                 <span style={{fontWeight:700,color:T.text}}>{form.label||"Model Name"}</span>
               </div>
-              <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}>
-                AA-{form.mfrCode||"BB"}-<span style={{color:T.accent,fontWeight:700}}>{form.code||"CC"}</span>-DD-EE-0001
+              <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}> AA-{form.mfrCode||"BB"}-<span style={{color:T.accent,fontWeight:700}}>{form.code||"CC"}</span>-DD-EE-0001
               </div>
             </div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
-              <Btn onClick={handleSave}>{editingCode?"💾 Save Changes":"＋ Add Model"}</Btn>
+              <Btn onClick={handleSave}>{editingCode?"Save Changes":"Add Model"}</Btn>
             </div>
           </div>
         </Modal>
@@ -2959,7 +3201,7 @@ function ModelsPage({ data }) {
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
             <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
-              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete Model + ${deleteCount} Part(s)` : "🗑 Delete"}
+              {saving ? "Deleting…" : deleteCount>0 ? `Delete Model + ${deleteCount} Part(s)` : "Delete"}
             </Btn>
           </div>
         </Modal>
@@ -3070,7 +3312,7 @@ function DisciplinesPage({ data }) {
           <span style={{fontWeight:800,fontSize:16,color:T.text}}>Standard Disciplines</span>
           <span style={{fontSize:12,background:"#dbeafe",color:"#1d4ed8",padding:"2px 10px",borderRadius:4,fontWeight:700}}>CP · ST · DI · IN · LC · TL · OT</span>
         </div>
-        <Btn small onClick={()=>{setFormD(EMPTY_D);setEditD(null);setShowD(true);}}>＋ Add Discipline</Btn>
+        <Btn small onClick={()=>{setFormD(EMPTY_D);setEditD(null);setShowD(true);}}>Add Discipline</Btn>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14,marginBottom:28}}>
@@ -3079,14 +3321,13 @@ function DisciplinesPage({ data }) {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <Pill color={d.color} bg={d.bg} size={14}>{d.code}</Pill>
               <div style={{display:"flex",gap:6}}>
-                <Btn small variant="secondary" onClick={()=>{setFormD({...d});setEditD(d.code);setShowD(true);}}>✏️</Btn>
-                <Btn small variant="danger" onClick={()=>setDelD(d)}>🗑</Btn>
+                <Btn small variant="secondary" onClick={()=>{setFormD({...d});setEditD(d.code);setShowD(true);}}></Btn>
+                <Btn small variant="danger" onClick={()=>setDelD(d)}></Btn>
               </div>
             </div>
             <div style={{fontWeight:800,fontSize:17,color:T.text,marginBottom:4}}>{d.label}</div>
             <div style={{fontSize:13,color:T.muted,marginBottom:10}}>{d.desc}</div>
-            <div style={{padding:"7px 10px",background:T.subtle,borderRadius:5,fontFamily:"monospace",fontSize:11,color:T.muted}}>
-              AA-BB-CC-<span style={{color:d.color,fontWeight:800}}>{d.code}</span>-EE-0001
+            <div style={{padding:"7px 10px",background:T.subtle,borderRadius:5,fontFamily:"monospace",fontSize:11,color:T.muted}}> AA-BB-CC-<span style={{color:d.color,fontWeight:800}}>{d.code}</span>-EE-0001
             </div>
           </Card>
         ))}
@@ -3095,7 +3336,7 @@ function DisciplinesPage({ data }) {
           style={{border:`2px dashed ${T.border}`,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer",minHeight:140,color:T.muted,transition:"all .15s"}}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=T.accent;e.currentTarget.style.background="#f0f9ff";}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.background="transparent";}}>
-          <span style={{fontSize:28}}>＋</span><span style={{fontSize:13,fontWeight:700}}>Add Discipline</span>
+          <span style={{fontSize:28}}></span><span style={{fontSize:13,fontWeight:700}}>Add Discipline</span>
         </div>
       </div>
 
@@ -3109,7 +3350,7 @@ function DisciplinesPage({ data }) {
               <div style={{fontSize:12,color:T.muted}}>Exclusively for Engines (EN) — replaces ME/EL/AC for Caterpillar & Waukesha</div>
             </div>
           </div>
-          <Btn small onClick={()=>{setFormE(EMPTY_E);setEditE(null);setShowE(true);}}>＋ Add System</Btn>
+          <Btn small onClick={()=>{setFormE(EMPTY_E);setEditE(null);setShowE(true);}}>Add System</Btn>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10}}>
           {engineSystems.map(s=>(
@@ -3119,8 +3360,8 @@ function DisciplinesPage({ data }) {
                 <div style={{fontSize:13,fontWeight:600,color:s.color,marginTop:2}}>{s.label}</div>
               </div>
               <div style={{display:"flex",gap:4}}>
-                <Btn small variant="secondary" onClick={()=>{setFormE({...s});setEditE(s.code);setShowE(true);}}>✏️</Btn>
-                <Btn small variant="danger" onClick={()=>setDelE(s)}>🗑</Btn>
+                <Btn small variant="secondary" onClick={()=>{setFormE({...s});setEditE(s.code);setShowE(true);}}></Btn>
+                <Btn small variant="danger" onClick={()=>setDelE(s)}></Btn>
               </div>
             </div>
           ))}
@@ -3129,7 +3370,7 @@ function DisciplinesPage({ data }) {
             style={{border:`2px dashed #fbbf24`,borderRadius:7,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:70,color:"#b45309",transition:"all .15s",padding:10}}
             onMouseEnter={e=>{e.currentTarget.style.background="#fef3c7";}}
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <span style={{fontSize:22}}>＋</span><span style={{fontSize:12,fontWeight:700}}>Add Engine System</span>
+            <span style={{fontSize:22}}></span><span style={{fontSize:12,fontWeight:700}}>Add Engine System</span>
           </div>
         </div>
       </Card>
@@ -3178,7 +3419,7 @@ function DisciplinesPage({ data }) {
             </div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <Btn variant="secondary" onClick={()=>{setShowD(false);setFormD(EMPTY_D);}}>Cancel</Btn>
-              <Btn onClick={saveD}>{editD?"💾 Save Changes":"＋ Add Discipline"}</Btn>
+              <Btn onClick={saveD}>{editD?"Save Changes":"Add Discipline"}</Btn>
             </div>
           </div>
         </Modal>
@@ -3213,7 +3454,7 @@ function DisciplinesPage({ data }) {
             </div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <Btn variant="secondary" onClick={()=>{setShowE(false);setFormE(EMPTY_E);}}>Cancel</Btn>
-              <Btn onClick={saveE}>{editE?"💾 Save Changes":"＋ Add Engine System"}</Btn>
+              <Btn onClick={saveE}>{editE?"Save Changes":"Add Engine System"}</Btn>
             </div>
           </div>
         </Modal>
@@ -3234,7 +3475,7 @@ function DisciplinesPage({ data }) {
         </p>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="secondary" onClick={()=>setDelD(null)}>Cancel</Btn>
-          <Btn variant="danger" onClick={()=>deleteD(delD)}>{delDCount>0 ? `🗑 Delete + ${delDCount} Part(s)` : "🗑 Delete"}</Btn>
+          <Btn variant="danger" onClick={()=>deleteD(delD)}>{delDCount>0 ? `Delete + ${delDCount} Part(s)` : "Delete"}</Btn>
         </div>
       </Modal>)}
 
@@ -3253,7 +3494,7 @@ function DisciplinesPage({ data }) {
         </p>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="secondary" onClick={()=>setDelE(null)}>Cancel</Btn>
-          <Btn variant="danger" onClick={()=>deleteE(delE)}>{delECount>0 ? `🗑 Delete + ${delECount} Part(s)` : "🗑 Delete"}</Btn>
+          <Btn variant="danger" onClick={()=>deleteE(delE)}>{delECount>0 ? `Delete + ${delECount} Part(s)` : "Delete"}</Btn>
         </div>
       </Modal>)}
 
@@ -3336,9 +3577,9 @@ function FunctionalGroupsPage({ data }) {
 
       <Card style={{marginBottom:20}}>
         <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search functional groups…" style={{maxWidth:260,width:"auto"}}/>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search functional groups…" style={{maxWidth:260,width:"auto"}}/>
           <span style={{fontSize:13,color:T.muted}}>{filtered.length} of {funcGroups.length}</span>
-          <div style={{marginLeft:"auto"}}><Btn onClick={()=>openAdd()}>＋ Add Functional Group</Btn></div>
+          <div style={{marginLeft:"auto"}}><Btn onClick={()=>openAdd()}>Add Functional Group</Btn></div>
         </div>
       </Card>
 
@@ -3354,7 +3595,7 @@ function FunctionalGroupsPage({ data }) {
                 <span style={{fontWeight:800,fontSize:15,color:T.text}}>{disc.label}</span>
                 <span style={{fontSize:12,color:T.muted}}>({items.length} group{items.length!==1?"s":""})</span>
               </div>
-              <Btn small onClick={()=>openAdd(disc.code)}>＋ Add to {disc.label}</Btn>
+              <Btn small onClick={()=>openAdd(disc.code)}>Add to {disc.label}</Btn>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
               {items.map(fg=>{
@@ -3367,8 +3608,8 @@ function FunctionalGroupsPage({ data }) {
                     </div>
                     <div style={{fontWeight:600,fontSize:14,color:T.text,marginBottom:10}}>{fg.label}</div>
                     <div style={{display:"flex",gap:6}}>
-                      <Btn small variant="secondary" onClick={()=>openEdit(fg)} style={{flex:1}}>✏️ Edit</Btn>
-                      <Btn small variant="danger" onClick={()=>setDeleteTarget(fg)} style={{flex:1}}>🗑</Btn>
+                      <Btn small variant="secondary" onClick={()=>openEdit(fg)} style={{flex:1}}>Edit</Btn>
+                      <Btn small variant="danger" onClick={()=>setDeleteTarget(fg)} style={{flex:1}}></Btn>
                     </div>
                   </Card>
                 );
@@ -3378,7 +3619,7 @@ function FunctionalGroupsPage({ data }) {
                 style={{border:`2px dashed ${disc.color}44`,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",minHeight:100,color:disc.color,transition:"all .15s",padding:10}}
                 onMouseEnter={e=>{e.currentTarget.style.background=disc.bg+"66";}}
                 onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-                <span style={{fontSize:24}}>＋</span>
+                <span style={{fontSize:24}}></span>
                 <span style={{fontSize:12,fontWeight:700}}>Add {disc.code} Group</span>
               </div>
             </div>
@@ -3416,14 +3657,13 @@ function FunctionalGroupsPage({ data }) {
                   <span style={{fontWeight:700,color:T.text}}>{form.label||"Group Name"}</span>
                   <span style={{fontSize:11,color:T.muted}}>({d?.label})</span>
                 </div>
-                <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}>
-                  AA-BB-CC-{form.disc||"DD"}-<span style={{color:d?.color||T.muted,fontWeight:700}}>{form.code||"EE"}</span>-0001
+                <div style={{fontFamily:"monospace",fontSize:11,color:T.muted,marginTop:6}}> AA-BB-CC-{form.disc||"DD"}-<span style={{color:d?.color||T.muted,fontWeight:700}}>{form.code||"EE"}</span>-0001
                 </div>
               </div>
             );})()}
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <Btn variant="secondary" onClick={closeForm}>Cancel</Btn>
-              <Btn onClick={handleSave}>{editingCode?"💾 Save Changes":"＋ Add Group"}</Btn>
+              <Btn onClick={handleSave}>{editingCode?"Save Changes":"Add Group"}</Btn>
             </div>
           </div>
         </Modal>
@@ -3446,7 +3686,7 @@ function FunctionalGroupsPage({ data }) {
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
             <Btn variant="secondary" onClick={()=>setDeleteTarget(null)}>Cancel</Btn>
             <Btn variant="danger" onClick={()=>handleDelete(deleteTarget)} disabled={saving}>
-              {saving ? "Deleting…" : deleteCount>0 ? `🗑 Delete + ${deleteCount} Part(s)` : "🗑 Delete"}
+              {saving ? "Deleting…" : deleteCount>0 ? `Delete + ${deleteCount} Part(s)` : "Delete"}
             </Btn>
           </div>
         </Modal>
@@ -3571,8 +3811,21 @@ function CodeGeneratorPage({ data }) {
     setUnit("EA"); setLoc(""); setRemarks(""); setImageUrl(null); setSaved(false);
   };
 
-  const sStep  = { padding:"10px 16px", borderRadius:6, background:T.subtle, border:`1px solid ${T.border}`, marginBottom:12 };
-  const sLabel = { fontSize:11, fontWeight:700, color:T.muted, letterSpacing:1, textTransform:"uppercase", marginBottom:6, display:"block" };
+  const sStep  = { padding:"10px 16px", borderRadius:T.radiusLg, background:T.subtle, border:`1px solid ${T.border}`, marginBottom:12 };
+  const sLabel = { ...TYPE.label, fontSize:11, color:T.textSecondary, marginBottom:6, display:"block" };
+
+  // The whole step block used to be dimmed to opacity 0.4 while locked,
+  // which put the step titles at roughly 2:1 against white — below the
+  // 4.5:1 minimum, and it hid what the form was going to ask for next.
+  // Now the label stays fully legible and only the control reads as
+  // unavailable, with a line saying what unlocks it.
+  const sStepLocked = { ...sStep, background:T.card, borderStyle:"dashed" };
+  const stepBox  = enabled => (enabled ? sStep : sStepLocked);
+  const LockHint = ({ enabled, needs }) => enabled ? null : (
+    <span style={{ ...TYPE.helper, color:T.muted, display:"flex", alignItems:"center", gap:5, marginTop:6 }}>
+      <Icon name="lock" size={11} /> Choose a {needs} first
+    </span>
+  );
 
   return (
     <div>
@@ -3595,44 +3848,48 @@ function CodeGeneratorPage({ data }) {
           </div>
 
           {/* Step 2 */}
-          <div style={{...sStep,opacity:step.cat?1:0.4}}>
+          <div style={stepBox(!!step.cat)}>
             <span style={sLabel}>Step 2 — BB: Manufacturer</span>
             <Select value={step.mfr} onChange={e=>setStep(s=>({...s,mfr:e.target.value,model:"",disc:"",fg:""}))} disabled={!step.cat}>
               <option value="">Select Manufacturer…</option>
               {filteredMfrs.map(m=><option key={m.code} value={m.code}>{m.code} — {m.label}</option>)}
             </Select>
+            <LockHint enabled={!!step.cat} needs="main category" />
           </div>
 
           {/* Step 3 */}
-          <div style={{...sStep,opacity:step.mfr?1:0.4}}>
+          <div style={stepBox(!!step.mfr)}>
             <span style={sLabel}>Step 3 — CC: Equipment Model</span>
             <Select value={step.model} onChange={e=>setStep(s=>({...s,model:e.target.value,disc:"",fg:""}))} disabled={!step.mfr}>
               <option value="">Select Model…</option>
               {filteredModels.map(m=><option key={m.code} value={m.code}>{m.code} — {m.label}</option>)}
             </Select>
+            <LockHint enabled={!!step.mfr} needs="manufacturer" />
           </div>
 
           {/* Step 4 */}
-          <div style={{...sStep,opacity:step.model?1:0.4,borderColor:isEngine?"#fbbf24":T.border,background:isEngine?"#fffbeb":T.subtle}}>
+          <div style={{...stepBox(!!step.model),...(isEngine?{borderColor:T.warnBorder,background:T.warnBg}:{})}}>
             <span style={sLabel}>Step 4 — DD: {isEngine?"Engine System":"Discipline"}</span>
             {isEngine&&<div style={{fontSize:11,color:"#b45309",marginBottom:6,fontWeight:600}}>🔧 Engine-specific system sections</div>}
             <Select value={step.disc} onChange={e=>setStep(s=>({...s,disc:e.target.value,fg:""}))} disabled={!step.model}>
               <option value="">{isEngine?"Select Engine System…":"Select Discipline…"}</option>
               {activeSections.map(d=><option key={d.code} value={d.code}>{d.code} — {d.label}</option>)}
             </Select>
+            <LockHint enabled={!!step.model} needs="equipment model" />
           </div>
 
           {/* Step 5 */}
-          <div style={{...sStep,opacity:step.disc?1:0.4}}>
+          <div style={stepBox(!!step.disc)}>
             <span style={sLabel}>Step 5 — EE: Functional Group</span>
             <Select value={step.fg} onChange={e=>setStep(s=>({...s,fg:e.target.value}))} disabled={!step.disc}>
               <option value="">Select Functional Group…</option>
               {filteredFG.map(f=><option key={f.code} value={f.code}>{f.code} — {f.label}</option>)}
             </Select>
+            <LockHint enabled={!!step.disc} needs="discipline" />
           </div>
 
           {/* Step 6 — Sequence (auto + manual) */}
-          <div style={{...sStep,background:"#f0f9ff",borderColor:"#bae6fd",opacity:canGenerate?1:0.4}}>
+          <div style={{...stepBox(!!canGenerate),background:canGenerate?T.accentLight:T.card,borderColor:canGenerate?T.accent:T.border}}>
             <span style={sLabel}>Step 6 — NNNN: Sequence Number</span>
             <div style={{display:"flex",gap:8,marginBottom:8}}>
               <button onClick={()=>setSeqMode("auto")}
@@ -3661,8 +3918,7 @@ function CodeGeneratorPage({ data }) {
           {/* Part details (optional, before save) */}
           {canGenerate && (
             <div style={{marginTop:4}}>
-              <div style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10}}>
-                Part Details (Optional)
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10}}> Part Details (Optional)
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
                 <div><label style={sLabel}>Part No.</label><Input value={partNo} onChange={e=>setPartNo(e.target.value)} placeholder="e.g. AN-BRG-001"/></div>
@@ -3694,7 +3950,7 @@ function CodeGeneratorPage({ data }) {
                   </span>
                 </div>
                 {seqLoading
-                  ? <div style={{textAlign:"center",color:T.muted,fontSize:12,marginBottom:10}}>⏳ Checking sequence…</div>
+                  ? <div style={{textAlign:"center",color:T.muted,fontSize:12,marginBottom:10}}>Checking sequence…</div>
                   : seqError
                     ? <div style={{textAlign:"center",color:T.danger,fontSize:12,marginBottom:10}}>
                         ⚠️ Could not check the next sequence number: {seqError}. Save is disabled — reload and try again, or set the number manually.
@@ -3706,10 +3962,10 @@ function CodeGeneratorPage({ data }) {
                 {saved
                   ? <div style={{display:"flex",gap:8}}>
                       <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>✅ Saved!</div>
-                      <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>＋ New Code</Btn>
+                      <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>New Code</Btn>
                     </div>
                   : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists||seqLoading||!!seqError}>
-                      {saving?"Saving…":"💾 Save to Master Table"}
+                      {saving?"Saving…":"Save to Master Table"}
                     </Btn>
                 }
               </>
@@ -3986,11 +4242,17 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:12 }}>
             {mode==='view' && <>
-              <Btn small variant="success" onClick={()=>setShowRecordModal(true)}>📦 Record Movement</Btn>
-              <Btn small onClick={()=>setMode('edit')}>✏️ Edit</Btn>
-              <Btn small variant="danger" onClick={()=>setMode('confirm-delete')}>🗑 Delete</Btn>
+              <Btn small onClick={()=>setShowRecordModal(true)}>Record Movement</Btn>
+              <Btn small variant="secondary" onClick={()=>setMode('edit')}>Edit</Btn>
+              <OverflowMenu items={[
+                { label:"Delete part", icon:"trash", danger:true, onClick:()=>setMode('confirm-delete') },
+              ]}/>
+              <span aria-hidden="true" style={{ width:1,height:20,background:T.border,margin:"0 2px" }}/>
             </>}
-            <button onClick={onClose} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.muted,padding:4 }}>✕</button>
+            <button onClick={onClose} aria-label="Close"
+              style={{ background:"none",border:"none",cursor:"pointer",color:T.muted,padding:6,display:"flex",alignItems:"center" }}>
+              <Icon name="close" size={16} />
+            </button>
           </div>
         </div>
 
@@ -4005,7 +4267,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
             <p style={{ fontSize:13,color:T.muted,marginBottom:20 }}>This will soft-delete the record. It will no longer appear in any page but is recoverable from the database.</p>
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={()=>setMode('view')}>Cancel</Btn>
-              <Btn variant="danger" onClick={handleDelete} disabled={saving}>{saving?"Deleting…":"🗑 Confirm Delete"}</Btn>
+              <Btn variant="danger" onClick={handleDelete} disabled={saving}>{saving?"Deleting…":"Confirm Delete"}</Btn>
             </div>
           </div>
         )}
@@ -4014,7 +4276,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         {mode==='view' && (
           <div style={{ padding:"20px 24px" }}>
             {loadingFull && (
-              <div style={{ textAlign:"center", padding:"10px 0", color:T.muted, fontSize:12 }}>⏳ Loading full part details…</div>
+              <div style={{ textAlign:"center", padding:"10px 0", color:T.muted, fontSize:12 }}>Loading full part details…</div>
             )}
             {/* Image */}
             <div style={{ marginBottom:20,textAlign:"center" }}>
@@ -4236,7 +4498,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
 
               <div style={{ display:"flex",gap:10,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${T.border}` }}>
                 <Btn variant="secondary" onClick={()=>setMode('view')}>Cancel</Btn>
-                <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"💾 Save Changes"}</Btn>
+                <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"Save Changes"}</Btn>
               </div>
             </div>
           </div>
@@ -4284,7 +4546,7 @@ function TreeLeafParts({ branch, total, dbReady, localParts, onSelect }) {
 
   const rowStyle = { marginLeft:90,padding:"5px 10px",borderRadius:5,marginBottom:3,background:"#f8fafc",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:`1px solid transparent`,transition:"all .15s" };
 
-  if (loading && !rows) return <div style={{ marginLeft:90, fontSize:11, color:T.muted, padding:"4px 0" }}>⏳ Loading parts…</div>;
+  if (loading && !rows) return <div style={{ marginLeft:90, fontSize:11, color:T.muted, padding:"4px 0" }}>Loading parts…</div>;
   if (error)  return <div style={{ marginLeft:90, fontSize:11, color:T.danger, padding:"4px 0" }}>Could not load these parts: {error}</div>;
   if (!rows || rows.length === 0) return <div style={{ marginLeft:90, fontSize:11, color:T.muted, padding:"4px 0", fontStyle:"italic" }}>No parts coded yet</div>;
 
@@ -4477,7 +4739,7 @@ function HierarchyTreePage({ data }) {
 
       {loadingTree && (
         <Card style={{ marginBottom:16, textAlign:"center", padding:24 }}>
-          <div style={{ color:T.muted, fontSize:13 }}>⏳ Loading hierarchy…</div>
+          <div style={{ color:T.muted, fontSize:13 }}>Loading hierarchy…</div>
         </Card>
       )}
       {loadError && (
@@ -4649,11 +4911,11 @@ function MasterTablePage({ data }) {
   const filteredMfrs  = manufacturers.filter(m => !fCat  || (m.catCodes||[]).includes(fCat));
   const filteredModels= models.filter(m => !fMfr || m.mfrCode === fMfr);
 
-  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const selStyle = { padding:"0 10px", height:32, borderRadius:T.radius, border:`1px solid ${T.borderStrong}`, fontSize:13, color:T.text, background:T.card, fontFamily:"inherit" };
 
   return (
     <div>
-      <PageHeader title="Master Spare Parts Table" sub={`${total.toLocaleString()} total coded parts`} />
+      <PageHeader title="Master Parts Table" sub={`${total.toLocaleString()} coded parts`} />
 
       {/* Filters */}
       <Card style={{ marginBottom:16 }}>
@@ -4661,7 +4923,7 @@ function MasterTablePage({ data }) {
           <input
             value={searchInput}
             onChange={e=>setSearchInput(e.target.value)}
-            placeholder="🔍 Code, description, part no…"
+            placeholder="Code, description, part no…"
             style={{ ...selStyle, minWidth:220, flex:"1 1 200px" }}
           />
           <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
@@ -4703,8 +4965,8 @@ function MasterTablePage({ data }) {
             </button>
           )}
           <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
-            <Btn small variant="secondary" onClick={exportCsv} disabled={exporting}>{exporting?"Exporting…":"📥 Export CSV"}</Btn>
-            <Btn small variant="secondary" onClick={()=>setImportOpen(true)}>📤 Import CSV</Btn>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={exporting}>{exporting?"Exporting…":"Export CSV"}</Btn>
+            <Btn small variant="secondary" onClick={()=>setImportOpen(true)}>Import CSV</Btn>
           </div>
         </div>
       </Card>
@@ -4726,18 +4988,19 @@ function MasterTablePage({ data }) {
         </div>
       </div>
 
-      <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>👆 Click any row to view, edit or delete the part</div>
-
       <Card>
         <div style={TABLE_SCROLL}>
           {loading
-            ? <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
+            ? <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading parts…</div>
             : (
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12.5 }}>
               <thead>
-                <tr style={{ background:T.header }}>
-                  {["","Code","Short Description","Cat","Mfr","Model","System","Func","Part No","Qty/Assy","On Hand","Loc","Status","Actions"].map(h=>(
-                    <th key={h} style={{ padding:"7px 9px", textAlign:"left", fontWeight:700, color:"#94a3b8", textTransform:"uppercase", fontSize:11, letterSpacing:0.4, whiteSpace:"nowrap" }}>{h}</th>
+                {/* Was an inverted navy bar that competed with the dark
+                    code pills beneath it. A light band with a strong
+                    bottom rule reads as a header without shouting. */}
+                <tr style={{ background:T.subtle }}>
+                  {[["",""],["Code",""],["Short Description",""],["Cat",""],["Mfr",""],["Model",""],["System",""],["Func",""],["Part No",""],["Qty/Assy","right"],["On Hand","right"],["Loc",""],["Status",""],["Actions",""]].map(([h,align])=>(
+                    <th key={h||'img'} style={{ padding:"9px 12px", textAlign:align||"left", ...TYPE.th, color:T.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${T.borderStrong}`, position:"sticky", top:0, background:T.subtle, zIndex:1 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -4752,28 +5015,43 @@ function MasterTablePage({ data }) {
                     return (
                       <tr key={r.code}
                         onClick={()=>setSelectedPart(r)}
-                        style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:"pointer" }}
-                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                        onMouseLeave={e=>e.currentTarget.style.background=i%2?T.subtle:T.card}>
-                        <td style={{ padding:"7px 9px", textAlign:"center" }}>
-                          {r.imageUrl ? <span title="Has image">📷</span> : <span style={{ color:"#d1d5db",fontSize:10 }}>—</span>}
+                        onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); setSelectedPart(r); } }}
+                        tabIndex={0}
+                        title={`Open ${r.code}`}
+                        // Zebra striping plus six coloured chips was two
+                        // competing systems. Striping is gone; a single
+                        // clear hover marks the row instead — which is
+                        // also what removes the need for the "click any
+                        // row" instruction that used to sit above.
+                        style={{ borderBottom:`1px solid ${T.border}`, background:T.card, cursor:"pointer", transition:"background .12s" }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#f5f8fb"}
+                        onMouseLeave={e=>e.currentTarget.style.background=T.card}>
+                        <td style={{ padding:"0 12px", height:40, textAlign:"center", color:T.muted }}>
+                          {r.imageUrl ? <Icon name="camera" size={13} title="Has image" style={{ margin:"0 auto" }}/> : <span style={{ color:T.border }}>—</span>}
                         </td>
-                        <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
-                        <td style={{ padding:"7px 9px", fontWeight:600, color:T.text, width:"100%", minWidth:150, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.shortDesc}</td>
-                        <td style={{ padding:"7px 9px" }}><Pill color={cat?.color} bg={cat?.bg}>{r.cat}</Pill></td>
-                        <td style={{ padding:"7px 9px" }}><Pill color="#b45309" bg="#fef3c7">{r.mfr}</Pill></td>
-                        <td style={{ padding:"7px 9px", fontSize:12, color:T.muted, maxWidth:110, lineHeight:1.35 }}>{mdl?.label||r.model}</td>
-                        <td style={{ padding:"7px 9px" }}><Pill color={dc.c||sec?.color} bg={dc.b||sec?.bg}>{r.disc}</Pill></td>
-                        <td style={{ padding:"7px 9px" }}><Pill color="#6d28d9" bg="#f5f3ff" size={11}>{r.fg}</Pill></td>
-                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted }}>{r.partNo||"—"}</td>
-                        <td style={{ padding:"7px 9px", textAlign:"center", color:T.muted, fontVariantNumeric:"tabular-nums" }} title="Quantity used per assembly — catalogue reference, not stock">{r.qtyPerAssembly}</td>
-                        <td style={{ padding:"7px 9px", textAlign:"center" }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
-                        <td style={{ padding:"7px 9px", fontFamily:"monospace", fontSize:12, color:T.muted, whiteSpace:"nowrap" }}>{r.loc||"—"}</td>
-                        <td style={{ padding:"7px 9px" }}>
-                          <Pill color={r.status==="Active"?T.success:T.danger} bg={r.status==="Active"?T.successBg:T.dangerBg} mono={false} size={11}>{r.status}</Pill>
+                        <td style={{ padding:"0 12px", height:40 }}><CodeTag code={r.code}/></td>
+                        <td style={{ padding:"0 12px", height:40, fontWeight:500, color:T.text, width:"100%", minWidth:150, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.shortDesc}</td>
+                        <td style={{ padding:"0 12px", height:40 }}><Tag title={cat?.label}>{r.cat}</Tag></td>
+                        <td style={{ padding:"0 12px", height:40 }}><Tag>{r.mfr}</Tag></td>
+                        <td style={{ padding:"0 12px", height:40, color:T.textSecondary, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={mdl?.label||r.model}>{mdl?.label||r.model}</td>
+                        <td style={{ padding:"0 12px", height:40 }}><Tag title={sec?.label}>{r.disc}</Tag></td>
+                        <td style={{ padding:"0 12px", height:40 }}><Tag>{r.fg}</Tag></td>
+                        <td style={{ padding:"0 12px", height:40, fontFamily:T.mono, fontSize:11.5, color:T.muted, whiteSpace:"nowrap" }}>{r.partNo||"—"}</td>
+                        <td style={{ padding:"0 12px", height:40, textAlign:"right", fontFamily:T.mono, color:T.muted, fontVariantNumeric:"tabular-nums" }} title="Quantity used per assembly — catalogue reference, not stock">{r.qtyPerAssembly}</td>
+                        {/* The number this table exists to answer. Was
+                            muted grey and left-aligned, quieter than a
+                            two-letter category code. */}
+                        <td style={{ padding:"0 12px", height:40, textAlign:"right", whiteSpace:"nowrap" }}><StockQtyDisplay qty={r.qtyOnHand} unit={r.unit} stockSource={r.stockSource} small/></td>
+                        <td style={{ padding:"0 12px", height:40, fontFamily:T.mono, fontSize:11.5, color:T.muted, whiteSpace:"nowrap" }}>{r.loc||"—"}</td>
+                        <td style={{ padding:"0 12px", height:40 }}>
+                          {/* "Active" is the norm, not an exception —
+                              21 green badges down a column is the same
+                              decoration problem in a new colour. Only
+                              the exception gets colour. */}
+                          <StatusTag tone={r.status==="Active"?"neutral":"warn"}>{r.status}</StatusTag>
                         </td>
-                        <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }} onClick={e=>e.stopPropagation()}>
-                          <Btn small variant="success" onClick={()=>setMoveTarget(r)}>📦 Move</Btn>
+                        <td style={{ padding:"0 12px", height:40, whiteSpace:"nowrap" }} onClick={e=>e.stopPropagation()}>
+                          <Btn small variant="secondary" onClick={()=>setMoveTarget(r)}>Move</Btn>
                         </td>
                       </tr>
                     );
@@ -4856,11 +5134,11 @@ function MasterTablePage({ data }) {
 // ─── ADMINISTRATION HUB ───────────────────────────────────────
 function AdminPage({ data }) {
   const modules = [
-    { id:"categories",    icon:"📦", title:"Main Categories",   desc:"Manage AA segment — equipment top-level classes", color:"#1d4ed8" },
+    { id:"categories",    icon:"", title:"Main Categories",   desc:"Manage AA segment — equipment top-level classes", color:"#1d4ed8" },
     { id:"manufacturers", icon:"🏭", title:"Manufacturers",     desc:"Manage BB segment — equipment makers", color:"#b45309" },
     { id:"models",        icon:"📐", title:"Equipment Models",   desc:"Manage CC segment — machine model codes", color:"#047857" },
     { id:"disciplines",   icon:"🔬", title:"Disciplines",        desc:"View DD segment — ME / EL / AC", color:"#7c3aed" },
-    { id:"funcgroups",    icon:"⚙️", title:"Functional Groups", desc:"Manage EE segment — component function codes", color:"#be123c" },
+    { id:"funcgroups",    icon:"", title:"Functional Groups", desc:"Manage EE segment — component function codes", color:"#be123c" },
   ];
 
   return (
@@ -5114,7 +5392,7 @@ function StockCountPage({ data }) {
           </Select>
           <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
             <Btn small variant="secondary" onClick={printCountSheet}>🖨️ Print Count Sheet</Btn>
-            <Btn small onClick={()=>setShowImport(true)}>📥 Bulk CSV Import</Btn>
+            <Btn small onClick={()=>setShowImport(true)}>Bulk CSV Import</Btn>
           </div>
         </div>
       </Card>
@@ -5123,7 +5401,7 @@ function StockCountPage({ data }) {
         {!dbReady ? (
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
         ) : loading ? (
-          <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading parts…</div>
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading parts…</div>
         ) : (
           <>
           <div style={TABLE_SCROLL}>
@@ -5149,7 +5427,7 @@ function StockCountPage({ data }) {
                       </td>
                       <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>
                         <Btn small disabled={savingId===p.id} onClick={()=>handleConfirm(p, counted[p.id] ?? "")} style={{ marginRight:6 }}>
-                          {savingId===p.id ? "…" : "✓ Confirm"}
+                          {savingId===p.id ? "…" : "Confirm"}
                         </Btn>
                         <Btn small variant="secondary" disabled={savingId===p.id} onClick={()=>handleConfirm(p, p.qtyOnHand)}>As-is</Btn>
                       </td>
@@ -5230,8 +5508,7 @@ function BulkCountImportModal({ onClose, onDone, flash }) {
   return (
     <Modal title="Bulk CSV Import — Physical Counts" onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
-        <div style={{ fontSize:12, color:T.muted }}>
-          Expects columns <code>part_code,counted_quantity,location</code> (header row optional; location optional).
+        <div style={{ fontSize:12, color:T.muted }}> Expects columns <code>part_code,counted_quantity,location</code> (header row optional; location optional).
         </div>
         <div>
           <label style={sLabel}>CSV File</label>
@@ -5250,8 +5527,7 @@ function BulkCountImportModal({ onClose, onDone, flash }) {
             </div>
 
             {unmatched.length > 0 && (
-              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}>
-                Unmatched codes: {unmatched.join(', ')}
+              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}> Unmatched codes: {unmatched.join(', ')}
               </div>
             )}
 
@@ -5289,7 +5565,7 @@ function BulkCountImportModal({ onClose, onDone, flash }) {
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
           <Btn onClick={handleCommit} disabled={committing || matched.length===0}>
-            {committing ? "Importing…" : `💾 Commit ${matched.length} Count(s)`}
+            {committing ? "Importing…" : `Commit ${matched.length} Count(s)`}
           </Btn>
         </div>
       </div>
@@ -5394,7 +5670,7 @@ function StockMovementsPage({ data }) {
   useEffect(() => { load(); }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const selStyle = { padding:"0 10px", height:32, borderRadius:T.radius, border:`1px solid ${T.borderStrong}`, fontSize:13, color:T.text, background:T.card, fontFamily:"inherit" };
 
   const handleVoid = async () => {
     if (!voidTarget) return;
@@ -5490,8 +5766,8 @@ function StockMovementsPage({ data }) {
       <Toast msg={toast}/>
       <PageHeader title="Stock Movements" sub="Every posted transaction against the real stock ledger, newest first"/>
       <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:16, gap:8 }}>
-        <Btn variant="secondary" onClick={exportCsv}>⬇ Export CSV</Btn>
-        <Btn onClick={()=>setShowRecord(true)}>📦 Record Movement</Btn>
+        <Btn variant="secondary" onClick={exportCsv}>Export CSV</Btn>
+        <Btn onClick={()=>setShowRecord(true)}>Record Movement</Btn>
       </div>
 
       {/* Summary tiles */}
@@ -5505,7 +5781,7 @@ function StockMovementsPage({ data }) {
       {/* Filters */}
       <Card style={{ marginBottom:16 }}>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Part code or reference…" style={{ ...selStyle, minWidth:200, flex:"1 1 180px" }}/>
+          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Part code or reference…" style={{ ...selStyle, minWidth:200, flex:"1 1 180px" }}/>
           <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={selStyle}/>
           <span style={{ fontSize:12, color:T.muted }}>to</span>
           <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={selStyle}/>
@@ -5539,7 +5815,7 @@ function StockMovementsPage({ data }) {
         {!dbReady ? (
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
         ) : loading ? (
-          <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading transactions…</div>
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading transactions…</div>
         ) : (
           <>
             <div style={TABLE_SCROLL}>
@@ -5579,15 +5855,13 @@ function StockMovementsPage({ data }) {
       {voidTarget && (
         <Modal title="Void Transaction" onClose={()=>{ if(!voiding){ setVoidTarget(null); setVoidReason(''); setVoidQty(''); } }}>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ background:T.dangerBg, borderRadius:6, padding:"10px 14px", fontSize:13, color:T.danger }}>
-              Voiding <strong>{TXN_LABELS[voidTarget.txn_type]}</strong> of <strong>{voidTarget.quantity}</strong> for <CodeTag code={voidTarget.part_code}/> posts a reversing entry — history is never edited.
+            <div style={{ background:T.dangerBg, borderRadius:6, padding:"10px 14px", fontSize:13, color:T.danger }}> Voiding <strong>{TXN_LABELS[voidTarget.txn_type]}</strong> of <strong>{voidTarget.quantity}</strong> for <CodeTag code={voidTarget.part_code}/> posts a reversing entry — history is never edited.
             </div>
             <div>
               <label style={{ fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,display:"block",marginBottom:5 }}>Quantity to reverse</label>
               <Input type="number" min="0" step="any" max={voidTarget.quantity} value={voidQty}
                 onChange={e=>setVoidQty(e.target.value)} placeholder={`All ${voidTarget.quantity} (leave blank)`}/>
-              <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>
-                Leave blank to reverse everything still outstanding and mark this entry void. A smaller number reverses only that many units and keeps the entry live so the rest can be reversed later.
+              <div style={{ fontSize:11, color:T.muted, marginTop:4 }}> Leave blank to reverse everything still outstanding and mark this entry void. A smaller number reverses only that many units and keeps the entry live so the rest can be reversed later.
               </div>
             </div>
             <div>
@@ -5739,7 +6013,7 @@ function ReorderSettingsPage({ data }) {
     URL.revokeObjectURL(url);
   };
 
-  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const selStyle = { padding:"0 10px", height:32, borderRadius:T.radius, border:`1px solid ${T.borderStrong}`, fontSize:13, color:T.text, background:T.card, fontFamily:"inherit" };
   const cellInputStyle = { width:72, padding:"5px 7px", borderRadius:4, border:`1px solid ${T.border}`, fontSize:12, fontFamily:"inherit", fontVariantNumeric:"tabular-nums" };
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -5755,14 +6029,14 @@ function ReorderSettingsPage({ data }) {
       )}
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:16 }}>
-        <StatCard label="Parts Never Configured" value={unsetCount===null?"…":unsetCount.toLocaleString()} color={T.muted} icon="⚙️"/>
+        <StatCard label="Parts Never Configured" value={unsetCount===null?"…":unsetCount.toLocaleString()} color={T.muted} icon=""/>
         <StatCard label="Matching Current Filter" value={total.toLocaleString()} color={T.accent} icon="🔎"/>
-        <StatCard label="Pending Edits" value={editedCount} color={editedCount?T.warn:T.muted} icon="✏️"/>
+        <StatCard label="Pending Edits" value={editedCount} color={editedCount?T.warn:T.muted} icon=""/>
       </div>
 
       <Card style={{ marginBottom:16 }}>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Part code…" style={{ ...selStyle, minWidth:180, flex:"1 1 160px" }}/>
+          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Part code…" style={{ ...selStyle, minWidth:180, flex:"1 1 160px" }}/>
           <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
             <option value="">All Categories</option>
             {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
@@ -5784,8 +6058,8 @@ function ReorderSettingsPage({ data }) {
             {db.STOCK_STATUSES.map(s=><option key={s} value={s}>{STOCK_STATUS_META[s].label}</option>)}
           </select>
           <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
-            <Btn small variant="secondary" onClick={exportCsv}>⬇ Export CSV</Btn>
-            {canEdit && <Btn small variant="secondary" onClick={()=>setShowImport(true)}>📥 Import CSV</Btn>}
+            <Btn small variant="secondary" onClick={exportCsv}>Export CSV</Btn>
+            {canEdit && <Btn small variant="secondary" onClick={()=>setShowImport(true)}>Import CSV</Btn>}
             {canEdit && <Btn small onClick={()=>setShowBulk(true)}>⚡ Set for Filtered Selection</Btn>}
           </div>
         </div>
@@ -5795,7 +6069,7 @@ function ReorderSettingsPage({ data }) {
         {!dbReady ? (
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
         ) : loading ? (
-          <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading…</div>
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading…</div>
         ) : (
           <>
           <div style={TABLE_SCROLL}>
@@ -5859,7 +6133,7 @@ function ReorderSettingsPage({ data }) {
           <Card style={{ display:"flex", alignItems:"center", gap:12, boxShadow:"0 8px 24px rgba(0,0,0,0.15)" }} pad={12}>
             <span style={{ fontSize:13, color:T.text, fontWeight:600 }}>{editedCount} unsaved change{editedCount===1?'':'s'}</span>
             <Btn small variant="secondary" onClick={()=>setEdits({})} disabled={saving}>Discard</Btn>
-            <Btn small onClick={handleSaveAll} disabled={saving}>{saving?"Saving…":"💾 Save Changes"}</Btn>
+            <Btn small onClick={handleSaveAll} disabled={saving}>{saving?"Saving…":"Save Changes"}</Btn>
           </Card>
         </div>
       )}
@@ -5914,8 +6188,7 @@ function BulkReorderModal({ filters, matchCount, onClose, onApplied }) {
     <Modal title="Set for Filtered Selection" onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
-        <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:6, padding:"10px 14px", fontSize:13, color:"#92400e", fontWeight:600 }}>
-          This applies to every part matching your current filters — <strong>{matchCount.toLocaleString()} part(s)</strong>. Leave a field blank to leave it unchanged.
+        <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:6, padding:"10px 14px", fontSize:13, color:"#92400e", fontWeight:600 }}> This applies to every part matching your current filters — <strong>{matchCount.toLocaleString()} part(s)</strong>. Leave a field blank to leave it unchanged.
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
           <div><label style={sLabel}>Min Stock</label><Input type="number" value={minStock} onChange={e=>setMinStock(e.target.value)} placeholder="unchanged"/></div>
@@ -6001,8 +6274,7 @@ function ReorderImportModal({ onClose, onDone, flash }) {
   return (
     <Modal title="Import Reorder Settings (CSV)" onClose={onClose} maxWidth={640}>
       <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
-        <div style={{ fontSize:12, color:T.muted }}>
-          Columns (header row required, any order): <code>part_code, min_stock, reorder_point, max_stock, lead_time_days, is_critical, preferred_supplier</code>. Only columns present are applied.
+        <div style={{ fontSize:12, color:T.muted }}> Columns (header row required, any order): <code>part_code, min_stock, reorder_point, max_stock, lead_time_days, is_critical, preferred_supplier</code>. Only columns present are applied.
         </div>
         <div>
           <label style={sLabel}>CSV File</label>
@@ -6017,8 +6289,7 @@ function ReorderImportModal({ onClose, onDone, flash }) {
               <span style={{ color:T.danger, fontWeight:700 }}>{unmatched.length} unmatched</span>
             </div>
             {unmatched.length > 0 && (
-              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}>
-                Unmatched codes: {unmatched.join(', ')}
+              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}> Unmatched codes: {unmatched.join(', ')}
               </div>
             )}
           </>
@@ -6026,7 +6297,7 @@ function ReorderImportModal({ onClose, onDone, flash }) {
         {progress && <div style={{ fontSize:12, color:T.muted }}>Importing… {progress.done} / {progress.total}</div>}
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>{committing?"Importing…":`💾 Commit ${matched.length} Update(s)`}</Btn>
+          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>{committing?"Importing…":`Commit ${matched.length} Update(s)`}</Btn>
         </div>
       </div>
     </Modal>
@@ -6099,8 +6370,7 @@ function MasterImportModal({ onClose, onDone, flash }) {
   return (
     <Modal title="Import Master Parts (CSV)" onClose={onClose} maxWidth={640}>
       <div style={{ display:"flex", flexDirection:"column", gap:14, maxHeight:"70vh", overflowY:"auto" }}>
-        <div style={{ fontSize:12, color:T.muted }}>
-          Update-only by <code>code</code> — matches existing parts, never creates new ones. Columns (header row required, any order): <code>code, short_description, long_description, part_no, oem_part, unit, location, status, remarks</code>. Category, manufacturer, model, discipline and functional group cannot be changed via import — edit those from the part's detail view.
+        <div style={{ fontSize:12, color:T.muted }}> Update-only by <code>code</code> — matches existing parts, never creates new ones. Columns (header row required, any order): <code>code, short_description, long_description, part_no, oem_part, unit, location, status, remarks</code>. Category, manufacturer, model, discipline and functional group cannot be changed via import — edit those from the part's detail view.
         </div>
         <div>
           <label style={sLabel}>CSV File</label>
@@ -6115,8 +6385,7 @@ function MasterImportModal({ onClose, onDone, flash }) {
               <span style={{ color:T.danger, fontWeight:700 }}>{unmatched.length} unmatched</span>
             </div>
             {unmatched.length > 0 && (
-              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}>
-                Unmatched codes: {unmatched.join(', ')}
+              <div style={{ background:T.dangerBg, borderRadius:6, padding:"8px 12px", fontSize:12, color:T.danger }}> Unmatched codes: {unmatched.join(', ')}
               </div>
             )}
           </>
@@ -6124,7 +6393,7 @@ function MasterImportModal({ onClose, onDone, flash }) {
         {progress && <div style={{ fontSize:12, color:T.muted }}>Importing… {progress.done} / {progress.total}</div>}
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>{committing?"Importing…":`💾 Commit ${matched.length} Update(s)`}</Btn>
+          <Btn onClick={handleCommit} disabled={committing || matched.length===0}>{committing?"Importing…":`Commit ${matched.length} Update(s)`}</Btn>
         </div>
       </div>
     </Modal>
@@ -6208,9 +6477,8 @@ function NotificationSettingsCard() {
   if (IS_IOS_SAFARI && !IS_STANDALONE) {
     return (
       <Card style={{ marginBottom:16 }}>
-        <SectionHeader>🔔 Enable Browser Notifications</SectionHeader>
-        <div style={{ fontSize:13, color:T.muted }}>
-          On iPhone/iPad, Web Push only works after adding this app to your Home Screen (Share → Add to Home Screen), then opening it from there.
+        <SectionHeader>Enable Browser Notifications</SectionHeader>
+        <div style={{ fontSize:13, color:T.muted }}> On iPhone/iPad, Web Push only works after adding this app to your Home Screen (Share → Add to Home Screen), then opening it from there.
         </div>
       </Card>
     );
@@ -6219,7 +6487,7 @@ function NotificationSettingsCard() {
   if (!PUSH_SUPPORTED) {
     return (
       <Card style={{ marginBottom:16 }}>
-        <SectionHeader>🔔 Enable Browser Notifications</SectionHeader>
+        <SectionHeader>Enable Browser Notifications</SectionHeader>
         <div style={{ fontSize:13, color:T.muted }}>Not supported in this browser.</div>
       </Card>
     );
@@ -6227,10 +6495,9 @@ function NotificationSettingsCard() {
 
   return (
     <Card style={{ marginBottom:16 }}>
-      <SectionHeader>🔔 Enable Browser Notifications</SectionHeader>
+      <SectionHeader>Enable Browser Notifications</SectionHeader>
       {permission === 'denied' ? (
-        <div style={{ fontSize:13, color:T.danger }}>
-          Notifications are blocked for this site. Re-enable them from your browser's site settings, then reload this page.
+        <div style={{ fontSize:13, color:T.danger }}> Notifications are blocked for this site. Re-enable them from your browser's site settings, then reload this page.
         </div>
       ) : subscribed ? (
         <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
@@ -6374,7 +6641,7 @@ function StockAlertsPage({ data }) {
   };
 
   const totalPages = Math.ceil(total / ALERTS_PAGE_SIZE);
-  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const selStyle = { padding:"0 10px", height:32, borderRadius:T.radius, border:`1px solid ${T.borderStrong}`, fontSize:13, color:T.text, background:T.card, fontFamily:"inherit" };
   const allSelected = rows.length > 0 && rows.every(r => selected[r.part_id]);
 
   return (
@@ -6387,11 +6654,12 @@ function StockAlertsPage({ data }) {
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
           {Object.entries(ALERT_SEVERITY_META).map(([key, meta]) => (
             <button key={key} onClick={()=>toggleSeverity(key)}
-              style={{ padding:"6px 12px", borderRadius:16, border:`1.5px solid ${meta.color}`, background: severity.includes(key)?meta.color:'#fff', color: severity.includes(key)?'#fff':meta.color, fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
-              {meta.dot} {meta.label}
+              aria-pressed={severity.includes(key)}
+              style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"0 12px", height:32, borderRadius:T.radius, border:`1px solid ${severity.includes(key)?meta.color:T.borderStrong}`, background: severity.includes(key)?meta.color:T.card, color: severity.includes(key)?'#fff':T.text, ...TYPE.button, cursor:"pointer", fontFamily:"inherit" }}>
+              <SeverityDot color={severity.includes(key)?'#fff':meta.color} /> {meta.label}
             </button>
           ))}
-          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Code or description…" style={{ ...selStyle, minWidth:200, flex:"1 1 180px" }}/>
+          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Code or description…" style={{ ...selStyle, minWidth:200, flex:"1 1 180px" }}/>
           <select value={fCat} onChange={e=>setFCat(e.target.value)} style={selStyle}>
             <option value="">All Categories</option>
             {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
@@ -6408,7 +6676,7 @@ function StockAlertsPage({ data }) {
             <input type="checkbox" checked={hideAck} onChange={e=>setHideAck(e.target.checked)}/> Hide acknowledged
           </label>
           <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
-            <Btn small variant="secondary" onClick={exportAlertsCsv} disabled={exporting}>{exporting?"Exporting…":"📥 Export CSV"}</Btn>
+            <Btn small variant="secondary" onClick={exportAlertsCsv} disabled={exporting}>{exporting?"Exporting…":"Export CSV"}</Btn>
             <Btn small variant="secondary" onClick={exportReorderListCsv} disabled={exporting}>🛒 Export Reorder List</Btn>
           </div>
         </div>
@@ -6417,14 +6685,14 @@ function StockAlertsPage({ data }) {
       {Object.keys(selected).some(k=>selected[k]) && (
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
           <span style={{ fontSize:12, color:T.muted }}>{Object.values(selected).filter(Boolean).length} selected</span>
-          <Btn small onClick={doBulkAcknowledge}>✓ Acknowledge Selected</Btn>
+          <Btn small onClick={doBulkAcknowledge}>Acknowledge Selected</Btn>
         </div>
       )}
 
       <Card>
         <div style={TABLE_SCROLL}>
           {loading ? (
-            <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading alerts…</div>
+            <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading alerts…</div>
           ) : rows.length === 0 ? (
             <div style={{ textAlign:"center", padding:40, color:T.muted }}>No active alerts — all stock levels are healthy ✅</div>
           ) : (
@@ -6446,13 +6714,13 @@ function StockAlertsPage({ data }) {
               </thead>
               <tbody>
                 {rows.map((r,i) => {
-                  const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, label:r.stock_status, dot:'⚪' };
+                  const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, label:r.stock_status, tone:'neutral' };
                   return (
                     <tr key={r.part_id} style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, opacity:r.is_acknowledged?0.55:1 }}>
                       <td style={{ padding:"7px 9px" }}>
                         <input type="checkbox" checked={!!selected[r.part_id]} onChange={e=>setSelected(s=>({...s,[r.part_id]:e.target.checked}))}/>
                       </td>
-                      <td style={{ padding:"7px 9px" }}><Pill color={meta.color} bg="#fff" mono={false} size={11}>{meta.dot} {meta.label}</Pill></td>
+                      <td style={{ padding:"7px 9px" }}><StatusTag tone={meta.tone||'neutral'}>{meta.label}</StatusTag></td>
                       <td style={{ padding:"7px 9px" }}><CodeTag code={r.code}/></td>
                       <td style={{ padding:"7px 9px", width:"100%", minWidth:150, whiteSpace:"normal", wordBreak:"break-word", lineHeight:1.35 }}>{r.short_desc}</td>
                       <td style={{ padding:"7px 9px" }}><Pill size={11}>{r.cat}</Pill></td>
@@ -6466,7 +6734,7 @@ function StockAlertsPage({ data }) {
                       <td style={{ padding:"7px 9px", whiteSpace:"nowrap", ...stickyActionsTd(i%2?T.subtle:T.card) }}>
                         {!r.is_acknowledged ? (
                           <>
-                            <Btn small variant="success" onClick={()=>doAcknowledge(r)}>✓ Ack</Btn>{' '}
+                            <Btn small variant="success" onClick={()=>doAcknowledge(r)}>Ack</Btn>{' '}
                             <Btn small variant="secondary" title="Snooze this alert" onClick={()=>setSnoozeTarget({ part_id:r.part_id, severity:r.stock_status, code:r.code })}>💤</Btn>{' '}
                           </>
                         ) : <span style={{ fontSize:11, color:T.muted }}>Acknowledged</span>}
@@ -6596,7 +6864,7 @@ function AssetRegistryPage({ data }) {
   const filteredMfrs   = manufacturers.filter(m => !fCat || (m.catCodes||[]).includes(fCat));
   const filteredModels = models.filter(m => !fMfr || m.mfrCode === fMfr);
   const totalPages = Math.ceil(total / ASSETS_PAGE_SIZE);
-  const selStyle = { padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, color:T.text, background:"#fff", fontFamily:"inherit" };
+  const selStyle = { padding:"0 10px", height:32, borderRadius:T.radius, border:`1px solid ${T.borderStrong}`, fontSize:13, color:T.text, background:T.card, fontFamily:"inherit" };
 
   const exportCsv = async () => {
     if (!dbReady) return flash('Requires a live database connection', 'err');
@@ -6646,13 +6914,13 @@ function AssetRegistryPage({ data }) {
         <StatCard label="Active" value={kpis?kpis.active.toLocaleString():"…"} color="#15803d" icon="🟢"/>
         <StatCard label="In Maintenance" value={kpis?kpis.in_maintenance.toLocaleString():"…"} color="#b45309" icon="🟠"/>
         <StatCard label="Down" value={kpis?kpis.down.toLocaleString():"…"} color="#dc2626" icon="🔴"/>
-        <StatCard label="Due for PM (30d)" value={kpis?kpis.due_30.toLocaleString():"…"} color="#7c3aed" icon="🛠️"/>
+        <StatCard label="Due for PM (30d)" value={kpis?kpis.due_30.toLocaleString():"…"} color="#7c3aed" icon="️"/>
       </div>
 
       {/* Filters */}
       <Card style={{ marginBottom:16 }}>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-          <input value={search} onChange={e=>setSearchInput(e.target.value)} placeholder="🔍 Asset tag, serial no, model…" style={{ ...selStyle, minWidth:200, flex:"1 1 200px" }}/>
+          <input value={search} onChange={e=>setSearchInput(e.target.value)} placeholder="Asset tag, serial no, model…" style={{ ...selStyle, minWidth:200, flex:"1 1 200px" }}/>
           <select value={fCat} onChange={e=>{setFCat(e.target.value);setFMfr("");setFModel("");}} style={selStyle}>
             <option value="">All Categories</option>
             {categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
@@ -6675,14 +6943,14 @@ function AssetRegistryPage({ data }) {
               <button onClick={()=>setViewMode('table')} style={{ padding:'6px 10px', border:'none', background:viewMode==='table'?T.accent:'#fff', color:viewMode==='table'?'#fff':T.muted, cursor:'pointer', fontSize:13 }}>☰</button>
               <button onClick={()=>setViewMode('grid')} style={{ padding:'6px 10px', border:'none', background:viewMode==='grid'?T.accent:'#fff', color:viewMode==='grid'?'#fff':T.muted, cursor:'pointer', fontSize:13 }}>▦</button>
             </div>
-            <Btn small variant="secondary" onClick={exportCsv} disabled={exporting}>{exporting?"Exporting…":"📥 Export CSV"}</Btn>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={exporting}>{exporting?"Exporting…":"Export CSV"}</Btn>
             {canEdit && <Btn small onClick={()=>setFormTarget('new')}>+ Add Asset</Btn>}
           </div>
         </div>
       </Card>
 
       {loading ? (
-        <div style={{ textAlign:"center", padding:40, color:T.muted }}>⏳ Loading assets…</div>
+        <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading assets…</div>
       ) : rows.length === 0 ? (
         <Card><div style={{ textAlign:"center", padding:40, color:T.muted }}>No assets found.</div></Card>
       ) : viewMode === 'grid' ? (
@@ -6698,7 +6966,7 @@ function AssetRegistryPage({ data }) {
                   <div style={{ fontFamily:'monospace', fontWeight:800, fontSize:13, color:T.text }}>{a.assetTag}</div>
                   <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>{a.mfrLabel} {a.modelLabel}</div>
                   <Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.label}</Pill>
-                  {a.pmDue && <span style={{ marginLeft:6, fontSize:11, color:'#b45309', fontWeight:700 }}>🛠️ PM Due</span>}
+                  {a.pmDue && <span style={{ marginLeft:6, fontSize:11, color:'#b45309', fontWeight:700 }}>️ PM Due</span>}
                 </div>
               </Card>
             );
@@ -6735,7 +7003,7 @@ function AssetRegistryPage({ data }) {
                       <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{a.lastPmDate || "—"}</td>
                       <td style={{ padding:"7px 9px" }}>
                         {a.pmDue
-                          ? <Pill color="#b45309" bg="#fef3c7" mono={false} size={11}>🛠️ PM Due</Pill>
+                          ? <Pill color="#b45309" bg="#fef3c7" mono={false} size={11}>️ PM Due</Pill>
                           : a.openEventCount > 0
                             ? <Pill color="#1d4ed8" bg="#dbeafe" mono={false} size={11}>{a.openEventCount} open</Pill>
                             : <span style={{ color:"#d1d5db" }}>—</span>}
@@ -6917,12 +7185,16 @@ function AssetFormModal({ data, asset, onClose, onSaved }) {
 
 // ─── ASSET DETAIL PAGE ────────────────────────────────────────
 const MAINTENANCE_TYPE_META = {
-  installation: { label:'Installation', color:'#0e7490', dot:'🔵' },
-  preventive:   { label:'Preventive',   color:'#16a34a', dot:'🟢' },
-  corrective:   { label:'Corrective',   color:'#d97706', dot:'🟠' },
-  inspection:   { label:'Inspection',   color:'#64748b', dot:'⚪' },
-  overhaul:     { label:'Overhaul',     color:'#dc2626', dot:'🔴' },
-  modification: { label:'Modification', color:'#7c3aed', dot:'🟣' },
+  // Event TYPE is identity — what kind of job it was — not state. Six
+  // hues here competed with the status colours elsewhere on the page.
+  // Corrective keeps a warning tone because an unplanned repair IS the
+  // exceptional case an engineer scans a timeline for.
+  installation: { label:'Installation', color:T.textSecondary },
+  preventive:   { label:'Preventive',   color:T.textSecondary },
+  corrective:   { label:'Corrective',   color:T.warn },
+  inspection:   { label:'Inspection',   color:T.textSecondary },
+  overhaul:     { label:'Overhaul',     color:T.warn },
+  modification: { label:'Modification', color:T.textSecondary },
 };
 
 // A logged part is "cancelled" exactly when the stock movement it
@@ -7265,7 +7537,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
         {!editing ? (
           <>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <span>{meta.dot}</span>
+              <SeverityDot color={meta.color} />
               <span style={{ color:meta.color, fontWeight:700, fontSize:13 }}>{meta.label}</span>
               {event.status !== 'completed' && (
                 <Pill color={event.status==='cancelled'?T.danger:T.warn} bg={event.status==='cancelled'?T.dangerBg:T.warnBg} mono={false} size={11}>{event.status}</Pill>
@@ -7305,7 +7577,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
                       : p.stock_transaction_id && (
                           <>
                             {net > 0 && (
-                              <Btn small variant="secondary" onClick={()=>{ setReturnTarget(p); setReturnQty(String(net)); setReturnReason(''); setError(''); }}>↩ Return</Btn>
+                              <Btn small variant="secondary" onClick={()=>{ setReturnTarget(p); setReturnQty(String(net)); setReturnReason(''); setError(''); }}>Return</Btn>
                             )}
                             {isAdmin && <Btn small variant="danger" onClick={()=>setConfirmCancel(p)}>Cancel</Btn>}
                           </>
@@ -7314,23 +7586,21 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
                 );
               })}
               {parts.some(isPartLineCancelled) && (
-                <div style={{ fontSize:11, color:T.muted, marginTop:6 }}>
-                  Cancelled parts were returned to stock and are not counted against this asset.
+                <div style={{ fontSize:11, color:T.muted, marginTop:6 }}> Cancelled parts were returned to stock and are not counted against this asset.
                 </div>
               )}
             </div>
 
             {canEdit && (
               <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:10, borderTop:`1px solid ${T.border}` }}>
-                {isAdmin && <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑 Remove Event</Btn>}
-                <Btn onClick={()=>setEditing(true)}>✏️ Edit</Btn>
+                {isAdmin && <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>Remove Event</Btn>}
+                <Btn onClick={()=>setEditing(true)}>Edit</Btn>
               </div>
             )}
           </>
         ) : (
           <>
-            <div style={{ fontSize:11, color:T.muted, background:T.subtle, padding:"8px 12px", borderRadius:6 }}>
-              Date ({event.event_date}) and asset cannot be changed once parts have been issued from stock against them.
+            <div style={{ fontSize:11, color:T.muted, background:T.subtle, padding:"8px 12px", borderRadius:6 }}> Date ({event.event_date}) and asset cannot be changed once parts have been issued from stock against them.
             </div>
             <div><label style={sLabel}>Title</label><input value={form.title} onChange={e=>set('title', e.target.value)} style={fieldStyle}/></div>
             <div><label style={sLabel}>Description</label><textarea value={form.description} onChange={e=>set('description', e.target.value)} rows={3} style={{ ...fieldStyle, resize:"vertical" }}/></div>
@@ -7351,8 +7621,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
               </div>
             </div>
             {form.status === 'cancelled' && event.status !== 'cancelled' && (
-              <div style={{ fontSize:11, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>
-                Saving as cancelled returns every part this event issued back to stock.
+              <div style={{ fontSize:11, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}> Saving as cancelled returns every part this event issued back to stock.
               </div>
             )}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
@@ -7379,8 +7648,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
       {confirmCancel && (
         <Modal title="Cancel Logged Part" onClose={()=>{ setConfirmCancel(null); setCancelReason(''); }} maxWidth={420}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ fontSize:13, color:T.text }}>
-              Cancel <strong>{confirmCancel.part?.code} × {confirmCancel.quantity}</strong>? The quantity goes back into stock and the line stays on this record marked cancelled.
+            <div style={{ fontSize:13, color:T.text }}> Cancel <strong>{confirmCancel.part?.code} × {confirmCancel.quantity}</strong>? The quantity goes back into stock and the line stays on this record marked cancelled.
             </div>
             <div>
               <label style={sLabel}>Reason (optional)</label>
@@ -7397,8 +7665,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
       {confirmDelete && (
         <Modal title="Remove Maintenance Event" onClose={()=>{ if(!deleting) setConfirmDelete(false); }} maxWidth={460}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ fontSize:13, color:T.text }}>
-              Remove <strong>{event.title}</strong>{event.work_order_no ? ` (${event.work_order_no})` : ''}?
+            <div style={{ fontSize:13, color:T.text }}> Remove <strong>{event.title}</strong>{event.work_order_no ? ` (${event.work_order_no})` : ''}?
               It moves to Trash, where an admin can restore it.
             </div>
             {(() => {
@@ -7427,7 +7694,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
               <Btn variant="secondary" onClick={()=>setConfirmDelete(false)} disabled={deleting}>Cancel</Btn>
               <Btn variant="danger" onClick={handleDeleteEvent} disabled={deleting}>
-                {deleting ? 'Removing…' : '🗑 Remove Event'}
+                {deleting ? 'Removing…' : 'Remove Event'}
               </Btn>
             </div>
           </div>
@@ -7454,7 +7721,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
             {error && <div style={{ fontSize:12, color:T.danger }}>{error}</div>}
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
               <Btn variant="secondary" onClick={()=>{ setReturnTarget(null); setReturnQty(''); setReturnReason(''); }} disabled={returning}>Back</Btn>
-              <Btn onClick={handleReturnPart} disabled={returning}>{returning ? 'Returning…' : '↩ Return to Store'}</Btn>
+              <Btn onClick={handleReturnPart} disabled={returning}>{returning ? 'Returning…' : 'Return to Store'}</Btn>
             </div>
           </div>
         </Modal>
@@ -7499,7 +7766,7 @@ function AssetDocumentsTab({ asset, flash }) {
         <input value={label} onChange={e=>setLabel(e.target.value)} placeholder="Label (e.g. Operator Manual)" style={{ padding:"7px 10px", borderRadius:5, border:`1px solid ${T.border}`, fontSize:13, flex:1 }}/>
         <input type="file" onChange={handleFile} disabled={uploading} style={{ fontSize:12 }}/>
       </div>
-      {uploading && <div style={{ fontSize:12, color:T.accent, marginBottom:10 }}>⏳ Uploading…</div>}
+      {uploading && <div style={{ fontSize:12, color:T.accent, marginBottom:10 }}>Uploading…</div>}
       {loading ? <div style={{ color:T.muted, fontSize:13 }}>Loading…</div> : docs.length===0 ? (
         <div style={{ color:T.muted, fontSize:13 }}>No documents uploaded yet.</div>
       ) : (
@@ -7511,7 +7778,7 @@ function AssetDocumentsTab({ asset, flash }) {
                 <StoredFileLink bucket="asset-documents" url={d.url} path={d.path} style={{ fontSize:13 }}>{d.label}</StoredFileLink>
               </span>
               <span style={{ fontSize:11, color:T.muted }}>{new Date(d.uploaded_at).toLocaleDateString()}</span>
-              <button onClick={()=>handleDelete(d)} style={{ background:"transparent", border:"none", color:T.danger, cursor:"pointer" }}>🗑</button>
+              <button onClick={()=>handleDelete(d)} style={{ background:"transparent", border:"none", color:T.danger, cursor:"pointer" }}></button>
             </div>
           ))}
         </div>
@@ -7564,7 +7831,7 @@ function AssetDetailPage({ data }) {
   if (!assetId) {
     return <Card><div style={{ padding:40, textAlign:"center", color:T.muted }}>No asset selected. <Btn small onClick={()=>navigateTo('assets')}>← Back to Asset Registry</Btn></div></Card>;
   }
-  if (loading && !asset) return <div style={{ textAlign:"center", padding:60, color:T.muted }}>⏳ Loading asset…</div>;
+  if (loading && !asset) return <div style={{ textAlign:"center", padding:60, color:T.muted }}>Loading asset…</div>;
   if (!asset) return <Card><div style={{ padding:40, textAlign:"center", color:T.muted }}>Asset not found. <Btn small onClick={()=>navigateTo('assets')}>← Back</Btn></div></Card>;
 
   const meta = ASSET_STATUS_META[asset.status] || {};
@@ -7627,8 +7894,8 @@ function AssetDetailPage({ data }) {
               <Pill color={meta.color} bg={meta.bg} mono={false}>{meta.label}</Pill>
               {canEdit && (
                 <div style={{ display:"flex", gap:6, marginTop:10 }}>
-                  <Btn small variant="secondary" onClick={()=>setShowEditModal(true)}>✏️ Edit</Btn>
-                  {isAdmin && <Btn small variant="danger" onClick={()=>setShowDeleteConfirm(true)}>🗑 Trash</Btn>}
+                  <Btn small variant="secondary" onClick={()=>setShowEditModal(true)}>Edit</Btn>
+                  {isAdmin && <Btn small variant="danger" onClick={()=>setShowDeleteConfirm(true)}>Trash</Btn>}
                 </div>
               )}
             </div>
@@ -7702,7 +7969,7 @@ function AssetDetailPage({ data }) {
                   return (
                     <Card key={ev.id} style={{ cursor:"pointer" }} onClick={()=>setEventTarget(ev)}>
                       <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                        <span style={{ fontSize:16 }}>{tmeta.dot}</span>
+                        <SeverityDot color={tmeta.color||T.muted} size={9} />
                         <div style={{ flex:1 }}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                             <div style={{ fontWeight:700, color:T.text }}>{ev.title}</div>
@@ -7714,7 +7981,7 @@ function AssetDetailPage({ data }) {
                             {ev.running_hours_at_event!=null && <span>⏱ {ev.running_hours_at_event} hrs</span>}
                             {ev.downtime_hours!=null && <span>⏸ {ev.downtime_hours}h downtime</span>}
                             {ev.work_order_no && <span>📋 {ev.work_order_no}</span>}
-                            {ev.performed_by && <span>👤 {ev.performed_by}</span>}
+                            {ev.performed_by && <span>{ev.performed_by}</span>}
                           </div>
                           {ev.event_type==='corrective' && (ev.failure_mode || ev.root_cause) && (
                             <div style={{ fontSize:11, color:T.muted, marginBottom:6 }}>
@@ -7827,7 +8094,7 @@ function AssetDetailPage({ data }) {
           <div style={{ fontSize:13, color:T.text, marginBottom:16 }}>Move <strong>{asset.assetTag}</strong> to Trash? It can be restored later from the Trash page.</div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
             <Btn variant="secondary" onClick={()=>setShowDeleteConfirm(false)}>Cancel</Btn>
-            <Btn variant="danger" onClick={handleDelete}>🗑 Move to Trash</Btn>
+            <Btn variant="danger" onClick={handleDelete}>Move to Trash</Btn>
           </div>
         </Modal>
       )}
@@ -7891,11 +8158,11 @@ const REPORT_TABS = [
 ];
 
 const FLAG_SEVERITY_META = {
-  critical:    { label:'Critical',    color:'#991B1B', bg:'#fee2e2', dot:'🔴',
+  critical:    { label:'Critical',    color:T.danger, bg:T.dangerBg, tone:'danger',
                  blurb:'5x or more than the fleet median' },
-  investigate: { label:'Investigate', color:'#DC2626', bg:'#fef2f2', dot:'🟠',
+  investigate: { label:'Investigate', color:T.danger, bg:T.dangerBg, tone:'danger',
                  blurb:'3-5x the fleet median' },
-  watch:       { label:'Watch',       color:'#D97706', bg:'#fef3c7', dot:'🟡',
+  watch:       { label:'Watch',       color:T.warn,   bg:T.warnBg,   tone:'warn',
                  blurb:'2-3x the fleet median' },
 };
 
@@ -8021,7 +8288,7 @@ function FleetOverviewTab({ navigateTo }) {
     downloadCsv(lines, `fleet-overview-${year}.csv`);
   };
 
-  if (loading) return <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading fleet overview…</div></Card>;
+  if (loading) return <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading fleet overview…</div></Card>;
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
@@ -8032,7 +8299,7 @@ function FleetOverviewTab({ navigateTo }) {
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </Select>
           <div style={{ marginLeft:'auto' }}>
-            <Btn small variant="secondary" onClick={exportCsv}>📥 Export CSV</Btn>
+            <Btn small variant="secondary" onClick={exportCsv}>Export CSV</Btn>
           </div>
         </div>
       </Card>
@@ -8105,8 +8372,7 @@ const LoadError = ({ error }) => error ? (
   <Card style={{ borderLeft:`3px solid ${T.danger}`, background:T.dangerBg }}>
     <div style={{ fontSize:13, color:T.danger, fontWeight:700 }}>Could not load this data</div>
     <div style={{ fontSize:12, color:T.text, marginTop:4 }}>{error}</div>
-    <div style={{ fontSize:11, color:T.muted, marginTop:6 }}>
-      This is a loading failure, not an empty result — the figures below are incomplete.
+    <div style={{ fontSize:11, color:T.muted, marginTop:6 }}> This is a loading failure, not an empty result — the figures below are incomplete.
     </div>
   </Card>
 ) : null;
@@ -8168,12 +8434,10 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
           group at least twice as often as other assets of the same model, over the same rolling
           12 months. They are comparisons against peers, not predictions — a flag means
           “worth a look”, never “this will fail”.
-          <div style={{ marginTop:8, color:T.muted, fontSize:12 }}>
-            A group is only compared when there are at least 3 assets of the model and the typical
+          <div style={{ marginTop:8, color:T.muted, fontSize:12 }}> A group is only compared when there are at least 3 assets of the model and the typical
             asset replaced it at least once; below that there is no basis for a comparison, so
             nothing is shown rather than a guess. Expand any row for the events behind it.
-            <div style={{ marginTop:6 }}>
-              Peers counts only assets that are not in Trash — moving an asset to Trash removes its
+            <div style={{ marginTop:6 }}> Peers counts only assets that are not in Trash — moving an asset to Trash removes its
               history from the comparison and can change, add or clear a flag on its sisters.
             </div>
           </div>
@@ -8192,16 +8456,15 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
           </Select>
           <span style={{ fontSize:12, color:T.muted }}>{flags.length} indicator(s)</span>
           <div style={{ marginLeft:'auto' }}>
-            <Btn small variant="secondary" onClick={exportCsv} disabled={flags.length===0}>📥 Export CSV</Btn>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={flags.length===0}>Export CSV</Btn>
           </div>
         </div>
       </Card>
 
       <Card>
-        {loading ? <div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading…</div>
+        {loading ? <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading…</div>
         : flags.length === 0 ? (
-          <div style={{ textAlign:'center', padding:40, color:T.muted, fontSize:13 }}>
-            No indicators. Either no asset is an outlier against its peers, or there is not yet
+          <div style={{ textAlign:'center', padding:40, color:T.muted, fontSize:13 }}> No indicators. Either no asset is an outlier against its peers, or there is not yet
             enough history — a comparison needs at least 3 assets of a model with replacements
             recorded against them.
           </div>
@@ -8224,7 +8487,7 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
                         style={{ borderBottom:`1px solid ${T.border}`, background:i%2?T.subtle:T.card, cursor:'pointer' }}>
                         <td style={{ padding:'7px 9px', color:T.muted, width:20 }}>{open?'▾':'▸'}</td>
                         <td style={{ padding:'7px 9px' }}>
-                          <Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.dot} {meta.label}</Pill>
+                          <StatusTag tone={meta.tone||'neutral'}>{meta.label}</StatusTag>
                         </td>
                         <td style={{ padding:'7px 9px', fontFamily:'monospace', fontWeight:800, whiteSpace:'nowrap' }}>{f.asset_tag}</td>
                         <td style={{ padding:'7px 9px', color:T.muted }}>{f.asset_model}</td>
@@ -8240,8 +8503,7 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
                       {open && (
                         <tr style={{ background:'#f8fafc' }}>
                           <td colSpan={9} style={{ padding:'12px 16px', borderBottom:`1px solid ${T.border}` }}>
-                            <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>
-                              Why this fired: <strong style={{ color:T.text }}>{f.asset_tag}</strong> replaced{' '}
+                            <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}> Why this fired: <strong style={{ color:T.text }}>{f.asset_tag}</strong> replaced{' '}
                               <strong style={{ color:T.text }}>{f.fg_label || f.fg}</strong> parts{' '}
                               <strong style={{ color:T.text }}>{f.asset_replacements_12m}</strong> times in the last 12 months,
                               against a median of <strong style={{ color:T.text }}>{f.fleet_median_12m}</strong> across{' '}
@@ -8274,8 +8536,7 @@ function ReliabilityFlagsTab({ models, navigateTo }) {
                               </table>
                             )}
                             <div style={{ marginTop:10 }}>
-                              <Btn small variant="secondary" onClick={(ev)=>{ ev.stopPropagation(); navigateTo('assetdetail',{ assetId:f.asset_id }); }}>
-                                Open {f.asset_tag} →
+                              <Btn small variant="secondary" onClick={(ev)=>{ ev.stopPropagation(); navigateTo('assetdetail',{ assetId:f.asset_id }); }}> Open {f.asset_tag} →
                               </Btn>
                             </div>
                           </td>
@@ -8377,7 +8638,7 @@ function ConsumptionTab({ categories, models, funcGroups }) {
             {(funcGroups||[]).map(f=><option key={f.code} value={f.code}>{f.label||f.code}</option>)}
           </Select>
           <div style={{ marginLeft:'auto' }}>
-            <Btn small variant="secondary" onClick={exportCsv} disabled={grouped.length===0}>📥 Export CSV</Btn>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={grouped.length===0}>Export CSV</Btn>
           </div>
         </div>
         {capped && (
@@ -8388,10 +8649,10 @@ function ConsumptionTab({ categories, models, funcGroups }) {
         )}
       </Card>
 
-      {loading ? <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading consumption…</div></Card> : (
+      {loading ? <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading consumption…</div></Card> : (
       <>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:14 }}>
-          <StatCard label="Parts consumed" value={totalQty.toLocaleString(undefined,{maximumFractionDigits:2})} icon="📦"/>
+          <StatCard label="Parts consumed" value={totalQty.toLocaleString(undefined,{maximumFractionDigits:2})} icon=""/>
           <StatCard label="Total cost" value={totalCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="💰" color={T.success}/>
           <StatCard label="Distinct groups" value={grouped.length} icon="🧩" color="#6d28d9"/>
           <StatCard label="Job lines" value={rows.length} icon="🧾" color={T.muted}/>
@@ -8482,7 +8743,7 @@ function CostTab({ models }) {
     downloadCsv(lines, `cost-${year}.csv`);
   };
 
-  if (loading) return <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>⏳ Loading cost data…</div></Card>;
+  if (loading) return <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading cost data…</div></Card>;
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
@@ -8498,7 +8759,7 @@ function CostTab({ models }) {
             {(models||[]).map(m=><option key={m.code} value={m.code}>{m.label||m.code}</option>)}
           </Select>
           <div style={{ marginLeft:'auto' }}>
-            <Btn small variant="secondary" onClick={exportCsv} disabled={table.length===0}>📥 Export CSV</Btn>
+            <Btn small variant="secondary" onClick={exportCsv} disabled={table.length===0}>Export CSV</Btn>
           </div>
         </div>
       </Card>
@@ -8575,27 +8836,27 @@ function CostTab({ models }) {
 }
 
 const NAV = [
-  { id:"dashboard",     labelKey:"nav_dashboard",     label:"Dashboard",           icon:"🏠", group:"",            groupKey:"",            adminOnly:false },
-  { id:"framework",     labelKey:"nav_framework",     label:"Coding Framework",    icon:"📐", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
-  { id:"categories",    labelKey:"nav_categories",    label:"Main Categories",     icon:"📦", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
-  { id:"disciplines",   labelKey:"nav_disciplines",   label:"Disciplines",         icon:"🔬", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
-  { id:"manufacturers", labelKey:"nav_manufacturers", label:"Manufacturers",       icon:"🏭", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
-  { id:"models",        labelKey:"nav_models",        label:"Equipment Models",    icon:"📋", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
-  { id:"funcgroups",    labelKey:"nav_funcgroups",    label:"Functional Groups",   icon:"⚙️", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
-  { id:"generator",     labelKey:"nav_generator",     label:"Code Generator",      icon:"✨", group:"Tools",       groupKey:"group_Tools",        adminOnly:false },
-  { id:"tree",          labelKey:"nav_tree",          label:"Hierarchy Tree",      icon:"🌳", group:"Tools",       groupKey:"group_Tools",        adminOnly:false },
-  { id:"master",        labelKey:"nav_master",        label:"Master Parts Table",  icon:"📊", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"ledger",        labelKey:"nav_ledger",        label:"Stock Ledger",        icon:"📒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"stockcount",    labelKey:"nav_stockcount",    label:"Stock Count",         icon:"🧮", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"movements",     labelKey:"nav_movements",     label:"Stock Movements",     icon:"🚚", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"🛒", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"🔔", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"assets",        labelKey:"nav_assets",        label:"Asset Registry",      icon:"🏭", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
-  { id:"reports",       labelKey:"nav_reports",       label:"Reliability Reports", icon:"📈", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
-  { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"🔑", group:"System",      groupKey:"group_System",       adminOnly:true  },
-  { id:"auditlog",      labelKey:"nav_auditlog",      label:"Audit Log",           icon:"📜", group:"System",      groupKey:"group_System",       adminOnly:true  },
-  { id:"users",         labelKey:"nav_users",         label:"User Management",     icon:"👥", group:"System",      groupKey:"group_System",       adminOnly:true  },
-  { id:"trash",         labelKey:"nav_trash",         label:"Trash",                icon:"🗑️", group:"System",     groupKey:"group_System",       adminOnly:true  },
+  { id:"dashboard",     labelKey:"nav_dashboard",     label:"Dashboard",           icon:"dashboard", group:"",            groupKey:"",            adminOnly:false },
+  { id:"framework",     labelKey:"nav_framework",     label:"Coding Framework",    icon:"framework", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
+  { id:"categories",    labelKey:"nav_categories",    label:"Main Categories",     icon:"category", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
+  { id:"disciplines",   labelKey:"nav_disciplines",   label:"Disciplines",         icon:"discipline", group:"Reference",   groupKey:"group_Reference",   adminOnly:false },
+  { id:"manufacturers", labelKey:"nav_manufacturers", label:"Manufacturers",       icon:"manufacturer", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
+  { id:"models",        labelKey:"nav_models",        label:"Equipment Models",    icon:"model", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
+  { id:"funcgroups",    labelKey:"nav_funcgroups",    label:"Functional Groups",   icon:"funcgroup", group:"Master Data", groupKey:"group_MasterData",  adminOnly:false },
+  { id:"generator",     labelKey:"nav_generator",     label:"Code Generator",      icon:"generator", group:"Tools",       groupKey:"group_Tools",        adminOnly:false },
+  { id:"tree",          labelKey:"nav_tree",          label:"Hierarchy Tree",      icon:"tree", group:"Tools",       groupKey:"group_Tools",        adminOnly:false },
+  { id:"master",        labelKey:"nav_master",        label:"Master Parts Table",  icon:"master", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"ledger",        labelKey:"nav_ledger",        label:"Stock Ledger",        icon:"ledger", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"stockcount",    labelKey:"nav_stockcount",    label:"Stock Count",         icon:"stockcount", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"movements",     labelKey:"nav_movements",     label:"Stock Movements",     icon:"movements", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"reorder", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"alerts", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"assets",        labelKey:"nav_assets",        label:"Asset Registry",      icon:"assets", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
+  { id:"reports",       labelKey:"nav_reports",       label:"Reliability Indicators", icon:"reports", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
+  { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"admin", group:"System",      groupKey:"group_System",       adminOnly:true  },
+  { id:"auditlog",      labelKey:"nav_auditlog",      label:"Audit Log",           icon:"auditlog", group:"System",      groupKey:"group_System",       adminOnly:true  },
+  { id:"users",         labelKey:"nav_users",         label:"User Management",     icon:"users", group:"System",      groupKey:"group_System",       adminOnly:true  },
+  { id:"trash",         labelKey:"nav_trash",         label:"Trash",                icon:"trash", group:"System",     groupKey:"group_System",       adminOnly:true  },
 ];
 
 // Pages whose main content is a wide table, plus the Dashboard. The
@@ -8701,65 +8962,75 @@ function AppShell() {
 
   return (
     <AlertsProvider dbReady={dbReady}>
-    <div style={{ display:"flex",height:"100vh",fontFamily:"'Inter','Segoe UI',system-ui,sans-serif",background:T.bg,overflow:"hidden" }}>
+    <div style={{ display:"flex",height:"100vh",fontFamily:T.sans,background:T.bg,overflow:"hidden" }}>
 
       {/* ── SIDEBAR ── */}
-      <div style={{ width:collapsed?52:228,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden" }}>
+      <div style={{ width:collapsed?56:224,background:T.sidebar,transition:"width .2s",flexShrink:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden" }}>
         <div style={{ padding:"16px 14px",borderBottom:`1px solid ${T.sidebarBorder}`,display:"flex",alignItems:"center",gap:10,minHeight:60 }}>
           <img src="/logo.png" alt="CarGas" style={{ width:28,height:28,objectFit:"contain",flexShrink:0 }}/>
           {!collapsed&&(
             <div>
-              <div style={{ color:"#f1f5f9",fontWeight:800,fontSize:12,lineHeight:1.2 }}>{t('appName')}</div>
-              <div style={{ color:"#475569",fontSize:10 }}>{t('appVersion')}</div>
+              <div style={{ color:T.sidebarTextActive,fontWeight:600,fontSize:13,lineHeight:1.2 }}>{t('appName')}</div>
+              <div style={{ color:T.sidebarGroup,fontFamily:T.mono,fontSize:10 }}>{t('appVersion')}</div>
             </div>
           )}
         </div>
 
-        <nav style={{ flex:1,padding:"8px 0" }}>
-          {[visibleNav[0]].map(n=>(
-            <NavItem key={n.id} n={n} active={effectivePage===n.id} onClick={()=>setPage(n.id)} collapsed={collapsed} />
-          ))}
-          {groups.map(g=>(
-            <div key={g}>
-              {!collapsed&&<div style={{ fontSize:9,fontWeight:700,color:"#334155",letterSpacing:1.5,textTransform:"uppercase",padding:"10px 14px 4px" }}>{t('group_'+g.replace(/\s+/g,''))}</div>}
-              {visibleNav.filter(n=>n.group===g).map(n=>(
-                <NavItem key={n.id} n={n} active={effectivePage===n.id} onClick={()=>setPage(n.id)} collapsed={collapsed} />
-              ))}
-            </div>
-          ))}
-        </nav>
+        <SidebarNav
+          visibleNav={visibleNav} groups={groups} collapsed={collapsed}
+          effectivePage={effectivePage} setPage={setPage} t={t}
+        />
 
       </div>
 
       {/* ── MAIN ── */}
       <div style={{ flex:1,display:"flex",flexDirection:"column",overflow:"hidden" }}>
-        <div style={{ background:T.card,borderBottom:`1px solid ${T.border}`,padding:"11px 28px",display:"flex",alignItems:"center",gap:16,flexShrink:0 }}>
+        <div style={{ background:T.card,borderBottom:`1px solid ${T.border}`,padding:"0 24px",minHeight:52,display:"flex",alignItems:"center",gap:16,flexShrink:0 }}>
           <button onClick={()=>setCollapsed(c=>!c)}
             title={`${collapsed?t('expand'):t('collapse')}  (Ctrl+B)`}
-            style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 10px",fontSize:16,lineHeight:1,color:T.text,cursor:"pointer",fontFamily:"inherit",flexShrink:0 }}>
-            ☰
+            aria-label={collapsed?t('expand'):t('collapse')}
+            style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:T.radius,padding:"6px 8px",lineHeight:0,color:T.text,cursor:"pointer",fontFamily:"inherit",flexShrink:0 }}>
+            <Icon name="menu" size={16} />
           </button>
-          <div>
-            <div style={{ fontWeight:700,fontSize:14,color:T.text }}>{t(NAV.find(n=>n.id===effectivePage)?.labelKey) || NAV.find(n=>n.id===effectivePage)?.label}</div>
-            <div style={{ fontSize:11,color:T.muted }}>{t('topBarSub')}</div>
+          {/* Breadcrumb replaces the constant strapline, which repeated
+              the same sentence on all 22 pages while the page title was
+              already restated as an H1 immediately below it. */}
+          <div style={{ display:"flex",alignItems:"center",gap:6,fontSize:12,color:T.muted,minWidth:0 }}>
+            {(() => {
+              const n = NAV.find(n=>n.id===effectivePage);
+              const grp = n?.groupKey ? t(n.groupKey) : null;
+              return (
+                <>
+                  {grp && <><span style={{ whiteSpace:"nowrap" }}>{grp}</span><span aria-hidden="true">/</span></>}
+                  <span style={{ fontWeight:600,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>
+                    {(n?.labelKey && t(n.labelKey)) || n?.label}
+                  </span>
+                </>
+              );
+            })()}
           </div>
           <div style={{ marginLeft:"auto",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
             <button onClick={toggleLang} title="Switch language / تغيير اللغة"
-              style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"4px 10px",fontSize:12,color:T.text,cursor:"pointer",fontFamily:"inherit",fontWeight:700 }}>
-              🌐 {lang === 'en' ? 'العربية' : 'English'}
+              style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:T.radius,padding:"5px 9px",...TYPE.button,color:T.text,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6 }}>
+              <Icon name="globe" size={13} /> {lang === 'en' ? 'العربية' : 'English'}
             </button>
+            {/* Connection state IS a state, so it keeps semantic colour. */}
             {dbReady
-              ? <span style={{ fontSize:11,background:"#dcfce7",color:"#15803d",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟢 {t('liveDb')}</span>
-              : <span style={{ fontSize:11,background:"#fef3c7",color:"#b45309",fontWeight:700,padding:"3px 8px",borderRadius:10 }}>🟡 {t('local')}</span>
+              ? <span style={{ ...TYPE.label,fontSize:9.5,background:T.successBg,color:T.success,padding:"4px 8px",borderRadius:T.radius,border:`1px solid ${T.successBorder}` }}>{t('liveDb')}</span>
+              : <span style={{ ...TYPE.label,fontSize:9.5,background:T.warnBg,color:T.warn,padding:"4px 8px",borderRadius:T.radius,border:`1px solid ${T.warnBorder}` }}>{t('local')}</span>
             }
             <AlertBell navigateTo={data.navigateTo} />
+            {/* Role is identity, not state — so it is neutral now, with
+                the role spelled out rather than encoded as a colour. */}
             {profile && (
-              <span style={{ background:roleBg[profile.role]??T.subtle,color:roleColor[profile.role]??T.muted,fontWeight:700,fontSize:11,padding:"4px 10px",borderRadius:12 }}>
-                {profile.role==='admin'?'🔑':'👤'} {profile.full_name||profile.email?.split('@')[0]}
+              <span style={{ background:T.subtle,border:`1px solid ${T.border}`,color:T.textSecondary,fontSize:11.5,padding:"4px 10px",borderRadius:T.radius,display:"flex",alignItems:"center",gap:6 }}>
+                <Icon name={profile.role==='admin'?'admin':'users'} size={12} />
+                <span style={{ fontWeight:600,color:T.text }}>{profile.full_name||profile.email?.split('@')[0]}</span>
+                <span style={{ color:T.muted }}>· {profile.role==='admin'?'Admin':'Dept. user'}</span>
               </span>
             )}
             <button onClick={signOut}
-              style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"4px 10px",fontSize:12,color:T.muted,cursor:"pointer",fontFamily:"inherit" }}>
+              style={{ background:"transparent",border:`1px solid ${T.border}`,borderRadius:T.radius,padding:"5px 10px",...TYPE.button,fontWeight:400,color:T.muted,cursor:"pointer",fontFamily:"inherit" }}>
               {t('signOut')}
             </button>
           </div>
@@ -8769,7 +9040,7 @@ function AppShell() {
           <div style={{ height:3,background:`linear-gradient(90deg,${T.accent},#38bdf8)`,flexShrink:0 }}/>
         )}
 
-        <div style={{ flex:1,overflowY:"auto",padding:28 }}>
+        <div style={{ flex:1,overflowY:"auto",padding:24 }}>
           {pageMap[effectivePage]}
         </div>
       </div>
@@ -8819,21 +9090,83 @@ function AuthGate() {
   return <AppShell />;
 }
 
-function NavItem({ n, active, onClick, collapsed }) {
-  const { t } = useLang();
-  const label = n.labelKey ? t(n.labelKey) : n.label;
+// Split out of AppShell so it can read the alert count: AppShell
+// renders AlertsProvider, so its own body sits outside that context.
+function SidebarNav({ visibleNav, groups, collapsed, effectivePage, setPage, t }) {
+  const alerts = useAlerts();
+  const badgeFor = id => (id === 'alerts' ? (alerts?.badgeCount || 0) : 0);
   return (
-    <div onClick={onClick} title={collapsed?label:""} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 14px",cursor:"pointer",background:active?"#1a3460":"transparent",borderLeft:active?"3px solid #38bdf8":"3px solid transparent",transition:"background .12s" }}>
-      <span style={{ fontSize:15,flexShrink:0 }}>{n.icon}</span>
-      {!collapsed&&<span style={{ fontSize:13,color:active?"#f1f5f9":"#94a3b8",fontWeight:active?700:400,whiteSpace:"nowrap" }}>{label}</span>}
+    <nav aria-label="Main" style={{ flex:1,padding:"8px 0" }}>
+      {[visibleNav[0]].map(n=>(
+        <NavItem key={n.id} n={n} active={effectivePage===n.id} onClick={()=>setPage(n.id)} collapsed={collapsed} badge={badgeFor(n.id)} />
+      ))}
+      {groups.map(g=>(
+        <div key={g}>
+          {!collapsed&&(
+            <div style={{ ...TYPE.label,fontSize:9.5,letterSpacing:"0.13em",color:T.sidebarGroup,padding:"16px 14px 6px" }}>
+              {t('group_'+g.replace(/\s+/g,''))}
+            </div>
+          )}
+          {visibleNav.filter(n=>n.group===g).map(n=>(
+            <NavItem key={n.id} n={n} active={effectivePage===n.id} onClick={()=>setPage(n.id)} collapsed={collapsed} badge={badgeFor(n.id)} />
+          ))}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+function NavItem({ n, active, onClick, collapsed, badge = 0 }) {
+  const { t } = useLang();
+  const [hover, setHover] = useState(false);
+  const label = n.labelKey ? t(n.labelKey) : n.label;
+  const badgeLabel = badge > 99 ? '99+' : String(badge);
+  return (
+    <div
+      onClick={onClick} onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); onClick(); } }}
+      role="link" tabIndex={0}
+      // The tooltip is always present, not only when collapsed: in the
+      // 52px rail it is the only way to name the destination.
+      title={collapsed ? (badge ? `${label} — ${badge} unacknowledged` : label) : ""}
+      aria-label={collapsed ? label : undefined}
+      aria-current={active ? "page" : undefined}
+      style={{
+        display:"flex", alignItems:"center", gap:10,
+        padding:"7px 14px", minHeight:34, cursor:"pointer",
+        background: active ? T.sidebarActive : hover ? T.sidebarHover : "transparent",
+        borderLeft: `2px solid ${active ? T.sidebarMarker : "transparent"}`,
+        color: active ? T.sidebarTextActive : T.sidebarText,
+        transition:"background .12s",
+        position:"relative",
+      }}>
+      <Icon name={n.icon} size={15} />
+      {!collapsed && <span style={{ fontSize:12.5,fontWeight:active?600:400,whiteSpace:"nowrap" }}>{label}</span>}
+      {/* Alert count. Collapsed, it shrinks to a dot on the icon so the
+          rail still signals that something needs attention. */}
+      {badge > 0 && (collapsed ? (
+        <span aria-hidden="true" style={{ position:"absolute",top:6,right:8,width:7,height:7,borderRadius:"50%",background:T.danger,border:`1px solid ${T.sidebar}` }}/>
+      ) : (
+        <span style={{ marginLeft:"auto",background:T.danger,color:"#fff",fontFamily:T.mono,fontSize:10,fontWeight:600,padding:"2px 5px",borderRadius:8,lineHeight:1 }}>
+          {badgeLabel}
+        </span>
+      ))}
     </div>
   );
 }
 
+// Severity is the one place semantic colour is fully spent. The emoji
+// dots rendered at a different size on every OS and carried no
+// accessible name; a painted dot inherits the token colour and pairs
+// with the label beside it, so severity never depends on colour alone.
+const SeverityDot = ({ color, size = 8 }) => (
+  <span aria-hidden="true" style={{ display:"inline-block",width:size,height:size,borderRadius:"50%",background:color,flexShrink:0 }}/>
+);
+
 const ALERT_SEVERITY_META = {
-  out:      { label:'Out of Stock', color:'#991B1B', dot:'🔴' },
-  critical: { label:'Critical',     color:'#DC2626', dot:'🟠' },
-  low:      { label:'Low Stock',    color:'#D97706', dot:'🟡' },
+  out:      { label:'Out of Stock', color:T.danger,  tone:'danger' },
+  critical: { label:'Critical',     color:T.danger,  tone:'danger' },
+  low:      { label:'Low Stock',    color:T.warn,    tone:'warn' },
 };
 
 // Header bell — badge counts only unacknowledged out+critical (low is
@@ -8891,10 +9224,10 @@ function AlertBell({ navigateTo }) {
             <div style={{ padding:20, textAlign:'center', color:T.muted, fontSize:12 }}>No active alerts — all stock levels are healthy ✅</div>
           ) : (
             top.map(r => {
-              const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, dot:'⚪' };
+              const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, tone:'neutral' };
               return (
                 <div key={r.part_id} role="menuitem" style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 14px', borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
-                  <span>{meta.dot}</span>
+                  <SeverityDot color={meta.color} />
                   <span style={{ fontFamily:'monospace', fontWeight:700, color:T.text }}>{r.code}</span>
                   <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:T.muted }}>{r.short_desc}</span>
                   <span style={{ fontVariantNumeric:'tabular-nums', color:meta.color, fontWeight:700 }}>{r.qty_on_hand}/{r.reorder_point}</span>

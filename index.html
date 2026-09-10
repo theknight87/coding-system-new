@@ -7,10 +7,27 @@
     <meta name="description" content="CarGas Coding System — standardized spare parts coding framework for engineering departments — 6-segment code structure AA-BB-CC-DD-EE-0001" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="manifest" href="/manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; background: #f0f4f8; }
+      /* Declared on :root as well as body so no element can inherit a
+         browser default, and repeated onto form controls, which do not
+         inherit font-family from an ancestor. */
+      :root, body {
+        font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        background: #f4f6f8;
+        color: #171c24;
+        -webkit-font-smoothing: antialiased;
+      }
+      input, select, textarea, button { font: inherit; color: inherit; }
+      /* Keyboard operation was invisible before this. */
+      :focus-visible { outline: 2px solid #15497f; outline-offset: 2px; }
       #root { height: 100vh; overflow: hidden; }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+      }
     </style>
   </head>
   <body>
