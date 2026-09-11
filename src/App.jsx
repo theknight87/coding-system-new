@@ -37,7 +37,7 @@ function StockMovementModal({ partCode, ops, onClose, onSaved }) {
   return (
     <Modal title="New Stock Transaction" onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
+        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>{error}</div>}
         {partCode ? (
           <div><label style={sLabel}>Part Code</label><CodeTag code={partCode}/></div>
         ) : (
@@ -174,7 +174,7 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
   return (
     <Modal title="Record Stock Movement" onClose={onClose} maxWidth={640}>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
+        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>{error}</div>}
 
         {/* Part picker */}
         <div>
@@ -241,7 +241,7 @@ function RecordMovementModal({ part, initialTxnType, onClose, onSaved }) {
         )}
         {goesNegative && (
           <div style={{ fontSize:12, color:"#92400e", background:T.warnBg, border:"1px solid #fbbf24", borderRadius:6, padding:"8px 12px", fontWeight:600 }}>
-            ⚠️ This will take the balance below zero ({resultQty}). Allowed, but double-check before posting.
+            This will take the balance below zero ({resultQty}). Allowed, but double-check before posting.
           </div>
         )}
 
@@ -510,7 +510,7 @@ function LoginPage() {
         <div style={{ color:'#94a3b8', fontSize:13, marginBottom:24, textAlign:'center' }}>Sign in to your account</div>
         {error && (
           <div style={{ background:'#fee2e2', color:'#dc2626', border:'1px solid #fca5a5', borderRadius:6, padding:'10px 14px', fontSize:13, marginBottom:16, fontWeight:600 }}>
-            ⚠️ {error}
+            {error}
           </div>
         )}
         <form onSubmit={handleLogin} style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -1028,7 +1028,7 @@ function StockLedgerPage({ data }) {
       </Card>
       <Card>
         {!dbReady ? (
-          <div style={{ textAlign:'center', padding:40, color:T.muted }}>🟡 Stock Ledger requires a live database connection.</div>
+          <div style={{ textAlign:'center', padding:40, color:T.muted }}>Stock Ledger requires a live database connection.</div>
         ) : loading ? (
           <div style={{ textAlign:'center', padding:40, color:T.muted }}>Loading transactions…</div>
         ) : (
@@ -1487,7 +1487,7 @@ function StoredFileLink({ bucket, url, path, children, style }) {
       <span onClick={handleOpen} style={{ color:T.accent, fontSize:12, cursor:'pointer', textDecoration:'underline', ...style }}>
         {busy ? 'Opening…' : children}
       </span>
-      {err && <span style={{ fontSize:11, color:T.danger, marginLeft:6 }}>⚠️ {err}</span>}
+      {err && <span style={{ fontSize:11, color:T.danger, marginLeft:6 }}>{err}</span>}
     </>
   );
 }
@@ -1522,7 +1522,7 @@ function FileUpload({ partCode, bucket, label, currentUrl, onUploaded }) {
         accept={bucket==='part-images' ? 'image/jpeg,image/png,image/webp' : 'application/pdf'}
         style={{ fontSize:12, color:T.muted }}/>
       {uploading && <div style={{ fontSize:12, color:T.accent, marginTop:4 }}>Uploading…</div>}
-      {err       && <div style={{ fontSize:12, color:T.danger, marginTop:4 }}>⚠️ {err}</div>}
+      {err       && <div style={{ fontSize:12, color:T.danger, marginTop:4 }}>{err}</div>}
     </div>
   );
 }
@@ -1533,10 +1533,10 @@ function FileUpload({ partCode, bucket, label, currentUrl, onUploaded }) {
 const INIT_CATEGORIES = [
   { code: "CP", label: "Compressors",        icon: "",  color: "#1d4ed8", bg: "#dbeafe" },
   { code: "EN", label: "Engines",             icon: "🔧", color: "#b45309", bg: "#fef3c7" },
-  { code: "ST", label: "Storage",             icon: "🗄️", color: "#047857", bg: "#d1fae5" },
+  { code: "ST", label: "Storage",             icon: "🗄", color: "#047857", bg: "#d1fae5" },
   { code: "DI", label: "Dispensers",          icon: "⛽", color: "#7c3aed", bg: "#ede9fe" },
   { code: "IN", label: "Instrumentation",     icon: "📡", color: "#be123c", bg: "#ffe4e6" },
-  { code: "LC", label: "Lubricants & Coolants",icon: "🛢️",color: "#0e7490", bg: "#cffafe" },
+  { code: "LC", label: "Lubricants & Coolants",icon: "🛢",color: "#0e7490", bg: "#cffafe" },
   { code: "TL", label: "Tools",               icon: "", color: "#6d28d9", bg: "#f5f3ff" },
   { code: "OT", label: "Others",              icon: "", color: "#374151", bg: "#f3f4f6" },
 ];
@@ -1775,6 +1775,11 @@ const T = {
   radius: 4,        // controls
   radiusLg: 6,      // containers
   shadow: "0 1px 2px rgba(20,25,34,.06), 0 8px 24px -12px rgba(20,25,34,.18)",
+  // Material-style resting elevation: a tight contact shadow plus a soft
+  // ambient one. Replaces the hairline border on cards — the lift is
+  // what separates the card from the page now, not an outline.
+  elevation:     "0 2px 6px -1px rgba(20,25,34,.10), 0 1px 3px -1px rgba(20,25,34,.07)",
+  elevationHigh: "0 12px 28px -8px rgba(20,25,34,.22), 0 4px 10px -4px rgba(20,25,34,.12)",
 };
 
 // A single-hue ramp, deep to light, for ranked chart series. Colour
@@ -1923,22 +1928,24 @@ const Tag = ({ children, title, mono = true }) => (
 );
 
 // State, and only state. Semantic colour lives here and nowhere else.
+// Solid filled pill, white text, uppercase and tracked — the Material
+// badge shape. Only the exceptions are filled: the healthy case stays a
+// quiet outline, because in a table of 5,867 rows a filled badge on
+// every row is decoration again, not signal.
 const StatusTag = ({ children, tone = "neutral" }) => {
   const tones = {
-    // The healthy case reads as neutral on purpose: in a table of 5,867
-    // rows, colouring the normal state means colouring almost every row,
-    // which is what left a genuine stock-out with nothing to shout with.
-    ok:      { c:T.textSecondary, b:T.subtle, br:T.border },
-    warn:    { c:T.warn,    b:T.warnBg,    br:T.warnBorder },
-    danger:  { c:T.danger,  b:T.dangerBg,  br:T.dangerBorder },
-    neutral: { c:T.textSecondary, b:T.subtle, br:T.border },
+    ok:      { solid:false, c:T.textSecondary, b:T.subtle, br:T.border },
+    neutral: { solid:false, c:T.textSecondary, b:T.subtle, br:T.border },
+    warn:    { solid:true,  c:"#fff", b:`linear-gradient(195deg, #b06a09, ${T.warn})`, br:"transparent" },
+    danger:  { solid:true,  c:"#fff", b:`linear-gradient(195deg, #bd3520, ${T.danger})`, br:"transparent" },
   };
   const x = tones[tone] || tones.neutral;
   return (
     <span style={{
       display:"inline-block", background:x.b, border:`1px solid ${x.br}`, color:x.c,
-      ...TYPE.label, fontSize:10, letterSpacing:"0.07em",
-      padding:"3px 7px", borderRadius:3, whiteSpace:"nowrap",
+      ...TYPE.label, fontSize:9.5, letterSpacing:"0.08em",
+      padding:"4px 10px", borderRadius:999, whiteSpace:"nowrap",
+      boxShadow: x.solid ? "0 2px 4px rgba(20,25,34,.16)" : "none",
     }}>{children}</span>
   );
 };
@@ -2083,7 +2090,7 @@ const stickyActionsTd = (bg) => ({
 // dropped by a shared component.
 const Card = ({ children, style, pad = 20, onClick, title, className }) => (
   <div onClick={onClick} title={title} className={className}
-    style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radiusLg, padding: pad, boxShadow: "0 1px 2px rgba(20,25,34,.05)", ...style }}>
+    style={{ background: T.card, border: "none", borderRadius: 12, padding: pad, boxShadow: T.elevation, ...style }}>
     {children}
   </div>
 );
@@ -2101,17 +2108,49 @@ const PageHeader = ({ title, sub }) => (
   </div>
 );
 
-const Btn = ({ children, onClick, variant = "primary", small = false, disabled = false, style: s = {}, title }) => {
-  const base = { border: "none", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer", fontWeight: 700, fontFamily: "inherit", transition: "opacity .15s", opacity: disabled ? 0.6 : 1, ...s };
-  const size = small ? { padding: "5px 12px", fontSize: 12 } : { padding: "9px 18px", fontSize: 14 };
+// Material-style pill: fully rounded, uppercase, tracked, and lifted by
+// a shadow tinted with the button's OWN colour rather than a generic
+// grey — that coloured lift is what makes the shape read as a raised
+// object instead of a flat rectangle. Disabled drops the lift entirely,
+// so "can't press this" is legible without relying on opacity alone.
+const BTN_LIFT = (rgb, a1 = 0.32, a2 = 0.18) =>
+  `0 3px 6px rgba(${rgb},${a1}), 0 6px 14px -6px rgba(${rgb},${a2})`;
+
+const Btn = ({ children, onClick, variant = "primary", small = false, disabled = false, style: s = {}, title, type }) => {
+  const [hover, setHover] = useState(false);
   const vars = {
-    primary:  { background: T.accent,   color: "#fff" },
-    secondary:{ background: T.subtle,   color: T.text, border: `1px solid ${T.border}` },
-    danger:   { background: T.dangerBg, color: T.danger, border: `1px solid #fca5a5` },
-    success:  { background: T.successBg,color: T.success },
-    ghost:    { background: "transparent", color: T.muted },
+    primary:  { background: `linear-gradient(195deg, #0d8a4f, ${T.accent})`, color: "#fff", shadow: BTN_LIFT("10,107,61") },
+    secondary:{ background: T.card, color: T.text, border: `1px solid ${T.borderStrong}`, shadow: "0 2px 4px rgba(20,25,34,.08)" },
+    danger:   { background: `linear-gradient(195deg, #c4402a, ${T.danger})`, color: "#fff", shadow: BTN_LIFT("163,43,24") },
+    success:  { background: `linear-gradient(195deg, #0d8a4f, ${T.success})`, color: "#fff", shadow: BTN_LIFT("10,107,61") },
+    ghost:    { background: "transparent", color: T.textSecondary, shadow: "none" },
   };
-  return <button onClick={onClick} disabled={disabled} title={title} style={{ ...base, ...size, ...vars[variant] }}>{children}</button>;
+  const v = vars[variant] || vars.primary;
+  const size = small
+    ? { padding: "6px 14px", fontSize: 10.5, letterSpacing: "0.06em" }
+    : { padding: "9px 20px", fontSize: 11.5, letterSpacing: "0.07em" };
+  return (
+    <button
+      type={type} onClick={onClick} disabled={disabled} title={title}
+      onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      style={{
+        border: v.border || "none",
+        borderRadius: 999,
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontWeight: 700, fontFamily: "inherit", textTransform: "uppercase",
+        lineHeight: 1.5, whiteSpace: "nowrap",
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+        background: v.background, color: v.color,
+        boxShadow: disabled ? "none" : (hover && !disabled ? v.shadow.replace(/0 3px 6px/, "0 5px 10px") : v.shadow),
+        transform: hover && !disabled && variant !== "ghost" ? "translateY(-1px)" : "none",
+        transition: "box-shadow .16s ease, transform .16s ease, filter .16s ease",
+        filter: disabled ? "grayscale(.5)" : "none",
+        opacity: disabled ? 0.55 : 1,
+        ...size, ...s,
+      }}>
+      {children}
+    </button>
+  );
 };
 
 const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength, min, max, step }) => (
@@ -2162,6 +2201,21 @@ const Table = ({ cols, rows, emptyMsg = "No records found." }) => (
 // hex now, so a tile that passes no colour at all must not be mistaken
 // for a "healthy" state tile. The default is therefore null — plain
 // ink — and only a colour a caller explicitly chose can mark a state.
+// Small colour helpers for the gradient tiles. Kept here rather than
+// hardcoding a second shade per token, so a palette change stays a
+// one-line edit in T.
+const hexA = (hex, a) => {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
+const shade = (hex, pct) => {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  const f = v => Math.max(0, Math.min(255, Math.round(v + (pct / 100) * 255)));
+  return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => f(v).toString(16).padStart(2, "0")).join("")}`;
+};
+
 const STATE_COLORS = new Set([T.warn, T.danger, T.success]);
 
 // Counts up to the value on mount. A number that lands rather than
@@ -2205,35 +2259,44 @@ const StatCard = ({ label, value, color = null, icon, tone, onClick, title, hint
                           : (brand || { c: T.muted, bg: T.subtle, br: T.border });
   const shown = useCountUp(value);
   const loading = value === "…";
+  // The icon tile is a filled gradient square that sits proud of the
+  // card on its own deeper shadow. That floating tile is the single
+  // detail that makes the Material card read the way it does — it is
+  // the only place a saturated fill appears on the Dashboard.
+  const tileGrad = isState
+    ? `linear-gradient(195deg, ${chip.c}, ${chip.c})`
+    : `linear-gradient(195deg, ${chip.c}, ${shade(chip.c, -18)})`;
   return (
     <Card onClick={onClick} title={title}
       className={onClick ? "cg-lift" : undefined}
-      style={{
-        // A hairline of the tile's own colour along the top: enough to
-        // give the row rhythm and warmth, not enough to shout.
-        borderTop: `2px solid ${chip.c}`,
-        textAlign: "left", cursor: onClick ? "pointer" : undefined,
-        display: "flex", alignItems: "flex-start", gap: 12,
-      }}>
-      {icon && (
-        <span style={{
-          width: 34, height: 34, borderRadius: 8, flexShrink: 0,
-          background: chip.bg, border: `1px solid ${chip.br}`, color: chip.c,
-          display: "grid", placeItems: "center",
-        }}>
-          <Icon name={icon} size={17} />
+      style={{ textAlign: "left", cursor: onClick ? "pointer" : undefined, padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <span style={{ minWidth: 0, flex: 1 }}>
+          {/* Two lines are reserved whether or not the label needs them,
+              so a wrapping label cannot push its number out of line with
+              the tile beside it. */}
+          <span style={{ ...TYPE.label, fontSize: 9.5, color: T.muted, display: "block", minHeight: 22, lineHeight: 1.25 }}>{label}</span>
+          {loading
+            ? <span className="cg-skeleton" style={{ display: "block", width: 64, height: 30, marginTop: 4 }} aria-label="Loading" />
+            : <span style={{ display: "block", fontSize: 27, fontWeight: 700, letterSpacing: "-0.025em", color: isState ? color : T.text, fontVariantNumeric: "tabular-nums", marginTop: 2, lineHeight: 1.2 }}>{shown}</span>}
         </span>
+        {icon && (
+          <span style={{
+            width: 48, height: 48, borderRadius: 10, flexShrink: 0,
+            background: tileGrad, color: "#fff",
+            display: "grid", placeItems: "center",
+            boxShadow: `0 4px 10px -2px ${hexA(chip.c, .45)}, 0 2px 4px -1px ${hexA(chip.c, .3)}`,
+          }}>
+            <Icon name={icon} size={22} stroke={1.7} />
+          </span>
+        )}
+      </div>
+      {hint && (
+        <>
+          <div style={{ borderTop: `1px solid ${T.border}`, margin: "13px -16px 0" }} />
+          <div style={{ ...TYPE.helper, padding: "9px 0 0", color: T.muted }}>{hint}</div>
+        </>
       )}
-      <span style={{ minWidth: 0, flex: 1 }}>
-        {/* Two lines are reserved whether or not the label needs them,
-            so a wrapping label cannot push its number out of line with
-            the tile beside it. */}
-        <span style={{ ...TYPE.label, fontSize: 9.5, color: T.muted, display: "block", minHeight: 22, lineHeight: 1.25 }}>{label}</span>
-        {loading
-          ? <span className="cg-skeleton" style={{ display: "block", width: 56, height: 28, marginTop: 6 }} aria-label="Loading" />
-          : <span style={{ display: "block", fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: isState ? color : T.text, fontVariantNumeric: "tabular-nums", marginTop: 4, lineHeight: 1.15 }}>{shown}</span>}
-        {hint && <span style={{ ...TYPE.helper, display: "block", marginTop: 2 }}>{hint}</span>}
-      </span>
     </Card>
   );
 };
@@ -2435,20 +2498,28 @@ function Dashboard({ data }) {
           eight that meant nothing. */}
       <div className="cg-stagger" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(292px,1fr))", gap: 12, marginBottom: 24 }}>
         <StatCard label="Total Parts"       value={loadingStats?"…":totalParts.toLocaleString()} tone="inventory" icon="master"
+          hint={`across ${categories.length} categories`}
           onClick={()=>navigateTo && navigateTo('master')} title="Open the Master Parts Table" />
         <StatCard label="Categories"        value={categories.length}   tone="reference" icon="category"
+          hint="defines segment AA"
           onClick={()=>navigateTo && navigateTo('categories')} title="Open Main Categories" />
         <StatCard label="Manufacturers"     value={manufacturers.length} tone="reference" icon="manufacturer"
+          hint="defines segment BB"
           onClick={()=>navigateTo && navigateTo('manufacturers')} title="Open Manufacturers" />
         <StatCard label="Models"            value={models.length}       tone="reference" icon="model"
+          hint="defines segment CC"
           onClick={()=>navigateTo && navigateTo('models')} title="Open Equipment Models" />
         <StatCard label="Functional Groups" value={funcGroups.length}   tone="reference" icon="funcgroup"
+          hint="defines segment EE"
           onClick={()=>navigateTo && navigateTo('funcgroups')} title="Open Functional Groups" />
         <StatCard label="Disciplines"       value={disciplines.length}  tone="reference" icon="discipline"
+          hint="defines segment DD"
           onClick={()=>navigateTo && navigateTo('disciplines')} title="Open Disciplines" />
         <StatCard label="Parts in Stock"    value={partsInStock===null?"…":partsInStock.toLocaleString()} tone="inventory" icon="stockcount"
+          hint={loadingStats?"\u00a0":`of ${totalParts.toLocaleString()} coded`}
           onClick={()=>navigateTo && navigateTo('master', { inStock: 'in' })} title="Parts with stock on hand" />
         <StatCard label="Movements (30d)"   value={movementsThisMonth===null?"…":movementsThisMonth.toLocaleString()} tone="activity" icon="movements"
+          hint="receipts, issues and returns"
           onClick={()=>navigateTo && navigateTo('movements')} title="Open Stock Movements" />
       </div>
 
@@ -2461,8 +2532,10 @@ function Dashboard({ data }) {
           hint={alerts.counts.out>0?"Needs ordering now":"Nothing out of stock"}
           onClick={()=>navigateTo && navigateTo('alerts', { severity: ['out'] })} title="Show parts that are out of stock" />
         <StatCard label="Critical" value={alerts.loading?"…":alerts.counts.critical.toLocaleString()} color={T.danger} icon="alerts"
+          hint="at or near zero"
           onClick={()=>navigateTo && navigateTo('alerts', { severity: ['critical'] })} title="Show critical parts" />
         <StatCard label="Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color={T.warn} icon="reorder"
+          hint="below the reorder point"
           onClick={()=>navigateTo && navigateTo('alerts', { severity: ['low'] })} title="Show parts below their reorder point" />
         <StatCard label="No reorder point" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} icon="lock"
           hint="These can never raise an alert"
@@ -2661,7 +2734,7 @@ const COLOR_PRESETS = [
   { color:"#831843", bg:"#fdf2f8", name:"Pink"   },
 ];
 
-const ICON_PRESETS = ["","🔧","🗄️","⛽","📡","🛢️","","","🏭","🔬","⚡","️","🔑","📋","💡","🧰","🔄","⚗️"];
+const ICON_PRESETS = ["","🔧","🗄","⛽","📡","🛢","","","🏭","🔬","⚡","","🔑","📋","💡","🧰","🔄","⚗"];
 
 function CategoriesPage({ data }) {
   const { categories, parts, ops } = data;
@@ -2852,7 +2925,7 @@ function CategoriesPage({ data }) {
               </div>
               <div style={fStyle}>
                 <label style={lStyle}>Icon Emoji</label>
-                <Input value={form.icon} onChange={e=>setForm(f=>({...f,icon:e.target.value}))} placeholder="e.g. ⚙️" />
+                <Input value={form.icon} onChange={e=>setForm(f=>({...f,icon:e.target.value}))} placeholder="e.g. ⚙" />
               </div>
             </div>
 
@@ -3948,7 +4021,7 @@ function CodeGeneratorPage({ data }) {
     // the opening-balance estimator or confirmed on the Stock Count page,
     // never typed in here.
     setSaved(true);
-    flash(`✅ Code ${generatedCode} saved to Master Table`);
+    flash(`Code ${generatedCode} saved to Master Table`);
   };
 
   const resetForm = () => {
@@ -4044,7 +4117,7 @@ function CodeGeneratorPage({ data }) {
               </button>
               <button onClick={()=>setSeqMode("manual")}
                 style={{flex:1,padding:"6px",borderRadius:5,border:`2px solid ${seqMode==="manual"?"#047857":T.border}`,background:seqMode==="manual"?"#d1fae5":"#fff",color:seqMode==="manual"?"#047857":T.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
-                ✏️ Manual
+                ✏ Manual
               </button>
             </div>
             {seqMode==="auto"
@@ -4099,15 +4172,15 @@ function CodeGeneratorPage({ data }) {
                   ? <div style={{textAlign:"center",color:T.muted,fontSize:12,marginBottom:10}}>Checking sequence…</div>
                   : seqError
                     ? <div style={{textAlign:"center",color:T.danger,fontSize:12,marginBottom:10}}>
-                        ⚠️ Could not check the next sequence number: {seqError}. Save is disabled — reload and try again, or set the number manually.
+                        Could not check the next sequence number: {seqError}. Save is disabled — reload and try again, or set the number manually.
                       </div>
                   : codeExists
-                    ? <div style={{textAlign:"center",color:T.danger,fontWeight:700,fontSize:13,marginBottom:10}}>⚠️ This code already exists</div>
-                    : <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>✅ Valid 6-segment code</div>
+                    ? <div style={{textAlign:"center",color:T.danger,fontWeight:700,fontSize:13,marginBottom:10}}>This code already exists</div>
+                    : <div style={{textAlign:"center",color:T.success,fontSize:12,marginBottom:10}}>Valid 6-segment code</div>
                 }
                 {saved
                   ? <div style={{display:"flex",gap:8}}>
-                      <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>✅ Saved!</div>
+                      <div style={{flex:1,textAlign:"center",padding:"10px",background:"#d1fae5",borderRadius:6,color:"#047857",fontWeight:700,fontSize:13}}>Saved!</div>
                       <Btn variant="secondary" onClick={resetForm} style={{flex:1}}>New Code</Btn>
                     </div>
                   : <Btn onClick={handleSave} style={{width:"100%"}} disabled={saving||codeExists||seqLoading||!!seqError}>
@@ -4173,12 +4246,12 @@ function CodeGeneratorPage({ data }) {
                     onUploaded={url=>{ setImageUrl(url); flash("Image uploaded successfully"); }}
                   />
                 : <div style={{fontSize:12,color:T.muted,padding:"12px",background:T.subtle,borderRadius:6}}>
-                    🟡 Image upload requires a connected Supabase database. Running in local mode.
+                    Image upload requires a connected Supabase database. Running in local mode.
                   </div>
               }
               {imageUrl && (
                 <div style={{marginTop:10,padding:"8px 12px",background:"#d1fae5",borderRadius:6,fontSize:12,color:"#047857",fontWeight:600}}>
-                  ✅ Image will be saved with the part when you click "Save to Master Table"
+                  Image will be saved with the part when you click "Save to Master Table"
                 </div>
               )}
             </Card>
@@ -4415,7 +4488,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         {mode==='confirm-delete' && (
           <div style={{ padding:24 }}>
             <div style={{ background:T.dangerBg,borderRadius:8,padding:20,marginBottom:20,border:`1px solid #fca5a5` }}>
-              <div style={{ fontWeight:800,fontSize:16,color:T.danger,marginBottom:8 }}>⚠️ Delete this spare part?</div>
+              <div style={{ fontWeight:800,fontSize:16,color:T.danger,marginBottom:8 }}>Delete this spare part?</div>
               <div style={{ fontFamily:"monospace",fontWeight:700,color:T.danger,fontSize:14,marginBottom:6 }}>{partView.code}</div>
               <div style={{ fontSize:13,color:T.text }}>{partView.shortDesc}</div>
             </div>
@@ -4613,7 +4686,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
         {mode==='edit' && (
           <div style={{ padding:"20px 24px" }}>
             <div style={{ background:"#fffbeb",border:"1px solid #fbbf24",borderRadius:7,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#92400e",fontWeight:600 }}>
-              ✏️ Editing editable fields only. The 6-segment code (<strong>{part.code}</strong>) cannot be changed.
+              ✏ Editing editable fields only. The 6-segment code (<strong>{part.code}</strong>) cannot be changed.
             </div>
             <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
@@ -4649,7 +4722,7 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                 <label style={sLabel}>Part Image</label>
                 {dbReady
                   ? <FileUpload partCode={part.code} bucket="part-images" label="" currentUrl={imgUrl} onUploaded={url=>{setImgUrl(url);flash("Image uploaded");}}/>
-                  : <div style={{ fontSize:12,color:T.muted,padding:10,background:T.subtle,borderRadius:6 }}>🟡 Image upload requires live DB</div>
+                  : <div style={{ fontSize:12,color:T.muted,padding:10,background:T.subtle,borderRadius:6 }}>Image upload requires live DB</div>
                 }
               </div>
 
@@ -4901,7 +4974,7 @@ function HierarchyTreePage({ data }) {
       )}
       {loadError && (
         <Card style={{ marginBottom:16, background:T.dangerBg, border:"1px solid #fca5a5" }}>
-          <div style={{ color:T.danger, fontSize:13, fontWeight:600 }}>⚠️ {loadError}</div>
+          <div style={{ color:T.danger, fontSize:13, fontWeight:600 }}>{loadError}</div>
         </Card>
       )}
 
@@ -5208,7 +5281,11 @@ function MasterTablePage({ data }) {
                           <StatusTag tone={r.status==="Active"?"neutral":"warn"}>{r.status}</StatusTag>
                         </td>
                         <td style={{ padding:"0 12px", height:40, whiteSpace:"nowrap" }} onClick={e=>e.stopPropagation()}>
-                          <Btn small variant="secondary" onClick={()=>setMoveTarget(r)}>Move</Btn>
+                          {/* A text button, not a pill. The reference does
+                              the same: a filled pill repeated down every
+                              row stops being a call to action and starts
+                              being wallpaper. */}
+                          <Btn small variant="ghost" onClick={()=>setMoveTarget(r)}>Move</Btn>
                         </td>
                       </tr>
                     );
@@ -5302,7 +5379,7 @@ function AdminPage({ data }) {
     <div>
       <PageHeader title="Administration" sub="Manage all master data modules for the coding framework" />
       <div style={{ padding:"14px 18px",background:"#0f172a",borderRadius:8,marginBottom:24,color:"#38bdf8",fontFamily:"monospace",fontWeight:700,fontSize:14 }}>
-        ⚠️ All changes must preserve the mandatory format: AA – BB – CC – DD – EE – 0001
+        All changes must preserve the mandatory format: AA – BB – CC – DD – EE – 0001
       </div>
       <NotificationSettingsCard />
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:16 }}>
@@ -5504,7 +5581,7 @@ function StockCountPage({ data }) {
       {/* Progress header */}
       <Card style={{ marginBottom:20 }}>
         {!dbReady ? (
-          <div style={{ color:T.muted, fontSize:13 }}>🟡 Requires a live database connection.</div>
+          <div style={{ color:T.muted, fontSize:13 }}>Requires a live database connection.</div>
         ) : confidence === null ? (
           <div style={{ color:T.muted, fontSize:13 }}>Loading…</div>
         ) : (
@@ -5548,7 +5625,7 @@ function StockCountPage({ data }) {
             <option value="none">Never Set</option>
           </Select>
           <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
-            <Btn small variant="secondary" onClick={printCountSheet}>🖨️ Print Count Sheet</Btn>
+            <Btn small variant="secondary" onClick={printCountSheet}>Print Count Sheet</Btn>
             <Btn small onClick={()=>setShowImport(true)}>Bulk CSV Import</Btn>
           </div>
         </div>
@@ -5556,7 +5633,7 @@ function StockCountPage({ data }) {
 
       <Card>
         {!dbReady ? (
-          <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>Requires a live database connection.</div>
         ) : loading ? (
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading parts…</div>
         ) : (
@@ -5970,7 +6047,7 @@ function StockMovementsPage({ data }) {
 
       <Card>
         {!dbReady ? (
-          <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>Requires a live database connection.</div>
         ) : loading ? (
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading transactions…</div>
         ) : (
@@ -6181,7 +6258,7 @@ function ReorderSettingsPage({ data }) {
 
       {!canEdit && (
         <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:7, padding:"10px 14px", marginBottom:16, fontSize:12, color:"#92400e", fontWeight:600 }}>
-          ⚠️ Your account doesn't have permission to change reorder settings. You can still view current thresholds below.
+          Your account doesn't have permission to change reorder settings. You can still view current thresholds below.
         </div>
       )}
 
@@ -6224,7 +6301,7 @@ function ReorderSettingsPage({ data }) {
 
       <Card>
         {!dbReady ? (
-          <div style={{ textAlign:"center", padding:40, color:T.muted }}>🟡 Requires a live database connection.</div>
+          <div style={{ textAlign:"center", padding:40, color:T.muted }}>Requires a live database connection.</div>
         ) : loading ? (
           <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading…</div>
         ) : (
@@ -6344,7 +6421,7 @@ function BulkReorderModal({ filters, matchCount, onClose, onApplied }) {
   return (
     <Modal title="Set for Filtered Selection" onClose={onClose}>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>⚠️ {error}</div>}
+        {error && <div style={{ background:T.dangerBg, color:T.danger, borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:600 }}>{error}</div>}
         <div style={{ background:T.warnBg, border:"1px solid #fbbf24", borderRadius:6, padding:"10px 14px", fontSize:13, color:"#92400e", fontWeight:600 }}> This applies to every part matching your current filters — <strong>{matchCount.toLocaleString()} part(s)</strong>. Leave a field blank to leave it unchanged.
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
@@ -6612,7 +6689,7 @@ function NotificationSettingsCard() {
 
   const handleTest = async () => {
     const reg = await navigator.serviceWorker.ready;
-    reg.showNotification('⚠️ CarGas Stock Alert (test)', {
+    reg.showNotification('CarGas Stock Alert (test)', {
       body: 'This is a test notification — push delivery is working.',
       icon: '/logo.png',
     });
@@ -6658,7 +6735,7 @@ function NotificationSettingsCard() {
         </div>
       ) : subscribed ? (
         <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          <span style={{ fontSize:13, color:T.success, fontWeight:700 }}>✅ Enabled on this device</span>
+          <span style={{ fontSize:13, color:T.success, fontWeight:700 }}>Enabled on this device</span>
           <Btn small variant="secondary" onClick={handleTest}>Send test notification</Btn>
           <Btn small variant="danger" onClick={handleUnsubscribe} disabled={busy}>Unsubscribe</Btn>
         </div>
@@ -6851,7 +6928,7 @@ function StockAlertsPage({ data }) {
           {loading ? (
             <div style={{ textAlign:"center", padding:40, color:T.muted }}>Loading alerts…</div>
           ) : rows.length === 0 ? (
-            <div style={{ textAlign:"center", padding:40, color:T.muted }}>No active alerts — all stock levels are healthy ✅</div>
+            <div style={{ textAlign:"center", padding:40, color:T.muted }}>No active alerts — all stock levels are healthy </div>
           ) : (
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead>
@@ -7071,7 +7148,7 @@ function AssetRegistryPage({ data }) {
         <StatCard label="Active" value={kpis?kpis.active.toLocaleString():"…"} color="#15803d" icon="🟢"/>
         <StatCard label="In Maintenance" value={kpis?kpis.in_maintenance.toLocaleString():"…"} color="#b45309" icon="🟠"/>
         <StatCard label="Down" value={kpis?kpis.down.toLocaleString():"…"} color="#dc2626" icon="🔴"/>
-        <StatCard label="Due for PM (30d)" value={kpis?kpis.due_30.toLocaleString():"…"} color="#7c3aed" icon="️"/>
+        <StatCard label="Due for PM (30d)" value={kpis?kpis.due_30.toLocaleString():"…"} color="#7c3aed" icon=""/>
       </div>
 
       {/* Filters */}
@@ -7123,7 +7200,7 @@ function AssetRegistryPage({ data }) {
                   <div style={{ fontFamily:'monospace', fontWeight:800, fontSize:13, color:T.text }}>{a.assetTag}</div>
                   <div style={{ fontSize:12, color:T.muted, marginBottom:8 }}>{a.mfrLabel} {a.modelLabel}</div>
                   <Pill color={meta.color} bg={meta.bg} mono={false} size={11}>{meta.label}</Pill>
-                  {a.pmDue && <span style={{ marginLeft:6, fontSize:11, color:'#b45309', fontWeight:700 }}>️ PM Due</span>}
+                  {a.pmDue && <span style={{ marginLeft:6, fontSize:11, color:'#b45309', fontWeight:700 }}> PM Due</span>}
                 </div>
               </Card>
             );
@@ -7160,7 +7237,7 @@ function AssetRegistryPage({ data }) {
                       <td style={{ padding:"7px 9px", fontSize:12, color:T.muted }}>{a.lastPmDate || "—"}</td>
                       <td style={{ padding:"7px 9px" }}>
                         {a.pmDue
-                          ? <Pill color="#b45309" bg="#fef3c7" mono={false} size={11}>️ PM Due</Pill>
+                          ? <Pill color="#b45309" bg="#fef3c7" mono={false} size={11}> PM Due</Pill>
                           : a.openEventCount > 0
                             ? <Pill color="#1d4ed8" bg="#dbeafe" mono={false} size={11}>{a.openEventCount} open</Pill>
                             : <span style={{ color:"#d1d5db" }}>—</span>}
@@ -7329,7 +7406,7 @@ function AssetFormModal({ data, asset, onClose, onSaved }) {
 
         <FileUpload partCode={tagPreview || asset?.assetTag || 'pending'} bucket="asset-photos" label="Photo" currentUrl={photoUrl} onUploaded={setPhotoUrl}/>
 
-        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>{error}</div>}
 
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
@@ -7417,7 +7494,7 @@ function UpdateHoursModal({ asset, onClose, onSaved }) {
           <input type="checkbox" checked={isReset} onChange={e=>setIsReset(e.target.checked)}/> Meter was reset/replaced (allow a lower reading)
         </label>
         <div><label style={sLabel}>Notes</label><input value={notes} onChange={e=>setNotes(e.target.value)} style={fieldStyle}/></div>
-        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>{error}</div>}
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
           <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"Save Reading"}</Btn>
@@ -7484,7 +7561,7 @@ function PartPickerRow({ row, assetModel, onChange, onRemove }) {
       </div>
       {!searchAll && <div style={{ fontSize:10, color:T.muted, marginTop:4 }}>Filtered to this asset's model — <span onClick={()=>setSearchAll(true)} style={{ color:T.accent, cursor:"pointer", textDecoration:"underline" }}>search all parts</span></div>}
       {searchAll && <div style={{ fontSize:10, color:T.muted, marginTop:4 }}>Searching all parts — <span onClick={()=>setSearchAll(false)} style={{ color:T.accent, cursor:"pointer", textDecoration:"underline" }}>filter to this model</span></div>}
-      {exceedsStock && <div style={{ fontSize:11, color:T.danger, marginTop:4 }}>⚠️ Quantity exceeds on-hand stock ({row.qtyOnHand}) — allowed, but double-check.</div>}
+      {exceedsStock && <div style={{ fontSize:11, color:T.danger, marginTop:4 }}>Quantity exceeds on-hand stock ({row.qtyOnHand}) — allowed, but double-check.</div>}
     </div>
   );
 }
@@ -7595,7 +7672,7 @@ function MaintenanceEventModal({ asset, onClose, onSaved }) {
           ))}
         </div>
 
-        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+        {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>{error}</div>}
 
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
@@ -7793,7 +7870,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
                 <div><label style={sLabel}>Root Cause</label><input value={form.rootCause} onChange={e=>set('rootCause', e.target.value)} style={fieldStyle}/></div>
               </div>
             )}
-            {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>⚠️ {error}</div>}
+            {error && <div style={{ fontSize:12, color:T.danger, background:T.dangerBg, padding:"8px 12px", borderRadius:6 }}>{error}</div>}
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}` }}>
               <Btn variant="secondary" onClick={()=>{ setEditing(false); setError(''); }}>Cancel</Btn>
               <Btn onClick={handleSave} disabled={saving}>{saving?"Saving…":"Save Changes"}</Btn>
@@ -7836,7 +7913,7 @@ function MaintenanceEventDetailModal({ event, parts, canEdit, onClose, onChanged
               ) : (
                 <div style={{ background:T.warnBg, border:`1px solid ${T.warn}`, borderRadius:6, padding:"10px 12px" }}>
                   <div style={{ fontSize:12, fontWeight:700, color:T.warn, marginBottom:6 }}>
-                    ⚠️ This returns {returning.length} part line{returning.length>1?'s':''} to stock:
+                    This returns {returning.length} part line{returning.length>1?'s':''} to stock:
                   </div>
                   {returning.map(p => (
                     <div key={p.id} style={{ fontSize:12, color:T.text, display:"flex", gap:8, padding:"2px 0" }}>
@@ -8394,7 +8471,7 @@ function ReportsPage({ data }) {
       </div>
 
       {!dbReady
-        ? <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>🟡 Requires a live database connection.</div></Card>
+        ? <Card><div style={{ textAlign:'center', padding:40, color:T.muted }}>Requires a live database connection.</div></Card>
         : tab === 'fleet'       ? <FleetOverviewTab navigateTo={navigateTo}/>
         : tab === 'flags'       ? <ReliabilityFlagsTab models={models} navigateTo={navigateTo}/>
         : tab === 'consumption' ? <ConsumptionTab categories={categories} models={models} funcGroups={funcGroups}/>
@@ -8800,7 +8877,7 @@ function ConsumptionTab({ categories, models, funcGroups }) {
         </div>
         {capped && (
           <div style={{ marginTop:10, fontSize:12, color:T.warn, background:T.warnBg, padding:'8px 12px', borderRadius:6 }}>
-            ⚠️ This period returned the maximum of {db.CONSUMPTION_ROW_CAP.toLocaleString()} lines, so the
+            This period returned the maximum of {db.CONSUMPTION_ROW_CAP.toLocaleString()} lines, so the
             totals below cover only part of it. Narrow the date range for an exact figure.
           </div>
         )}
@@ -8923,7 +9000,7 @@ function CostTab({ models }) {
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:14 }}>
         <StatCard label={`Parts cost ${year}`} value={curCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="💰"/>
-        <StatCard label={`Parts cost ${year-1}`} value={prevCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="🗓️" color={T.muted}/>
+        <StatCard label={`Parts cost ${year-1}`} value={prevCost.toLocaleString(undefined,{maximumFractionDigits:2})} icon="🗓" color={T.muted}/>
         <StatCard label="Year over year"
           value={delta === null ? '—' : `${delta>0?'+':''}${delta.toFixed(1)}%`}
           icon={delta === null ? '➖' : delta > 0 ? '📈' : '📉'}
@@ -9387,7 +9464,7 @@ function AlertBell({ navigateTo }) {
           {loadingTop ? (
             <div style={{ padding:20, textAlign:'center', color:T.muted, fontSize:12 }}>Loading…</div>
           ) : top.length === 0 ? (
-            <div style={{ padding:20, textAlign:'center', color:T.muted, fontSize:12 }}>No active alerts — all stock levels are healthy ✅</div>
+            <div style={{ padding:20, textAlign:'center', color:T.muted, fontSize:12 }}>No active alerts — all stock levels are healthy </div>
           ) : (
             top.map(r => {
               const meta = ALERT_SEVERITY_META[r.stock_status] || { color:T.muted, tone:'neutral' };
