@@ -257,6 +257,9 @@ below that, rows are omitted rather than shown as weak signals.
    here were shipped as "done" and were not. The app has an **offline mode**
    (unset `VITE_SUPABASE_URL`, or point it at a placeholder) that renders every
    page with seed data — use it with Playwright to check UI changes.
+   Browser work goes through the `playwright-cli` skill; run
+   `scripts/setup-playwright-cli.sh` once per session first
+   (see `docs/PLAYWRIGHT_CLI.md`).
 3. **Test destructive SQL inside a transaction that rolls back**
    (`DO $$ … RAISE EXCEPTION 'results >> % <<' … $$`) before running it live.
 4. **One numbered migration per change**, with DDL, indexes, RLS policies,
