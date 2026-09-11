@@ -16,21 +16,36 @@
 //
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 //
-// Deployed with verify_jwt=false, same trade-off as low-stock-alert:
-// invoked by a scheduled job with no user session, only ever reads
-// alert state and pushes notifications — it can't mutate spare_parts
-// or leak anything beyond "some parts are low," so the cron job in
-// migration 019 calls it with no Authorization header at all rather
-// than embedding the service role key in a committed SQL file.
+// Deployed with verify_jwt=false because the caller is pg_cron, which
+// has no user session. Since migration 040 it also requires the
+// x-alert-cron-secret header, verified by verify_alert_cron_secret()
+// inside Postgres — a purpose-scoped secret that grants nothing but the
+// right to trigger an alert run, rather than the service role key the
+// cron command would otherwise have to carry.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
 
-Deno.serve(async (_req: Request) => {
+Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    // Is this our cron job? Checked before anything else.
+    const gate = createClient(supabaseUrl, serviceKey);
+    const { data: authorised, error: authErr } = await gate.rpc(
+      "verify_alert_cron_secret",
+      { p_secret: req.headers.get("x-alert-cron-secret") ?? "" },
+    );
+    if (authErr) throw authErr;
+    if (authorised !== true) {
+      return new Response(
+        JSON.stringify({ error: "unauthorized" }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
     const vapidPublic = Deno.env.get("VAPID_PUBLIC_KEY");
     const vapidPrivate = Deno.env.get("VAPID_PRIVATE_KEY");
     const vapidSubject = Deno.env.get("VAPID_SUBJECT");
@@ -68,6 +83,7 @@ Deno.serve(async (_req: Request) => {
     const { data: recentLog, error: logErr } = await supabase
       .from("alert_notifications_log")
       .select("part_id,severity")
+      .eq("channel", "push")
       .gte("notified_at", cutoff);
     if (logErr) throw logErr;
 
@@ -117,7 +133,7 @@ Deno.serve(async (_req: Request) => {
     }
 
     await supabase.from("alert_notifications_log").insert(
-      freshAlerts.map((a) => ({ part_id: a.part_id, severity: a.stock_status })),
+      freshAlerts.map((a) => ({ part_id: a.part_id, severity: a.stock_status, channel: "push" })),
     );
 
     return new Response(

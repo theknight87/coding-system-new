@@ -1090,7 +1090,7 @@ function UsersPage() {
   const [users,     setUsers]     = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [form,      setForm]      = useState({ email:'', full_name:'', role:'department_user', department:'' });
+  const [form,      setForm]      = useState({ email:'', full_name:'', department:'' });
   const [toast,     setToast]     = useState(null);
 
   const flash = (t, type='ok') => { setToast({text:t,type}); setTimeout(()=>setToast(null),3200); };
@@ -1108,11 +1108,16 @@ function UsersPage() {
       email: form.email,
       options: {
         emailRedirectTo: window.location.origin,
-        data: { full_name: form.full_name, role: form.role, department: form.department || null },
+        // No role here. Sign-up metadata is client input on an
+        // unauthenticated endpoint, so migration 039 makes the database
+        // ignore it entirely — every new account is created as
+        // department_user and an admin promotes afterwards. Sending it
+        // anyway would only imply it still decides something.
+        data: { full_name: form.full_name, department: form.department || null },
       },
     });
     if (error) return flash(error.message,'err');
-    flash(`Invitation sent to ${form.email} — they will join as ${form.role === 'admin' ? 'Admin' : 'Department User'}`);
+    flash(`Invitation sent to ${form.email} — they will join as a Department User`);
     setShowModal(false);
     reload();
   };
@@ -1187,14 +1192,13 @@ function UsersPage() {
                 <Input value={form[f.key]} onChange={e=>setForm(p=>({...p,[f.key]:e.target.value}))} placeholder={f.ph}/>
               </div>
             ))}
-            <div>
-              <label style={{ display:'block', fontSize:11, fontWeight:700, color:T.muted, marginBottom:5, textTransform:'uppercase', letterSpacing:0.8 }}>Role</label>
-              <Select value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))}>
-                <option value="department_user">Department User</option>
-                <option value="admin">Admin</option>
-              </Select>
+            {/* The Role select is gone, not disabled. Migration 039
+                makes the database ignore any role the client sends at
+                sign-up, so a control implying otherwise would be a lie. */}
+            <div style={{ background:T.subtle, border:`1px solid ${T.border}`, borderRadius:T.radius, padding:'10px 12px', fontSize:12.5, color:T.textSecondary, lineHeight:1.5 }}>
+              Everyone is invited as a <strong style={{ color:T.text }}>Department User</strong>. To make this person an admin, use <strong style={{ color:T.text }}>Change Role</strong> on this page after they have signed in.
             </div>
-            <div style={{ background:'#fffbeb', borderRadius:6, padding:10, fontSize:12, color:'#b45309' }}>📧 A magic-link invitation email will be sent.</div>
+            <div style={{ background:T.warnBg, border:`1px solid ${T.warnBorder}`, borderRadius:T.radius, padding:'10px 12px', fontSize:12.5, color:T.warn }}>A magic-link invitation email will be sent.</div>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <Btn variant="secondary" onClick={()=>setShowModal(false)}>Cancel</Btn>
               <Btn onClick={handleInvite}>Send Invitation</Btn>
