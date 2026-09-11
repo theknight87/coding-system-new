@@ -54,10 +54,11 @@ dependency without asking.
 src/App.jsx          ~8,800 lines — every page and component
 src/lib/db.js        ~1,390 lines — all Supabase access
 src/lib/supabase.js  client creation
-supabase/migrations/ 001 … 038
+supabase/migrations/ 001 … 042
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
 supabase/scripts/    seed_demo_dataset.sql, remove_demo_assets.sql (manual)
-docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md
+docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md,
+                     SECURITY.md (what enforces what — read before touching auth/RLS)
 CHANGELOG.md         what each phase added, and why
 ```
 
@@ -260,7 +261,7 @@ below that, rows are omitted rather than shown as weak signals.
    (`DO $$ … RAISE EXCEPTION 'results >> % <<' … $$`) before running it live.
 4. **One numbered migration per change**, with DDL, indexes, RLS policies,
    triggers, `COMMENT ON`, and a commented-out rollback block at the bottom.
-   Next number: **039**.
+   Next number: **043**.
 5. **Frontend edits:** complete replacement files or anchored, asserted
    patches. A careless `str.replace` with an empty needle once ballooned
    `db.js` to 9.4 MB.
@@ -280,24 +281,41 @@ tables, but eight of them were found with RLS off in production (fixed in
 Landmarks: `011` ledger · `015` reorder points · `017`–`019` alerts and push ·
 `020`–`022` assets · `023` maintenance↔stock link · `024` void double-count fix ·
 `026` partial returns + work-order numbers · `029` privilege-escalation fix ·
-`030` reliability views · `031`–`037` review fixes · `038` trash purge blockers.
+`030` reliability views · `031`–`037` review fixes · `038` trash purge blockers ·
+`039` sign-up role is not client input · `040`–`041` alert-function caller auth +
+email de-duplication · `042` server-derived row attribution.
 
 ---
 
-# 11. Review status (2026-09-09)
+# 11. Review status (security audit 2026-09-11)
 
-All CRITICAL and HIGH findings fixed and verified. Current state:
+All CRITICAL and HIGH findings fixed and verified against the LIVE
+database. Full detail, including the attack tests to re-run after
+touching auth or policies, is in **`docs/SECURITY.md`** — read that
+before changing anything in this section's territory.
 
-- ✅ No public table without RLS
+- ✅ No public table without RLS (19/19)
+- ✅ No permissive write policy, no `WITH CHECK (true)` insert policy
 - ✅ No `anon`-callable privileged function
 - ✅ No `SECURITY DEFINER` function without a pinned `search_path`
+- ✅ Sign-up cannot name its own role (039)
+- ✅ Alert Edge Functions reject an unauthenticated caller, and cannot
+      send a duplicate email inside 24h (040, 041)
+- ✅ Row attribution is forced to `auth.uid()` — 21 triggers (042)
 - ✅ No stock drift, no orphan maintenance lines
 - ✅ `v_asset_reliability_flags`: 532 ms → 22 ms (index on `reverses_txn_id`)
+
+⚠ **The browser reaches Postgres directly with a key that ships in the
+bundle.** RLS is not one control among several — it is the only one.
+Anything enforced in React is decoration.
 
 ## Open items
 
 1. **Department-user column restriction** — see the gap in §7. Needs your
-   decision.
+   decision. (A scope gap, not an escalation.)
+1b. **Two dashboard-only settings** — confirm sign-up is disabled, and enable
+   leaked-password protection. Neither is reachable via MCP or API; see
+   `docs/SECURITY.md` §5. Sign-up being open no longer grants admin (039).
 2. **`CP-FN-F30-AC-PRV-0001` is in Trash holding 2 units** (trashed
    2026-09-09 06:16, before the guard existed). Either restore it or write the
    stock off with an adjustment — the ledger still counts those 2. It cannot
