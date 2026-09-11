@@ -5,6 +5,14 @@
 import { supabase } from './supabase.js';
 
 // ─── AUTH HELPERS ─────────────────────────────────────────────
+// NOTE (migration 042): the created_by / updated_by / user_id values
+// this module sends are no longer authoritative. BEFORE triggers in the
+// database overwrite them with auth.uid() on insert and update, because
+// anything the browser sends is forgeable — audit_logs in particular had
+// WITH CHECK (true), so any signed-in user could write an entry
+// attributed to anyone. The calls below still pass the value for
+// readability and for the offline/local path; the database decides.
+// Do not add a new call site that relies on being able to choose it.
 async function uid() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
