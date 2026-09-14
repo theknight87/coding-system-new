@@ -1,8 +1,12 @@
 // low-stock-alert — Supabase Edge Function
 //
-// Queries v_stock_status for any part that is out/critical/low and,
-// if any exist, emails a summary via Resend. Designed to be invoked
-// on a schedule by pg_cron (see supabase/migrations/016_low_stock_alert_cron.sql).
+// Queries v_active_alerts for any part that is out/critical/low AND
+// not acknowledged or snoozed, and if any exist, emails a summary via
+// Resend. Acknowledge silences a part for good; Snooze until its date
+// passes. Both apply at every severity, out of stock included.
+//
+// Designed to be invoked on a schedule by pg_cron
+// (see supabase/migrations/016_low_stock_alert_cron.sql).
 //
 // Required secrets (Project Settings -> Edge Functions -> Secrets, or
 // `supabase secrets set NAME=value`):
@@ -75,10 +79,17 @@ Deno.serve(async (req: Request) => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
+    // v_active_alerts, not v_stock_status: only the former carries
+    // is_acknowledged, so reading v_stock_status made Acknowledge and
+    // Snooze invisible to email while push already honoured them. The
+    // same part was muted for one channel and not the other.
+    // NOTE: the part key here is `part_id`, not `id` as in
+    // v_stock_status. Getting that wrong returns 400, not a bad row.
     const { data: rows, error } = await supabase
-      .from("v_stock_status")
-      .select("id,code,short_desc,qty_on_hand,min_stock,reorder_point,stock_status,is_critical")
+      .from("v_active_alerts")
+      .select("part_id,code,short_desc,qty_on_hand,min_stock,reorder_point,stock_status,is_critical")
       .in("stock_status", ["out", "critical", "low"])
+      .eq("is_acknowledged", false)
       .order("severity_rank", { ascending: true })
       .limit(200);
 
@@ -105,7 +116,7 @@ Deno.serve(async (req: Request) => {
     if (logErr) throw logErr;
 
     const recentSet = new Set((recentLog || []).map((r) => `${r.part_id}:${r.severity}`));
-    const freshRows = rows.filter((r) => !recentSet.has(`${r.id}:${r.stock_status}`));
+    const freshRows = rows.filter((r) => !recentSet.has(`${r.part_id}:${r.stock_status}`));
 
     if (freshRows.length === 0) {
       return new Response(
@@ -159,7 +170,7 @@ Deno.serve(async (req: Request) => {
     // Written only after Resend accepted it, so a failed send does not
     // suppress the next attempt.
     await supabase.from("alert_notifications_log").insert(
-      freshRows.map((r) => ({ part_id: r.id, severity: r.stock_status, channel: "email" })),
+      freshRows.map((r) => ({ part_id: r.part_id, severity: r.stock_status, channel: "email" })),
     );
 
     return new Response(
