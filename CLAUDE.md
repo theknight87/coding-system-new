@@ -6,7 +6,7 @@ https://coding-system-new.pages.dev — Supabase project `fuwllmohhqlfcvhoyfgm`.
 **Do not redesign it. Do not rewrite it. Preserve the current architecture.
 Only modify files required for the requested feature.**
 
-Last full review: 2026-09-09 (see *Review status* at the end).
+Last full review: 2026-09-14 (see *Review status* at the end).
 
 ---
 
@@ -25,8 +25,9 @@ CP - GA - G04 - ME - GSK - 0235
 └───────────────────────────── main category
 ```
 
-Live scale: **5,867 parts, 5,881 stock transactions, 4 assets,
-21 maintenance events, 58,432 audit rows, 3 users.**
+Live scale (measured 2026-09-14): **5,867 parts, 5,886 stock
+transactions, 4 assets, 21 maintenance events, 58,478 audit rows,
+3 users.**
 
 Engines (`EN`) use dedicated **engine systems** (BAS, LUB, COL, AIR, FUE,
 ELS, OPS, ENC, GEN, SRV) in the 4th segment instead of the standard
@@ -51,8 +52,8 @@ dependency without asking.
 # 3. Repository layout
 
 ```
-src/App.jsx          ~8,800 lines — every page and component
-src/lib/db.js        ~1,390 lines — all Supabase access
+src/App.jsx          ~9,500 lines — every page and component
+src/lib/db.js        ~1,440 lines — all Supabase access
 src/lib/supabase.js  client creation
 supabase/migrations/ 001 … 044
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
@@ -158,7 +159,8 @@ that is correct, not a bug to work around.
 
 # 6. Tables and views
 
-**Tables (19):** `alert_acknowledgements`, `alert_notifications_log`,
+**Tables (20):** `alert_acknowledgements`, `alert_cron_auth` (041),
+`alert_notifications_log`,
 `asset_documents`, `asset_hours_log`, `assets`, `audit_logs`, `categories`,
 `disciplines`, `engine_systems`, `functional_groups`, `maintenance_events`,
 `maintenance_parts_used`, `manufacturers`, `models`, `push_subscriptions`,
@@ -219,10 +221,16 @@ caller was found able to set any part's stock).
 
 - RLS is **enabled on every public table**. Assume it is on; never ship a new
   table without policies.
-- Policies use `TO authenticated`. `anon` has no access to anything —
-  true since `044`, which revoked the grants that made it false. Note
-  that RLS alone does not achieve this: a `SECURITY DEFINER` view
-  bypasses it, so a new view needs its `anon` grant checked, not assumed.
+- `anon` has no access to anything — true since `044`, which revoked the
+  grants that made it false. RLS alone does not achieve this: a
+  `SECURITY DEFINER` view bypasses it, so a new view needs its `anon`
+  grant checked, not assumed.
+- ⚠ **Most policies are `TO PUBLIC`, not `TO authenticated`** — 27 of
+  them across 8 tables, four reading `USING (true)`. Measured
+  2026-09-14; the older claim in this file that policies are
+  `TO authenticated` was wrong. Nothing is exposed today because `anon`
+  holds no grant, but that is one layer where there should be two. See
+  finding #6 in `docs/SECURITY_History.md`.
 - `SECURITY DEFINER` functions are revoked from `anon`; only the RPCs `db.js`
   actually calls are granted to `authenticated`.
 - Never expose secrets. Edge-function secrets live in Supabase Dashboard →
@@ -276,6 +284,25 @@ below that, rows are omitted rather than shown as weak signals.
 6. **Explain every changed file** in the response, and end with
    FILES CREATED / FILES MODIFIED / SQL TO RUN / APPLY ORDER.
 7. Don't repeat work already done; don't touch anything outside the request.
+8. **Keep the record without being asked.** These three are part of
+   finishing a change, not a follow-up task:
+   - **Anything security-related** — a policy, grant, role, view guard,
+     RLS change, auth flow, secret handling, edge-function caller check,
+     or a finding you merely *noticed* — gets an entry appended to
+     `docs/SECURITY_History.md` in the same commit. Dated, with the
+     migration number, the evidence measured live, and what is still
+     open. Append; never rewrite an existing entry. Extend the §4
+     verification query whenever a finding teaches a new check, and
+     record the new expected output with the date it was measured.
+   - **Anything that changes how the project works** — a new page, table,
+     view, migration, role capability, convention or dependency — gets
+     `CLAUDE.md` updated in the same commit: the relevant section, the
+     migrations range, `Next number`, and the landmark list.
+   - **Anything that would have helped a future audit find it sooner**
+     gets folded into `security-audit/SKILL.md` **and**
+     `security-audit/SECURITY_AUDIT_PROMPT.md`, written generically —
+     no names, ids, table names or domains from this repository, since
+     that package is meant for other projects.
 
 ---
 
@@ -296,7 +323,7 @@ admin-only · `044` anon loses every read in `public`.
 
 ---
 
-# 11. Review status (security audit 2026-09-11)
+# 11. Review status (full review 2026-09-14)
 
 All CRITICAL and HIGH findings fixed and verified against the LIVE
 database. Full detail, including the attack tests to re-run after
@@ -315,6 +342,22 @@ before changing anything in this section's territory.
 - ✅ Row attribution is forced to `auth.uid()` — 21 triggers (042)
 - ✅ No stock drift, no orphan maintenance lines
 - ✅ `v_asset_reliability_flags`: 532 ms → 22 ms (index on `reverses_txn_id`)
+- ✅ Re-verified 2026-09-14: 6/6 department-user attack tests blocked,
+      3/3 `anon` attack tests blocked, 0 stock drift, 0 orphan lines,
+      0 profile↔auth mismatch, 2/2 cron jobs sending the secret,
+      0 production dependency vulnerabilities
+
+## Open after the 2026-09-14 review
+
+- 🟠 **MEDIUM — 27 policies are `TO PUBLIC`, four `USING (true)`.** Not
+  reachable today (no `anon` grant), but it is a single layer where
+  there should be two. Fix proposed as migration `045`; see finding #6
+  in `docs/SECURITY_History.md`. **Needs your go-ahead.**
+- 🟡 **LOW — 8 functions with a mutable `search_path`.** Not
+  exploitable: neither `anon` nor `authenticated` can `CREATE` in
+  `public`, so nothing can be planted to shadow a name. Hygiene.
+- 🟡 **LOW — 6 dev-dependency advisories** through `vite`.
+  `npm audit --omit=dev` is 0; nothing reaches the deployed bundle.
 
 ⚠ **The browser reaches Postgres directly with a key that ships in the
 bundle.** RLS is not one control among several — it is the only one.
@@ -327,11 +370,11 @@ Anything enforced in React is decoration.
 1b. **Two dashboard-only settings** — confirm sign-up is disabled, and enable
    leaked-password protection. Neither is reachable via MCP or API; see
    `docs/SECURITY_History.md` §5. Sign-up being open no longer grants admin (039).
-2. **`CP-FN-F30-AC-PRV-0001` is in Trash holding 2 units** (trashed
-   2026-09-09 06:16, before the guard existed). Either restore it or write the
-   stock off with an adjustment — the ledger still counts those 2. It cannot
-   be purged (1 stock movement), and neither can `CP-FN-F03-AC-SOV-0001`
-   (4 legacy `stock_movements` rows). Both correctly stay in Trash.
+2. ✅ **Trashed part holding stock — RESOLVED.** Re-measured 2026-09-14:
+   both `CP-FN-F30-AC-PRV-0001` and `CP-FN-F03-AC-SOV-0001` now hold
+   **0**, so the ledger no longer counts phantom units. Neither can be
+   purged (each is referenced by stock movements) and both correctly
+   stay in Trash — that part was never a bug.
 3. **Demo data** — `TEST-G04-002/003/004` and 18 `DEMO` maintenance events
    exist so the Indicators page has something to show. Remove with
    `supabase/scripts/remove_demo_assets.sql` (returns the parts to stock).

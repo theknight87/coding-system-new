@@ -167,6 +167,20 @@ project's migrations do, inside a transaction that rolls back, and
 reading its ACL. If a default ACL belongs to a platform-owned role you
 cannot alter, say so explicitly and name what stays exposed.
 
+Probe **every object kind**, not one: loop over tables *and* views (and
+materialized views / foreign tables where they exist), and state in the
+finding which kinds you enumerated — a census that covers one kind
+proves nothing about the other, and a finding that does not say what it
+searched cannot be re-checked.
+
+Read each policy's **role list** as well as its expression. A policy
+written without a `TO` clause applies to PUBLIC, which includes the
+anonymous role; a project can have correct-looking expressions
+throughout and still address every policy to everyone. A `USING (true)`
+read policy addressed to PUBLIC is protected only by the grant — report
+that as a finding even when the current grant makes it unreachable, and
+say plainly that it is a missing second layer rather than an open door.
+
 Where every signed-in user reaches the database as the **same** role and
 the application's own roles live in a table, note that a grant cannot
 express per-role authorization at all — revoking to hide something from

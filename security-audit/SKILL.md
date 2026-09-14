@@ -362,6 +362,48 @@ FROM pg_default_acl d JOIN pg_namespace n ON n.oid=d.defaclnamespace
 WHERE n.nspname='public';
 ```
 
+#### Probe every object kind, and say which you probed
+
+A census that loops over one `relkind` proves nothing about the other.
+This is not hypothetical: an audit that enumerated only views reported
+eleven leaking objects and called the exposure fully described. A later
+pass that enumerated tables as well found five more, holding rows the
+first report never mentioned. The fix had already covered both, so
+nothing was actually exposed — but the *report* was wrong, and a reader
+deciding what to prioritise would have been misled.
+
+- Loop over tables **and** views (`relkind IN ('r','v')`), plus
+  materialized views and foreign tables if the platform has them.
+- Write down which kinds the probe covered, in the finding itself. A
+  finding that does not say what it searched cannot be re-checked.
+- The same applies to roles: probing the anonymous role says nothing
+  about a second untrusted role, if the platform has one.
+
+#### Read the policy's ROLE list, not just its expression
+
+A policy with no `TO` clause applies to **PUBLIC** — which includes the
+anonymous role. A project can have a careful-looking policy set where
+every expression is correct and still have every policy addressed to
+everyone, because `TO authenticated` was never written.
+
+Check both halves, and treat them as independent controls:
+
+```sql
+-- policies addressed to PUBLIC rather than a named role
+SELECT c.relname, p.polname, p.polcmd,
+       pg_get_expr(p.polqual, p.polrelid) AS using_expr
+FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+WHERE p.polroles = '{0}'::oid[]          -- {0} means PUBLIC
+ORDER BY 1, 2;
+```
+
+A `USING (true)` SELECT policy addressed to PUBLIC is protected only by
+the grant. That is one layer. When the grant is also the thing you just
+found wrong, it is zero layers with a lucky outcome — report it as a
+finding even when the current grant makes it unreachable, and say
+plainly that it is defence-in-depth rather than an open door.
+
 #### When every user shares one database role
 
 In backend-as-a-service architectures, every signed-in user typically

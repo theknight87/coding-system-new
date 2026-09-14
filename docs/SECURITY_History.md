@@ -254,6 +254,137 @@ same view, so the header bell zeroes itself.
 
 ---
 
+## 3c. Full review, 14 September 2026 (second pass)
+
+A complete re-audit, requested after 043/044. No CRITICAL or HIGH
+finding is currently exploitable. One MEDIUM and three LOW are recorded
+below, plus a correction to what §3b claimed.
+
+### Correction to finding #4 — the pre-044 exposure was wider than reported
+
+§3b listed eleven **views** as readable by `anon`. That list was
+incomplete, and the reason matters: the probe that produced it looped
+over `relkind='v'` only. It never tested a single table.
+
+Re-tested by restoring the pre-044 grants inside a transaction that
+rolled back. As `anon`, five **tables** were also readable:
+
+| Table | Rows |
+|---|---|
+| `maintenance_parts_used` | 26 |
+| `maintenance_events` | 21 |
+| `alert_acknowledgements` | 11 |
+| `assets` | 4 |
+| `asset_documents` | 3 |
+
+Writes were never possible — every write policy on these tables tests
+`current_user_role()`, which returns `'anonymous'`. `044` closed the
+read path with the grants, and the 044 assertion did cover both kinds
+(`relkind IN ('r','v')`), so the fix was complete even though the
+finding's description was not.
+
+**Lesson, now in the audit skill:** a probe that enumerates one object
+kind gives false assurance about the other. Enumerate tables *and*
+views, and say which you enumerated.
+
+### #6 — Policies are `TO PUBLIC`, and four are `USING (true)` · OPEN
+
+**Severity: medium.** Not currently exploitable; it removes the second
+layer of defence.
+
+§7 of `CLAUDE.md` said "Policies use `TO authenticated`". Measured: **27
+policies across 8 tables are `TO PUBLIC`**, which includes `anon`. Four
+of them read `USING (true)`:
+
+```
+alert_acknowledgements.alert_ack_select        USING (true)
+asset_documents.asset_documents_select         USING (true)
+asset_hours_log.asset_hours_log_select         USING (true)
+maintenance_parts_used.maintenance_parts_used_select  USING (true)
+```
+
+and two more carry no role test at all:
+
+```
+assets.assets_select                USING (deleted_at IS NULL)
+maintenance_events.maintenance_events_select  USING (deleted_at IS NULL)
+```
+
+This is exactly the exposure proven in the correction above. Today the
+only thing preventing it is the absence of an `anon` grant — one layer,
+and the layer that was wrong until `044`. Re-grant `anon` by accident,
+or create a table through a path that still inherits the platform
+default ACL, and these policies hand the rows over.
+
+**Proposed remediation (migration 045, not yet applied):** re-declare
+the 27 policies `TO authenticated`, and give the six SELECT policies
+above a role test instead of `true`. Behaviour for real users does not
+change — both application roles pass the test — so this is additive
+defence, not a restriction.
+
+### #7 — Eight functions have a mutable `search_path` · LOW
+
+The Supabase advisor flags `set_updated_at`, `get_alert_counts`,
+`get_unconfigured_count`, `next_work_order_no`, `maintenance_event_set_wo`,
+`maintenance_parts_require_txn`, `maintenance_parts_block_desync` and
+`spare_parts_block_delete_with_stock`.
+
+**Not exploitable here**, and the reason is worth recording because it
+is what makes this LOW rather than HIGH: an attacker would have to plant
+an object that shadows an unqualified name, and neither `anon` nor
+`authenticated` holds `CREATE` on `public` — measured, both `false`.
+Every `SECURITY DEFINER` function already pins its path; these eight are
+`SECURITY INVOKER`. Worth fixing as hygiene, since the protection is a
+schema privilege someone could grant away.
+
+### #8 — `current_user_role()` is executable by `anon` · LOW, accepted
+
+Advisor `0028`. It is `SECURITY DEFINER`, so the advisor flags it, but
+it returns `'anonymous'` to an `anon` caller — that is its entire job,
+and the value is what `032` made load-bearing. Revoking `EXECUTE` from
+`anon` was considered and **not** done: the signup path evaluates
+`enforce_profile_role` (`039`), and breaking account creation to silence
+an advisory would be a bad trade. Recorded as accepted, not missed.
+
+### #9 — Six dev-dependency advisories · LOW
+
+`npm audit`: 6 (2 moderate, 4 high) — `esbuild`, `postcss`, `nanoid`,
+`browserslist`, `baseline-browser-mapping`, all transitive through
+`vite`. `npm audit --omit=dev` reports **0**: none reaches the deployed
+bundle. The `esbuild` advisory concerns the local dev server only.
+Fix by bumping `vite` when convenient.
+
+### What was re-verified and passed
+
+| Check | Result |
+|---|---|
+| RLS enabled | 20/20 tables |
+| Permissive write policies / open inserts | 0 / 0 |
+| `SECURITY DEFINER` functions with unpinned `search_path` | 0 |
+| Privileged RPCs missing a role guard | 0 of 6 |
+| `anon` grants in `public` | 0 |
+| `anon` objects readable (tables **and** views) | 0 |
+| Attack tests as department_user | 6/6 blocked |
+| Attack tests as `anon` | 3/3 blocked |
+| Stock drift · orphan lines · negative stock | 0 · 0 · 0 |
+| Profiles ↔ auth.users mismatch | 0 both ways |
+| Cron jobs active and sending the secret | 2/2 |
+| Secrets committed to the repo | none |
+| Production dependency vulnerabilities | 0 |
+| Page timings (admin) | audit log 4.2 ms · stock 1.8 ms · reliability 38.5 ms |
+
+The six department_user attack tests were: void a transaction, edit
+master data, trash a part, self-promote to admin, write `qty_on_hand`
+directly, read another user's profile. All blocked; profile visibility
+returned 1 row, its own.
+
+**Still open by decision, not oversight:** the department-user column
+restriction (§6) — re-confirmed live, a department user can still write
+`location` and `reorder_point`, outside the three columns the spec
+allows.
+
+---
+
 ## 4. Verification — run this after any schema change
 
 ```sql
