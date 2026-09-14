@@ -32,6 +32,11 @@ a service just to make a check possible.
    name and location only.
 7. Do not run availability-affecting tests against production (load,
    brute force, mass email, deletion).
+8. A control being **enabled** is not the data being **protected**.
+   State the property that matters — "no unauthenticated caller can
+   read this" — and test it by *becoming* the untrusted caller. "Row
+   security is on for every table" can be entirely true while the data
+   is readable by anyone through a path the row rules never see.
 
 ---
 
@@ -71,8 +76,12 @@ it (use `?` where nothing does).
 Look for `SECURITY_HISTORY.md`, `SECURITY.md`, prior audit reports,
 architecture/security notes, agent instruction files. Read them as
 **historical context only**. Do not assume previous findings remain
-fixed — re-verify current state. If no history file exists, recommend
-creating one after remediation.
+fixed — re-verify current state. Re-examine previously **accepted**
+risks as well, asking what accepting each one disables elsewhere: an
+accepted risk is a decision taken against one consideration and usually
+has consequences nobody enumerated at the time. For each, write down
+what it switches off, then go and check whatever that was protecting.
+If no history file exists, recommend creating one after remediation.
 
 ---
 
@@ -144,6 +153,30 @@ deliberate. Inspect elevated-privilege functions: what they do, who may
 execute them, whether their search path is pinned, who owns them — and
 remember **they bypass the row rules you just verified**, as do triggers
 written that way.
+
+Then audit the **grants**, which the row rules do not cover. A view that
+runs as its owner does not apply the caller's row rules, so for such a
+view the table-level grant is the only thing between it and an
+unauthenticated reader. Do not infer read access from the policy list:
+**assume the anonymous/untrusted role and select from every table and
+view**, and report exactly which objects returned rows. Check the
+schema's DEFAULT privileges as well — many platforms seed them so every
+future object is granted to every role, which makes any revoke you
+perform temporary; prove the change by creating an object the way the
+project's migrations do, inside a transaction that rolls back, and
+reading its ACL. If a default ACL belongs to a platform-owned role you
+cannot alter, say so explicitly and name what stays exposed.
+
+Where every signed-in user reaches the database as the **same** role and
+the application's own roles live in a table, note that a grant cannot
+express per-role authorization at all — revoking to hide something from
+one application role hides it from all of them, so the distinction must
+live in a policy or inside the object. When you add such a restriction
+to a shared object, enumerate every caller first — each application
+role, the service/automation identity used by scheduled jobs and
+serverless functions, and the anonymous role — and record a row count
+for each. A restriction that also silences a background job reads as a
+pass from the attacker's side and is discovered weeks later.
 
 **3.6 Drift.** Where live tooling exists, compare repository against
 production: schema, policies, RLS state, functions, triggers, scheduled

@@ -15,7 +15,7 @@ three-tier app.
 
 ---
 
-## The six rules that govern everything
+## The seven rules that govern everything
 
 1. **Never trust the browser.** Anything the client sends is an
    attacker-chosen value until a trusted side re-derives or re-checks it.
@@ -30,6 +30,12 @@ three-tier app.
 5. **Read-only until authorized.** Phase 1 changes nothing.
 6. **Understand every result.** A test that passes for a reason you
    cannot explain has not passed.
+7. **A control being *enabled* is not the data being *protected*.**
+   Name the property you actually care about — "no unauthenticated
+   reader can see this" — and test *that*, by becoming the untrusted
+   caller. "Row security is on for every table" is a statement about
+   configuration; it can be entirely true while the data is readable by
+   anyone through a path the row rules never see.
 
 ---
 
@@ -107,6 +113,15 @@ get reverted, someone restores a database from an old snapshot.
 
 **Re-verify every previously "fixed" item.** If no history file exists,
 recommend creating one (see Phase 9).
+
+**Re-examine every previously *accepted* item too, and ask what
+accepting it costs elsewhere.** An accepted risk is a decision made
+against one consideration; it usually has consequences nobody
+enumerated at the time. "These views run as their owner, which we
+accept" was a decision about one column in one screen — and it silently
+made the grants on those views the only access control protecting them.
+For each accepted item, write down what it *disables*, then go and check
+whatever that was protecting.
 
 ---
 
@@ -293,6 +308,76 @@ WHERE p.polcmd='a' AND pg_get_expr(p.polwithcheck,p.polrelid)='true';
 > as its owner is not subject to the policies you just verified. Audit
 > those functions as separate, independent entry points — and remember
 > that *triggers* written that way are entry points too.
+
+#### Row rules are not the only gate: check the grants too
+
+"RLS is enabled on every table" and "the data is protected" are two
+different statements. A project can satisfy the first completely and
+fail the second, because **a view that runs as its owner does not apply
+the caller's row rules** — for such a view, the table-level grant is the
+only thing between it and an unauthenticated reader.
+
+So audit the grant table as its own domain, not as a footnote to RLS:
+
+- **List what every role can read**, especially the anonymous / public
+  role. Do not infer it from the policies; they do not apply here.
+- **Assume the untrusted role and select from every object.** This is
+  the only check that answers the real question. It takes one loop and
+  it is the single highest-value query in this whole section.
+- **Check the schema's DEFAULT privileges too.** Many platforms seed
+  them so that every future object is granted to every role. Revoking
+  the current grants without changing the defaults fixes nothing
+  durably: the next migration that creates a table silently re-opens
+  it. After changing them, prove it — create an object the way your
+  migrations do, inside a transaction that rolls back, and read its
+  ACL.
+- Some default ACLs belong to a platform-owned role you cannot alter.
+  Say so explicitly in the migration and in the report, and name what
+  remains exposed. Do not let an `EXCEPTION WHEN insufficient_privilege`
+  turn into a silent success.
+
+```sql
+-- what can the anonymous role actually read? (adapt the role name)
+DO $$
+DECLARE r record; n int; leaks text := '';
+BEGIN
+  SET LOCAL ROLE anon;                      -- the untrusted role
+  FOR r IN SELECT c.relname FROM pg_class c
+           JOIN pg_namespace ns ON ns.oid=c.relnamespace
+           WHERE ns.nspname='public' AND c.relkind IN ('r','v') LOOP
+    BEGIN
+      EXECUTE format('SELECT COUNT(*) FROM public.%I', r.relname) INTO n;
+      IF n > 0 THEN leaks := leaks || r.relname || '=' || n || '  '; END IF;
+    EXCEPTION WHEN others THEN NULL;        -- denied is the good outcome
+    END;
+  END LOOP;
+  RESET ROLE;
+  RAISE EXCEPTION 'READABLE BY ANON >> % <<', leaks;   -- forces rollback
+END $$;
+
+-- and what will the NEXT object be granted?
+SELECT pg_get_userbyid(d.defaclrole) AS granted_by,
+       array_to_string(d.defaclacl, ' | ') AS default_acl
+FROM pg_default_acl d JOIN pg_namespace n ON n.oid=d.defaclnamespace
+WHERE n.nspname='public';
+```
+
+#### When every user shares one database role
+
+In backend-as-a-service architectures, every signed-in user typically
+arrives as the *same* database role, with the application's own roles
+(admin, editor, viewer) held in a table. Two consequences:
+
+- **A grant cannot express per-role authorization.** Revoking SELECT to
+  hide something from one application role hides it from all of them.
+  The distinction has to live in a policy or in the object itself, via a
+  lookup of the caller's application role.
+- **When you add such a restriction to a shared object, enumerate every
+  caller first.** Background jobs, schedulers and serverless functions
+  usually read the same objects under a service identity. If you do not
+  admit that identity explicitly, they fail silently — and a report that
+  stops arriving is noticed weeks later, if at all. Verify each caller
+  class separately and state the row counts for all of them.
 
 ### 3.6 Repository vs production drift
 
@@ -690,6 +775,16 @@ These cost real time. Check them before concluding a fix failed:
 - **An error code can be ambiguous** — the same code may mean "policy
   denied" and "insufficient privilege". Read the error *message*, not
   just the code.
+- **A revoke that does not touch DEFAULT privileges is temporary.** The
+  objects you fixed stay fixed; the next one created re-inherits the
+  grant you removed. Re-run the census after creating an object, not
+  just after the revoke.
+- **Testing a restriction only as the role you restricted proves half
+  of it.** The other half is that everyone else still works. Enumerate
+  every caller class — each application role, the service/automation
+  identity, the anonymous role — and record a row count for each. A
+  restriction that also silenced a scheduled job looks like a pass from
+  the attacker's side.
 
 > **Do not record a test as passed until you understand why it produced
 > that result.** If a test fails unexpectedly, first determine whether
@@ -767,6 +862,15 @@ enforces what, the verification query with its expected output, and the
 attack tests to re-run after touching auth or policies. History is the
 log; `SECURITY.md` is the current truth.
 
+One combined document is fine too, and often better for a small
+project — keep the current-state sections at the top, edited in place,
+and an append-only dated log of findings below them. What matters is
+that the log is never rewritten: each finding keeps the date, the fix,
+and the evidence, so a later reader can see what was once wrong and why
+the fix is shaped the way it is. Extend the verification query every
+time a finding teaches you a new check, and record the new expected
+output alongside the date it was measured.
+
 ---
 
 ## Phase 11 — Re-audits
@@ -808,6 +912,11 @@ the old report.
 - [ ] Read-only respected until approval
 - [ ] Each fix tested with the original attack; regressions tested
 - [ ] Every test result understood, not just observed
+- [ ] Read access enumerated **as the untrusted role**, object by
+      object — not inferred from the policy list
+- [ ] DEFAULT privileges checked, and re-checked by creating an object
+- [ ] Every caller class row-counted after each restriction (each app
+      role, the service identity, the anonymous role)
 - [ ] Production confirmed unchanged after tests
 - [ ] Manual/dashboard checks listed with exact paths
 - [ ] `SECURITY.md` and `SECURITY_HISTORY.md` updated

@@ -1,11 +1,20 @@
-# Security model — CarGas Coding System
+# Security history — CarGas Coding System
 
-Last audited and hardened: **11 September 2026** (migrations 039–042).
+Last change: **14 September 2026** (migrations 043–044).
+Audits so far: 11 Sep 2026 (039–042) · 14 Sep 2026 (043–044).
 
-This document records what actually enforces security in this system,
-what was found broken, and how to verify it is still working. Every
-claim here was measured against the live database, not inferred from
-the migration files — the two have drifted before (see `031`).
+This is the running log of everything security-related in this system:
+what enforces what today, every finding ever closed and how, and how to
+verify it is still working.
+
+**Append to it; do not rewrite it.** Each finding keeps its own dated
+entry with the migration that closed it, so a later reader can see not
+just the current state but what was once wrong and why the fix looks
+the way it does. Update §2, §5 and §6 in place when the picture
+changes, and add a new subsection under §3 for each new finding.
+
+Every claim here was measured against the live database, not inferred
+from the migration files — the two have drifted before (see `031`).
 
 ---
 
@@ -50,6 +59,8 @@ secrets read through `Deno.env.get`. No credential is committed, and
 | `qty_on_hand` cannot be typed | `SECURITY INVOKER` trigger | `034` |
 | Who may invoke the alert functions | `x-alert-cron-secret` + `verify_alert_cron_secret()` | `040`, `041` |
 | Alert email volume | 24h dedup per (part, severity, channel) | `040` |
+| Who may see stock alerts | role guard inside `v_active_alerts` | `043` |
+| `anon` reading anything in `public` | no grants, and none by default | `044` |
 
 ### Roles
 
@@ -59,9 +70,15 @@ never NULL. This is load-bearing: guards are written
 `IF current_user_role() <> 'admin' THEN RAISE`, and with NULL that IF
 evaluates to NULL and never fires (`032`).
 
+Since `043`, stock alerts are **admin-only**. A grant cannot express
+that: every signed-in user reaches PostgREST as the same Postgres role,
+`authenticated`, so revoking SELECT would lock out admins too. The role
+lives in `user_profiles`, which only `current_user_role()` reads, so the
+guard sits inside the view.
+
 ---
 
-## 3. Findings closed in the September 2026 audit
+## 3. Findings closed on 11 September 2026
 
 ### #1 — Sign-up role was client input · migration 039
 
@@ -138,10 +155,109 @@ maintenance path or a service_role job that set the column itself.
 
 ---
 
+## 3b. Findings closed on 14 September 2026
+
+Found while implementing a product change (making alerts admin-only),
+not during a scheduled audit — which is itself the lesson: the grant
+listing was never checked, only the policies.
+
+### #4 — `anon` could read most of the database · migration 044
+
+**Severity: critical.** §7 of `CLAUDE.md` had claimed for months that
+"anon has no access to anything". Measured with `SET ROLE anon` — the
+role behind the publishable key that ships in the bundle, with no
+sign-in at all:
+
+| Object | Rows readable by `anon` |
+|---|---|
+| `audit_logs_with_user` | **58,472** — the whole audit log, with user names |
+| `v_stock_status` | 5,867 |
+| `v_stock_transactions_detail` | 5,886 |
+| `v_active_alerts` | 38 |
+| `v_maintenance_parts_used` | 26 |
+| `v_stock_confidence` | 6 |
+| `v_stock_status_summary` | 5 |
+| `v_assets_overview`, `v_asset_cost_summary` | 4 each |
+| `v_asset_kpis`, `v_asset_pm_due` | 1 each |
+
+**Why the tables were safe and the views were not.** RLS is on for all
+19 tables and every policy is `TO authenticated`, so `anon` selects
+nothing from them. But the 11 pre-030 views are `SECURITY DEFINER`
+(§6 — left that way deliberately by `037`, for an unrelated reason). A
+`SECURITY DEFINER` view runs as its owner and does **not** apply the
+caller's RLS. `anon` held SELECT on every one of them, so reading the
+view read straight past the policies.
+
+This is the gap between "RLS is enabled" and "the data is protected".
+Both were true statements about this database; only the first was ever
+checked.
+
+**Fix.** `044` revokes every `anon` grant on every table and view in
+`public`, and removes `anon` from the schema's **default privileges** —
+without that second half, the next `CREATE TABLE` silently re-grants it
+and re-opens the hole. Verified by creating a table through the
+migration path inside a transaction that rolled back: owner `postgres`,
+granted to `authenticated` and `service_role` only.
+
+The `supabase_admin` default ACL could not be altered from the
+migration role; the migration emits a NOTICE saying so rather than
+pretending it succeeded. Objects created by `supabase_admin` (e.g. via
+some dashboard paths) would still be granted — re-run the check query
+at the bottom of `044` after any such object.
+
+**Not converted to `security_invoker`.** That is the change `037`
+declined to make and it would blank the User column on Stock Movements
+for department users. Revoking `anon` closes the exposure without
+altering what any signed-in user sees.
+
+**Left alone deliberately:** `anon` still holds EXECUTE on 14 public
+functions. Each was checked — thirteen are `SECURITY INVOKER` and RLS
+still stops them, and `current_user_role()` is `SECURITY DEFINER` but
+returns `'anonymous'` to an `anon` caller, which is its whole purpose.
+No leak, so the migration was not widened into it.
+
+### #5 — Alerts leaked to every signed-in user · migration 043
+
+Not a vulnerability so much as a missing restriction: stock alerts were
+visible to department users, and the product decision was that they
+should not be. Recorded here because the *enforcement* is the
+interesting part.
+
+The guard is a row filter inside `v_active_alerts`:
+
+```sql
+AND (current_user = 'service_role' OR public.current_user_role() = 'admin')
+```
+
+`service_role` is admitted explicitly because both alert Edge Functions
+read this view. Forgetting that would have stopped the daily email with
+no error anywhere — a failure nobody notices until the mail stops
+arriving.
+
+`current_user` rather than `auth.role()`: the latter reads
+`request.jwt.claims`, which is unset outside a PostgREST request, so it
+cannot be tested from a SQL session. `current_user` reflects the role
+PostgREST `SET ROLE`s into and was measured returning `service_role`
+and `authenticated` correctly from inside a view.
+
+Verified live, all four callers:
+
+| Caller | Rows | Bell badge |
+|---|---|---|
+| `anon` | denied | — |
+| admin | 38 | 29 |
+| department_user | **0** | **0** |
+| `service_role` | 38 | — |
+
+`get_alert_counts()` needed no change: it is `SECURITY INVOKER` over the
+same view, so the header bell zeroes itself.
+
+---
+
 ## 4. Verification — run this after any schema change
 
 ```sql
--- Expect: 0, 0, 0, 0, false, 21, 2, 0
+-- Expect: 0, 0, 0, 0, false, 21, 2, 0, 0, 0
 SELECT 'stock_drift_rows', COUNT(*)::text FROM (
   SELECT sp.id FROM public.spare_parts sp
   LEFT JOIN public.stock_transactions st ON st.part_id = sp.id
@@ -165,10 +281,29 @@ UNION ALL SELECT 'attribution_triggers', COUNT(*)::text FROM pg_trigger
 UNION ALL SELECT 'cron_jobs_sending_secret', COUNT(*)::text
   FROM cron.job WHERE command LIKE '%alert_cron_secret%'
 UNION ALL SELECT 'orphan_maintenance_lines', COUNT(*)::text
-  FROM public.maintenance_parts_used WHERE stock_transaction_id IS NULL;
+  FROM public.maintenance_parts_used WHERE stock_transaction_id IS NULL
+-- Added after finding #4. RLS on the tables says nothing about a
+-- SECURITY DEFINER view, so check the grants themselves, and check that
+-- the defaults will not hand them back out to the next new object.
+UNION ALL SELECT 'anon_grants_in_public', COUNT(*)::text
+  FROM information_schema.role_table_grants g
+  JOIN pg_class c ON c.relname=g.table_name
+  JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public'
+  WHERE g.grantee='anon' AND g.table_schema='public'
+UNION ALL SELECT 'default_acls_granting_anon', COUNT(*)::text
+  FROM pg_default_acl d
+  JOIN pg_namespace n ON n.oid=d.defaclnamespace AND n.nspname='public'
+  WHERE d.defaclobjtype='r'
+    AND pg_get_userbyid(d.defaclrole)='postgres'
+    AND array_to_string(d.defaclacl,' ') LIKE '%anon=%';
 ```
 
-Result on 11 Sep 2026: `0, 0, 0, 0, false, 21, 2, 0`.
+Result on 11 Sep 2026: `0, 0, 0, 0, false, 21, 2, 0` (first eight).
+Result on 14 Sep 2026: `0, 0, 0, 0, false, 21, 2, 0, 0, 0`.
+
+`default_acls_granting_anon` deliberately counts only the `postgres`
+default ACL. The `supabase_admin` one still lists `anon` and cannot be
+changed from the migration role — see finding #4.
 
 ### Testing pattern
 
@@ -223,6 +358,11 @@ each.
 - **11 pre-030 views are `SECURITY DEFINER`.** Converting them would
   blank the User column on Stock Movements for department users, since
   `user_profiles` is own-row-or-admin. Left deliberately; see `037`.
+  ⚠ Accepting this costs something, and `044` is the bill: such a view
+  bypasses the caller's RLS entirely, so **its grants are the only thing
+  standing between it and an unauthenticated reader**. Any new view here
+  needs its grants checked explicitly — RLS on the tables underneath
+  proves nothing about it.
 - **`alert_notifications_log` and `alert_cron_auth` have RLS on with no
   policies.** Deliberate: service_role only. The advisor reports this
   as INFO; do not "fix" it by adding a policy.
