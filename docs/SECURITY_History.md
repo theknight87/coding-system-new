@@ -287,7 +287,7 @@ finding's description was not.
 kind gives false assurance about the other. Enumerate tables *and*
 views, and say which you enumerated.
 
-### #6 — Policies are `TO PUBLIC`, and four are `USING (true)` · OPEN
+### #6 — Policies are `TO PUBLIC`, and four are `USING (true)` · CLOSED by `045`
 
 **Severity: medium.** Not currently exploitable; it removes the second
 layer of defence.
@@ -316,11 +316,41 @@ and the layer that was wrong until `044`. Re-grant `anon` by accident,
 or create a table through a path that still inherits the platform
 default ACL, and these policies hand the rows over.
 
-**Proposed remediation (migration 045, not yet applied):** re-declare
-the 27 policies `TO authenticated`, and give the six SELECT policies
-above a role test instead of `true`. Behaviour for real users does not
-change — both application roles pass the test — so this is additive
-defence, not a restriction.
+**Remediation — migration `045`, applied 2026-09-14.** All 27 policies
+re-declared `TO authenticated`, and the six SELECT rules above given a
+role test instead of `true`. Written out policy by policy rather than
+regenerated in a loop: a policy rebuilt from the catalogue is
+unreviewable in a diff.
+
+Dry-run first, inside a transaction that rolled back, then applied.
+Verified live afterwards:
+
+| Check | Result |
+|---|---|
+| Policies addressed to `PUBLIC` | **0** |
+| Objects readable as `anon` (tables + views) | **0** |
+| admin vs department_user on assets / events / lines | 4 / 21 / 26, identical |
+| `v_maintenance_parts_used` admin vs dept | 26 / 26 |
+| `service_role` on `v_active_alerts` | 38 |
+
+Nothing changed for real users, which was the point: both application
+roles pass the new test, so every read that worked before still works.
+
+`service_role` was never at risk — it carries `BYPASSRLS` (measured
+true), so the alert Edge Functions do not evaluate these policies at
+all. Signup was not at risk either: `handle_new_user()` is
+`SECURITY DEFINER` owned by `postgres`, which also bypasses RLS, so
+`profiles_insert` is not evaluated during account creation. Both were
+checked before the migration was written, not after it broke something.
+
+**Two `USING (true)` SELECT policies remain, deliberately:**
+`stock_movements_select` and `stock_transactions_select`. Both are
+`TO authenticated`, so `anon` is already excluded, and the ledger is
+meant to be readable by every signed-in user — both roles have the
+Stock Ledger and Stock Movements pages. Adding a role test there would
+exclude only an authenticated user with no profile row, of which there
+are currently none (checked: 0 auth users without a profile). Recorded
+as checked and accepted rather than missed.
 
 ### #7 — Eight functions have a mutable `search_path` · LOW
 
@@ -426,11 +456,20 @@ UNION ALL SELECT 'default_acls_granting_anon', COUNT(*)::text
   JOIN pg_namespace n ON n.oid=d.defaclnamespace AND n.nspname='public'
   WHERE d.defaclobjtype='r'
     AND pg_get_userbyid(d.defaclrole)='postgres'
-    AND array_to_string(d.defaclacl,' ') LIKE '%anon=%';
+    AND array_to_string(d.defaclacl,' ') LIKE '%anon=%'
+-- Added after finding #6. A policy with no TO clause applies to PUBLIC,
+-- which includes anon; the expression being correct says nothing about
+-- who the policy is addressed to.
+UNION ALL SELECT 'policies_addressed_to_public', COUNT(*)::text
+  FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
+  JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public'
+  WHERE p.polroles = '{0}'::oid[];
 ```
 
 Result on 11 Sep 2026: `0, 0, 0, 0, false, 21, 2, 0` (first eight).
-Result on 14 Sep 2026: `0, 0, 0, 0, false, 21, 2, 0, 0, 0`.
+Result on 14 Sep 2026, before `045`: `0, 0, 0, 0, false, 21, 2, 0, 0, 0`
+plus `policies_addressed_to_public = 27`.
+Result on 14 Sep 2026, after `045`: `0, 0, 0, 0, false, 21, 2, 0, 0, 0, 0`.
 
 `default_acls_granting_anon` deliberately counts only the `postgres`
 default ACL. The `supabase_admin` one still lists `anon` and cannot be

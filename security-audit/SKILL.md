@@ -404,6 +404,19 @@ found wrong, it is zero layers with a lucky outcome — report it as a
 finding even when the current grant makes it unreachable, and say
 plainly that it is defence-in-depth rather than an open door.
 
+When you re-declare a policy to fix its role list, **write each one out**
+rather than regenerating them from the catalogue in a loop. A policy
+rebuilt by dynamic SQL is unreviewable in a diff, and these are the
+rules the system's security rests on. Re-state the expression exactly;
+if you are also tightening it, that belongs on its own line where a
+reviewer can see it.
+
+Before changing any policy, establish which callers **bypass** row
+security entirely — a platform service identity usually does, and so
+does the owner of a definer function used by the signup path. Check
+that first: it tells you which of your worries are real, and it is
+cheaper than discovering after the fact that account creation broke.
+
 #### When every user shares one database role
 
 In backend-as-a-service architectures, every signed-in user typically

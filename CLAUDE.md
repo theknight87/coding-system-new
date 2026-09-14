@@ -55,7 +55,7 @@ dependency without asking.
 src/App.jsx          ~9,500 lines — every page and component
 src/lib/db.js        ~1,440 lines — all Supabase access
 src/lib/supabase.js  client creation
-supabase/migrations/ 001 … 044
+supabase/migrations/ 001 … 045
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
 supabase/scripts/    seed_demo_dataset.sql, remove_demo_assets.sql (manual)
 docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md,
@@ -225,12 +225,12 @@ caller was found able to set any part's stock).
   grants that made it false. RLS alone does not achieve this: a
   `SECURITY DEFINER` view bypasses it, so a new view needs its `anon`
   grant checked, not assumed.
-- ⚠ **Most policies are `TO PUBLIC`, not `TO authenticated`** — 27 of
-  them across 8 tables, four reading `USING (true)`. Measured
-  2026-09-14; the older claim in this file that policies are
-  `TO authenticated` was wrong. Nothing is exposed today because `anon`
-  holds no grant, but that is one layer where there should be two. See
-  finding #6 in `docs/SECURITY_History.md`.
+- Every policy is `TO authenticated` — 0 addressed to `PUBLIC`, true
+  since `045`. It was **not** true before: 27 policies across 8 tables
+  were `TO PUBLIC` (which includes `anon`) and four read `USING (true)`.
+  Two `USING (true)` SELECT policies remain by design, on
+  `stock_movements` and `stock_transactions`: the ledger is readable by
+  any signed-in user, and `TO authenticated` already excludes `anon`.
 - `SECURITY DEFINER` functions are revoked from `anon`; only the RPCs `db.js`
   actually calls are granted to `authenticated`.
 - Never expose secrets. Edge-function secrets live in Supabase Dashboard →
@@ -277,7 +277,7 @@ below that, rows are omitted rather than shown as weak signals.
    (`DO $$ … RAISE EXCEPTION 'results >> % <<' … $$`) before running it live.
 4. **One numbered migration per change**, with DDL, indexes, RLS policies,
    triggers, `COMMENT ON`, and a commented-out rollback block at the bottom.
-   Next number: **045**.
+   Next number: **046**.
 5. **Frontend edits:** complete replacement files or anchored, asserted
    patches. A careless `str.replace` with an empty needle once ballooned
    `db.js` to 9.4 MB.
@@ -319,7 +319,8 @@ Landmarks: `011` ledger · `015` reorder points · `017`–`019` alerts and push
 `030` reliability views · `031`–`037` review fixes · `038` trash purge blockers ·
 `039` sign-up role is not client input · `040`–`041` alert-function caller auth +
 email de-duplication · `042` server-derived row attribution · `043` alerts are
-admin-only · `044` anon loses every read in `public`.
+admin-only · `044` anon loses every read in `public` · `045` every policy
+is `TO authenticated`.
 
 ---
 
@@ -349,10 +350,10 @@ before changing anything in this section's territory.
 
 ## Open after the 2026-09-14 review
 
-- 🟠 **MEDIUM — 27 policies are `TO PUBLIC`, four `USING (true)`.** Not
-  reachable today (no `anon` grant), but it is a single layer where
-  there should be two. Fix proposed as migration `045`; see finding #6
-  in `docs/SECURITY_History.md`. **Needs your go-ahead.**
+- ✅ **MEDIUM — policies addressed to `PUBLIC` — CLOSED by `045`.**
+  All 27 re-declared `TO authenticated`, and the six open SELECT rules
+  given a role test. Verified: 0 PUBLIC policies, 0 objects readable as
+  `anon`, and admin and department_user row counts unchanged.
 - 🟡 **LOW — 8 functions with a mutable `search_path`.** Not
   exploitable: neither `anon` nor `authenticated` can `CREATE` in
   `public`, so nothing can be planted to shadow a name. Hygiene.

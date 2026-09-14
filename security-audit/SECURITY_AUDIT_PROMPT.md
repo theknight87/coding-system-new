@@ -181,6 +181,8 @@ read policy addressed to PUBLIC is protected only by the grant — report
 that as a finding even when the current grant makes it unreachable, and
 say plainly that it is a missing second layer rather than an open door.
 
+When re-declaring policies to fix a role list, write each one out rather than regenerating them from the catalogue — a policy rebuilt by dynamic SQL is unreviewable in a diff. And before changing any policy, establish which callers bypass row security entirely (a platform service identity usually does, as does the owner of a definer function on the signup path); that tells you which risks are real before you write the migration rather than after it breaks something.
+
 Where every signed-in user reaches the database as the **same** role and
 the application's own roles live in a table, note that a grant cannot
 express per-role authorization at all — revoking to hide something from
