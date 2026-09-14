@@ -58,7 +58,8 @@ supabase/migrations/ 001 … 044
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
 supabase/scripts/    seed_demo_dataset.sql, remove_demo_assets.sql (manual)
 docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md,
-                     SECURITY.md (what enforces what — read before touching auth/RLS)
+                     SECURITY_History.md (what enforces what — read before
+                     touching auth/RLS)
 CHANGELOG.md         what each phase added, and why
 ```
 
@@ -299,7 +300,7 @@ admin-only · `044` anon loses every read in `public`.
 
 All CRITICAL and HIGH findings fixed and verified against the LIVE
 database. Full detail, including the attack tests to re-run after
-touching auth or policies, is in **`docs/SECURITY.md`** — read that
+touching auth or policies, is in **`docs/SECURITY_History.md`** — read that
 before changing anything in this section's territory.
 
 - ✅ No public table without RLS (19/19)
@@ -325,7 +326,7 @@ Anything enforced in React is decoration.
    decision. (A scope gap, not an escalation.)
 1b. **Two dashboard-only settings** — confirm sign-up is disabled, and enable
    leaked-password protection. Neither is reachable via MCP or API; see
-   `docs/SECURITY.md` §5. Sign-up being open no longer grants admin (039).
+   `docs/SECURITY_History.md` §5. Sign-up being open no longer grants admin (039).
 2. **`CP-FN-F30-AC-PRV-0001` is in Trash holding 2 units** (trashed
    2026-09-09 06:16, before the guard existed). Either restore it or write the
    stock off with an adjustment — the ledger still counts those 2. It cannot
