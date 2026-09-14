@@ -6770,6 +6770,7 @@ function StockAlertsPage({ data }) {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [hideAck, setHideAck] = useState(true);
+  const [mutedCount, setMutedCount] = useState(0);
 
   const [page,    setPage]    = useState(0);
   const [total,   setTotal]   = useState(0);
@@ -6806,9 +6807,13 @@ function StockAlertsPage({ data }) {
     Promise.all([
       db.fetchActiveAlertsCount(filters),
       db.fetchActiveAlerts(filters, page, ALERTS_PAGE_SIZE),
-    ]).then(([countRes, dataRes]) => {
+      // How many the Hide-acknowledged checkbox is holding back, under
+      // the same filters, so the number next to it means what it says.
+      db.fetchActiveAlertsCount({ ...filters, hideAcknowledged:false, onlyAcknowledged:true }),
+    ]).then(([countRes, dataRes, mutedRes]) => {
       setTotal(countRes.count ?? 0);
       setRows(dataRes.data ?? []);
+      setMutedCount(mutedRes.count ?? 0);
     }).finally(()=>setLoading(false));
   }, [dbReady, filters, page]);
 
@@ -6820,6 +6825,14 @@ function StockAlertsPage({ data }) {
     const { error } = await db.acknowledgeAlert(row.part_id, row.stock_status);
     if (error) return flash(`Error: ${error.message}`, 'err');
     flash(`Acknowledged ${row.code}`);
+    alerts.refreshAlerts();
+    load();
+  };
+
+  const doUnmute = async (row) => {
+    const { error } = await db.clearAlertAcknowledgement(row.part_id, row.stock_status);
+    if (error) return flash(`Error: ${error.message}`, 'err');
+    flash(`${row.code} will alert again`);
     alerts.refreshAlerts();
     load();
   };
@@ -6914,6 +6927,9 @@ function StockAlertsPage({ data }) {
           </select>
           <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:T.muted, cursor:"pointer" }}>
             <input type="checkbox" checked={hideAck} onChange={e=>setHideAck(e.target.checked)}/> Hide acknowledged
+            {mutedCount > 0 && (
+              <Pill size={11} color={T.warn} bg={T.warnBg}>{mutedCount} muted</Pill>
+            )}
           </label>
           <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
             <Btn small variant="secondary" onClick={exportAlertsCsv} disabled={exporting}>{exporting?"Exporting…":"Export CSV"}</Btn>
@@ -6977,7 +6993,17 @@ function StockAlertsPage({ data }) {
                             <Btn small variant="success" onClick={()=>doAcknowledge(r)}>Ack</Btn>{' '}
                             <Btn small variant="secondary" title="Snooze this alert" onClick={()=>setSnoozeTarget({ part_id:r.part_id, severity:r.stock_status, code:r.code })}>💤</Btn>{' '}
                           </>
-                        ) : <span style={{ fontSize:11, color:T.muted }}>Acknowledged</span>}
+                        ) : (
+                          <>
+                            <Btn small variant="secondary"
+                              title={r.snooze_until
+                                ? `Snoozed until ${new Date(r.snooze_until).toLocaleDateString()} — alert again now`
+                                : "Acknowledged — alert again now"}
+                              onClick={()=>doUnmute(r)}>
+                              {r.snooze_until ? "Un-snooze" : "Un-ack"}
+                            </Btn>{' '}
+                          </>
+                        )}
                         <Btn small variant="ghost" onClick={()=>navigateTo && navigateTo('master', { search: r.code })}>View</Btn>
                       </td>
                     </tr>

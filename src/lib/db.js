@@ -726,6 +726,9 @@ function applyAlertFilters(q, filters = {}) {
   if (filters.mfr)    q = q.eq('mfr', filters.mfr);
   if (filters.disc)   q = q.eq('disc', filters.disc);
   if (filters.hideAcknowledged) q = q.eq('is_acknowledged', false);
+  // Counts the rows the "Hide acknowledged" checkbox is currently
+  // keeping off screen, so the page can say how many are muted.
+  if (filters.onlyAcknowledged) q = q.eq('is_acknowledged', true);
   if (filters.search) {
     q = q.or(`code.ilike.%${filters.search}%,short_desc.ilike.%${filters.search}%`);
   }
@@ -782,6 +785,26 @@ export async function acknowledgeAlert(partId, severity, note = null) {
     .select('*').maybeSingle();
   if (!error) await audit('UPDATE', 'alert_acknowledgements', partId, null, { severity, action: 'acknowledge' });
   return { data, error };
+}
+
+// Removes the mute entirely, so the part alerts again on screen, in the
+// daily email and in push. Deleting the row rather than nulling a column
+// is deliberate: v_active_alerts reads is_acknowledged as "a row exists
+// and has not expired", so no row is the only true un-muted state.
+//
+// Covers Snooze as well — both write the same (part_id, severity) row,
+// so one delete clears whichever is in force.
+//
+// No role gate here: alert_ack_delete allows admin and department_user,
+// exactly the two that alert_ack_insert allows. Whoever can mute can unmute.
+export async function clearAlertAcknowledgement(partId, severity) {
+  const { error } = await supabase
+    .from('alert_acknowledgements')
+    .delete()
+    .eq('part_id', partId)
+    .eq('severity', severity);
+  if (!error) await audit('UPDATE', 'alert_acknowledgements', partId, null, { severity, action: 'clear' });
+  return { error };
 }
 
 export async function snoozeAlert(partId, severity, snoozeUntil) {
