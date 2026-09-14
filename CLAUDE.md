@@ -54,7 +54,7 @@ dependency without asking.
 src/App.jsx          ~8,800 lines — every page and component
 src/lib/db.js        ~1,390 lines — all Supabase access
 src/lib/supabase.js  client creation
-supabase/migrations/ 001 … 042
+supabase/migrations/ 001 … 043
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
 supabase/scripts/    seed_demo_dataset.sql, remove_demo_assets.sql (manual)
 docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md,
@@ -204,6 +204,7 @@ caller was found able to set any part's stock).
 | Trash / restore anything | ✅ | ❌ (037) |
 | Edit master data (categories, mfrs, models, …) | ✅ | ❌ |
 | Admin, Audit Log, Users, Trash pages | ✅ | ❌ |
+| Stock Alerts page, header bell, dashboard alert tiles | ✅ | ❌ (043) |
 
 > ⚠ **Known gap — not enforced.** The spec says a department user may edit
 > *only* Functional Group, Sequential Number and Description on a part. In
@@ -264,7 +265,7 @@ below that, rows are omitted rather than shown as weak signals.
    (`DO $$ … RAISE EXCEPTION 'results >> % <<' … $$`) before running it live.
 4. **One numbered migration per change**, with DDL, indexes, RLS policies,
    triggers, `COMMENT ON`, and a commented-out rollback block at the bottom.
-   Next number: **043**.
+   Next number: **044**.
 5. **Frontend edits:** complete replacement files or anchored, asserted
    patches. A careless `str.replace` with an empty needle once ballooned
    `db.js` to 9.4 MB.
@@ -286,7 +287,8 @@ Landmarks: `011` ledger · `015` reorder points · `017`–`019` alerts and push
 `026` partial returns + work-order numbers · `029` privilege-escalation fix ·
 `030` reliability views · `031`–`037` review fixes · `038` trash purge blockers ·
 `039` sign-up role is not client input · `040`–`041` alert-function caller auth +
-email de-duplication · `042` server-derived row attribution.
+email de-duplication · `042` server-derived row attribution · `043` alerts are
+admin-only, and anon loses `v_active_alerts`.
 
 ---
 
@@ -332,3 +334,13 @@ Anything enforced in React is decoration.
 5. **11 pre-030 views are `SECURITY DEFINER`** and bypass RLS. Converting them
    would blank the User column on Stock Movements for department users
    (`user_profiles` is own-row-or-admin). Left deliberately; see `037`.
+6. 🔴 **`anon` can read most views — OPEN, and this one is not deliberate.**
+   Measured 2026-09-14 with `SET ROLE anon` (the key that ships in the
+   bundle, no sign-in): `audit_logs_with_user` **58,472 rows with user
+   names**, `v_stock_status` 5,867, `v_stock_transactions_detail` 5,886,
+   `v_maintenance_parts_used`, `v_stock_confidence`,
+   `v_stock_status_summary`, and four asset views. The tables are behind
+   RLS; these `SECURITY DEFINER` views walk around it while `anon` still
+   holds SELECT. §7's "anon has no access to anything" is currently
+   false. `043` closed `v_active_alerts` only. **Migration 044 should
+   revoke `anon` on the rest.**

@@ -2449,6 +2449,7 @@ function CrudPage({ title, sub, items, setItems, fields, renderRow, emptyMsg, le
 
 function Dashboard({ data }) {
   const { categories, manufacturers, models, disciplines, funcGroups, dbReady, navigateTo } = data;
+  const { isAdmin } = useAuth();
 
   const [totalParts,   setTotalParts]   = useState(0);
   const [catCounts,    setCatCounts]    = useState(categories.map(c=>({...c,count:0})));
@@ -2530,10 +2531,18 @@ function Dashboard({ data }) {
       </div>
 
       {/* Stock Alerts */}
-      {/* These four keep the status colours. Because the row above is
+      {/* These keep the status colours. Because the row above is
           brand-toned rather than rainbow, a red figure here is still the
-          most urgent thing on the page. */}
+          most urgent thing on the page.
+
+          The three alert tiles are admin-only (migration 043): their
+          counts come from v_active_alerts, which returns a department
+          user nothing, so for them the tiles would read a flat 0 and
+          lead to a page they cannot open. "No reorder point" stays —
+          it reads v_stock_status and opens Reorder Settings, both of
+          which a department user still has. */}
       <div className="cg-stagger" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(292px,1fr))", gap: 12, marginBottom: 24 }}>
+        {isAdmin && <>
         <StatCard label="Out of Stock" value={alerts.loading?"…":alerts.counts.out.toLocaleString()} color={T.danger} icon="warning"
           hint={alerts.counts.out>0?"Needs ordering now":"Nothing out of stock"}
           onClick={()=>navigateTo && navigateTo('alerts', { severity: ['out'] })} title="Show parts that are out of stock" />
@@ -2543,6 +2552,7 @@ function Dashboard({ data }) {
         <StatCard label="Low Stock" value={alerts.loading?"…":alerts.counts.low.toLocaleString()} color={T.warn} icon="reorder"
           hint="below the reorder point"
           onClick={()=>navigateTo && navigateTo('alerts', { severity: ['low'] })} title="Show parts below their reorder point" />
+        </>}
         <StatCard label="No reorder point" value={alerts.loading?"…":alerts.unconfigured.toLocaleString()} icon="lock"
           hint="These can never raise an alert"
           onClick={()=>navigateTo && navigateTo('reorder', { filter:'unconfigured' })} title="Parts with no reorder point set" />
@@ -9116,7 +9126,7 @@ const NAV = [
   { id:"stockcount",    labelKey:"nav_stockcount",    label:"Stock Count",         icon:"stockcount", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"movements",     labelKey:"nav_movements",     label:"Stock Movements",     icon:"movements", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
   { id:"reorder",       labelKey:"nav_reorder",       label:"Reorder Settings",    icon:"reorder", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
-  { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"alerts", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:false },
+  { id:"alerts",        labelKey:"nav_alerts",        label:"Stock Alerts",        icon:"alerts", group:"Inventory",   groupKey:"group_Inventory",    adminOnly:true  },
   { id:"assets",        labelKey:"nav_assets",        label:"Asset Registry",      icon:"assets", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
   { id:"reports",       labelKey:"nav_reports",       label:"Reliability Indicators", icon:"reports", group:"Assets",      groupKey:"group_Assets",       adminOnly:false },
   { id:"admin",         labelKey:"nav_admin",         label:"Administration",      icon:"admin", group:"System",      groupKey:"group_System",       adminOnly:true  },
@@ -9292,7 +9302,10 @@ function AppShell() {
               ? <span style={{ ...TYPE.label,fontSize:9.5,background:T.successBg,color:T.success,padding:"4px 8px",borderRadius:T.radius,border:`1px solid ${T.successBorder}` }}>{t('liveDb')}</span>
               : <span style={{ ...TYPE.label,fontSize:9.5,background:T.warnBg,color:T.warn,padding:"4px 8px",borderRadius:T.radius,border:`1px solid ${T.warnBorder}` }}>{t('local')}</span>
             }
-            <AlertBell navigateTo={data.navigateTo} />
+            {/* Alerts are admin-only (migration 043). A department user
+                would get an empty bell anyway, since v_active_alerts
+                returns them nothing — this stops it being rendered at all. */}
+            {isAdmin && <AlertBell navigateTo={data.navigateTo} />}
             {/* Role is identity, not state — so it is neutral now, with
                 the role spelled out rather than encoded as a colour. */}
             {profile && (
