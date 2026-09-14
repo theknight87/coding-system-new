@@ -183,6 +183,20 @@ say plainly that it is a missing second layer rather than an open door.
 
 When re-declaring policies to fix a role list, write each one out rather than regenerating them from the catalogue — a policy rebuilt by dynamic SQL is unreviewable in a diff. And before changing any policy, establish which callers bypass row security entirely (a platform service identity usually does, as does the owner of a definer function on the signup path); that tells you which risks are real before you write the migration rather than after it breaks something.
 
+A rule that is documented but unenforced is itself a finding. Where a
+spec or role table says "role X may only do Y", test whether anything
+actually stops them doing Z, and report the gap classified by
+consequence rather than treating it as handled because it is written
+down. Before closing such a gap, enumerate every path that writes the
+columns or calls the operation you are about to restrict — a
+restriction written earlier often contradicts a feature shipped since,
+and that conflict belongs to the owner, not to you. Note also that
+per-column authorization usually cannot be a grant (column privileges
+are per database role, and signed-in users typically share one, so the
+grant would restrict the privileged role too), and that such a guard
+must compare old values to new rather than firing on a column being
+present, since clients commonly send the whole record on every save.
+
 Where every signed-in user reaches the database as the **same** role and
 the application's own roles live in a table, note that a grant cannot
 express per-role authorization at all — revoking to hide something from

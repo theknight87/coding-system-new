@@ -55,7 +55,7 @@ dependency without asking.
 src/App.jsx          ~9,500 lines — every page and component
 src/lib/db.js        ~1,440 lines — all Supabase access
 src/lib/supabase.js  client creation
-supabase/migrations/ 001 … 045
+supabase/migrations/ 001 … 046
 supabase/functions/  low-stock-alert, send-stock-alerts (Deno edge functions)
 supabase/scripts/    seed_demo_dataset.sql, remove_demo_assets.sql (manual)
 docs/                دليل-المستخدم.md (Arabic user guide), ADMIN_RUNBOOK.md,
@@ -209,13 +209,33 @@ caller was found able to set any part's stock).
 | Admin, Audit Log, Users, Trash pages | ✅ | ❌ |
 | Stock Alerts page, header bell, dashboard alert tiles | ✅ | ❌ (043) |
 
-> ⚠ **Known gap — not enforced.** The spec says a department user may edit
-> *only* Functional Group, Sequential Number and Description on a part. In
-> reality the Master Table part form applies **no** field-level role gating,
-> and `spare_parts_update` allows a department user to update any column
-> except the ledger-derived ones. Closing this needs a UI change plus a
-> column-level policy, and would change what storekeepers can do day to day —
-> **ask before implementing it.**
+### What a department user may edit on a part (046)
+
+**The rule:** a department user may change what a part *is like*; only an
+admin may change what a part *is*.
+
+| | Department user |
+|---|---|
+| `fg`, `short_desc`, `long_desc` | ✅ the spec's three |
+| `location`, `remarks` | ✅ |
+| `image_url`, `datasheet_url`, `manual_url`, `drawing_url` | ✅ |
+| `min_stock`, `max_stock`, `reorder_point`, `lead_time_days`, `is_critical`, `preferred_supplier` | ✅ Reorder Settings |
+| `code` | ❌ fixed after creation |
+| `cat`, `mfr`, `model`, `disc` | ❌ the code's own segments |
+| `status`, `part_no`, `oem_part`, `qty_per_assembly`, `unit` | ❌ |
+
+Enforced by a `BEFORE UPDATE` trigger, not a column grant: `GRANT UPDATE
+(col)` is per **database** role, and every signed-in user arrives as
+`authenticated`, so a grant would take the columns from admins too.
+
+The trigger compares `OLD` to `NEW` and refuses only a **real change** —
+`savePart()` sends the whole row on every save, so a guard that fired on
+column presence would reject every edit. The four affected inputs are
+also disabled in the part form for non-admins.
+
+The reorder columns are deliberately editable: the Reorder Settings page
+is not admin-only and `bulk_set_reorder_settings` already permits a
+department user. Locking them would have removed a working feature.
 
 ## Security rules
 
@@ -277,7 +297,7 @@ below that, rows are omitted rather than shown as weak signals.
    (`DO $$ … RAISE EXCEPTION 'results >> % <<' … $$`) before running it live.
 4. **One numbered migration per change**, with DDL, indexes, RLS policies,
    triggers, `COMMENT ON`, and a commented-out rollback block at the bottom.
-   Next number: **046**.
+   Next number: **047**.
 5. **Frontend edits:** complete replacement files or anchored, asserted
    patches. A careless `str.replace` with an empty needle once ballooned
    `db.js` to 9.4 MB.
@@ -320,7 +340,7 @@ Landmarks: `011` ledger · `015` reorder points · `017`–`019` alerts and push
 `039` sign-up role is not client input · `040`–`041` alert-function caller auth +
 email de-duplication · `042` server-derived row attribution · `043` alerts are
 admin-only · `044` anon loses every read in `public` · `045` every policy
-is `TO authenticated`.
+is `TO authenticated` · `046` department-user column restriction.
 
 ---
 
@@ -366,8 +386,12 @@ Anything enforced in React is decoration.
 
 ## Open items
 
-1. **Department-user column restriction** — see the gap in §7. Needs your
-   decision. (A scope gap, not an escalation.)
+1. ✅ **Department-user column restriction — CLOSED by `046`.** The rule
+   and the column list are in §7. Verified live in a rolled-back
+   transaction: 9/9 blocked columns refused for a department user, the
+   allowed columns still writable in the same statement, admin
+   unaffected; and in a real browser, the four affected inputs disabled
+   for a department user and enabled for an admin.
 1b. **Two dashboard-only settings** — confirm sign-up is disabled, and enable
    leaked-password protection. Neither is reachable via MCP or API; see
    `docs/SECURITY_History.md` §5. Sign-up being open no longer grants admin (039).

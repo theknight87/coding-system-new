@@ -2159,15 +2159,21 @@ const Btn = ({ children, onClick, variant = "primary", small = false, disabled =
   );
 };
 
-const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength, min, max, step }) => (
+// `disabled` is in the signature, not spread: these components take an
+// explicit prop list, and a silently dropped prop has bitten this file
+// three times. A disabled field must LOOK disabled too, or a department
+// user just sees an input that refuses to type.
+const DISABLED_FIELD = { background: T.subtle, color: T.muted, cursor: "not-allowed" };
+
+const Input = ({ value, onChange, placeholder, style: s = {}, type = "text", maxLength, min, max, step, disabled, title }) => (
   <input type={type} value={value} onChange={onChange} placeholder={placeholder} maxLength={maxLength}
-    min={min} max={max} step={step}
-    style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 14, color: T.text, background: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit", ...s }} />
+    min={min} max={max} step={step} disabled={disabled} title={title}
+    style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 14, color: T.text, background: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit", ...(disabled ? DISABLED_FIELD : null), ...s }} />
 );
 
-const Select = ({ value, onChange, children, style: s = {} }) => (
-  <select value={value} onChange={onChange}
-    style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 14, color: T.text, background: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit", ...s }}>
+const Select = ({ value, onChange, children, style: s = {}, disabled, title }) => (
+  <select value={value} onChange={onChange} disabled={disabled} title={title}
+    style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: `1px solid ${T.border}`, fontSize: 14, color: T.text, background: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit", ...(disabled ? DISABLED_FIELD : null), ...s }}>
     {children}
   </select>
 );
@@ -4291,6 +4297,11 @@ function CodeGeneratorPage({ data }) {
 function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
   if (!part) return null;
   const { categories, manufacturers, models, disciplines, engineSystems, funcGroups, ops, dbReady } = data;
+  // Migration 046: a department user may change what a part is LIKE,
+  // not what it IS. The database refuses the rest; these flags stop
+  // them filling in a field that would be rejected on save.
+  const { isAdmin } = useAuth();
+  const lockedHint = "Only an admin can change this — it is part of how the part is classified.";
 
   const [mode,        setMode]        = useState('view'); // 'view' | 'edit' | 'confirm-delete'
   const [fullPart,     setFullPart]    = useState(part);   // full record once fetched
@@ -4703,13 +4714,14 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
           <div style={{ padding:"20px 24px" }}>
             <div style={{ background:"#fffbeb",border:"1px solid #fbbf24",borderRadius:7,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#92400e",fontWeight:600 }}>
               ✏ Editing editable fields only. The 6-segment code (<strong>{part.code}</strong>) cannot be changed.
+              {!isAdmin && " Part number, OEM number, unit and status are admin-only (046)."}
             </div>
             <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
                 <div><label style={sLabel}>Short Description</label><Input value={form.shortDesc||""} onChange={e=>setForm(f=>({...f,shortDesc:e.target.value}))}/></div>
                 <div><label style={sLabel}>Long Description</label><Input value={form.longDesc||""} onChange={e=>setForm(f=>({...f,longDesc:e.target.value}))}/></div>
-                <div><label style={sLabel}>Part Number</label><Input value={form.partNo||""} onChange={e=>setForm(f=>({...f,partNo:e.target.value}))} placeholder="e.g. AN-BRG-001"/></div>
-                <div><label style={sLabel}>OEM Part Number</label><Input value={form.oemPart||""} onChange={e=>setForm(f=>({...f,oemPart:e.target.value}))} placeholder="e.g. 1234567"/></div>
+                <div><label style={sLabel}>Part Number</label><Input value={form.partNo||""} onChange={e=>setForm(f=>({...f,partNo:e.target.value}))} placeholder="e.g. AN-BRG-001" disabled={!isAdmin} title={!isAdmin?lockedHint:undefined}/></div>
+                <div><label style={sLabel}>OEM Part Number</label><Input value={form.oemPart||""} onChange={e=>setForm(f=>({...f,oemPart:e.target.value}))} placeholder="e.g. 1234567" disabled={!isAdmin} title={!isAdmin?lockedHint:undefined}/></div>
                 <div>
                   <label style={sLabel}>Quantity on Hand</label>
                   <div style={{ padding:"8px 12px", borderRadius:6, border:`1px solid ${T.border}`, background:T.subtle, fontSize:14 }}>
@@ -4718,13 +4730,13 @@ function PartDetailModal({ part, data, onClose, onDeleted, onUpdated }) {
                   </div>
                 </div>
                 <div><label style={sLabel}>Unit</label>
-                  <Select value={form.unit||"EA"} onChange={e=>setForm(f=>({...f,unit:e.target.value}))}>
+                  <Select value={form.unit||"EA"} onChange={e=>setForm(f=>({...f,unit:e.target.value}))} disabled={!isAdmin} title={!isAdmin?lockedHint:undefined}>
                     {["EA","SET","KIT","L","KG","M","BOX","ROLL"].map(u=><option key={u}>{u}</option>)}
                   </Select>
                 </div>
                 <div><label style={sLabel}>Location</label><Input value={form.loc||""} onChange={e=>setForm(f=>({...f,loc:e.target.value}))} placeholder="e.g. WH-A1"/></div>
                 <div><label style={sLabel}>Status</label>
-                  <Select value={form.status||"Active"} onChange={e=>setForm(f=>({...f,status:e.target.value}))}>
+                  <Select value={form.status||"Active"} onChange={e=>setForm(f=>({...f,status:e.target.value}))} disabled={!isAdmin} title={!isAdmin?lockedHint:undefined}>
                     {["Active","Inactive","Obsolete"].map(s=><option key={s}>{s}</option>)}
                   </Select>
                 </div>

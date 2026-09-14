@@ -417,6 +417,35 @@ does the owner of a definer function used by the signup path. Check
 that first: it tells you which of your worries are real, and it is
 cheaper than discovering after the fact that account creation broke.
 
+#### A documented rule that nothing enforces is a finding
+
+Specifications, role tables and README files describe intent; only code
+enforces it. Where a document says "role X may only do Y", go and test
+whether anything stops them doing Z. Treat the gap as a finding in its
+own right, classified by consequence — often a scope gap rather than an
+escalation, but never "already handled because it is written down".
+
+When you close such a gap, check what the rule would break **before**
+implementing it. A restriction written years earlier may contradict a
+feature shipped since, and the people affected are usually the ones with
+the least say. Enumerate every path that writes the columns or calls the
+operation you are about to restrict — including pages that are not
+gated, and privileged routines that already permit the role — and put
+the conflict to the owner rather than resolving it silently in either
+direction.
+
+Two implementation notes that generalise:
+
+- **Per-column authorization usually cannot be a grant.** Column
+  privileges are per database role, and in a backend-as-a-service every
+  signed-in user shares one. A grant intended to restrict the lesser
+  role takes the column from the greater one too. The check belongs in
+  a trigger or a policy that reads the application role.
+- **Compare old to new, not "was the column supplied".** Clients
+  commonly send the whole record on every save. A guard that fires on a
+  column being present rejects every edit anyone makes, which looks like
+  a broken feature rather than a security rule, and gets reverted.
+
 #### When every user shares one database role
 
 In backend-as-a-service architectures, every signed-in user typically

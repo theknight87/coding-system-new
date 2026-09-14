@@ -415,6 +415,69 @@ allows.
 
 ---
 
+## 3d. Department-user column restriction — 14 September 2026 · `046`
+
+The scope gap `034` deferred and §6 listed as open by decision. Approved
+and implemented. Not a vulnerability — a restriction that was documented
+but never enforced.
+
+**The rule:** a department user may change what a part *is like*; only an
+admin may change what a part *is*. Blocked for a department user: `code`,
+`cat`, `mfr`, `model`, `disc`, `status`, `part_no`, `oem_part`,
+`qty_per_assembly`, `unit`. Everything else they touch today stays
+editable — descriptions, functional group, location, remarks,
+attachments and the six reorder columns.
+
+**A trigger, not a column grant.** `GRANT UPDATE (col, …)` is per
+database role, and every signed-in user arrives as `authenticated`, so a
+grant would have taken those columns from admins too. Same reason `043`
+put its guard inside a view: the application role lives in
+`user_profiles`, which only `current_user_role()` reads.
+
+**`OLD` vs `NEW`, not column presence.** `savePart()` sends the whole row
+on every save. A guard that fired on a column being present in the
+statement would have rejected every edit a department user makes. Only a
+real change is refused.
+
+**`SECURITY INVOKER`, copied deliberately from `034`** — where writing it
+as `DEFINER` first made `current_user` the function's owner, so the guard
+could never see `authenticated` and never fired.
+
+**What was almost broken, and how it was caught:** the strict reading of
+the spec is three columns. Taking it literally would have locked
+`min_stock`, `reorder_point` and the rest — and the Reorder Settings page
+is **not** admin-only, with `bulk_set_reorder_settings` explicitly
+permitting a department user, and `updateReorderSettings()` writing the
+columns directly. Enforcing the spec as written would have removed a
+working feature from the people who use it. Raised before implementing;
+the column list was widened by decision.
+
+**Verified.** Behavioural probe in a transaction that rolled back:
+
+```
+blocked = 9/9 refused for department_user
+allowed columns in one UPDATE (location, remarks, short_desc, long_desc,
+  fg, reorder_point, min_stock, is_critical, image_url) -> written
+admin, same blocked columns -> written
+```
+
+And in a real browser against the built bundle, with PostgREST mocked:
+as a department user the Part Number, OEM Part Number, Unit and Status
+inputs report `disabled: true` and the rest `false`; as an admin all four
+report `false`.
+
+One testing note worth keeping: the first admin run reported all four
+still disabled, which looked like a failure of the gate. It was a flawed
+test — the role was switched with `page.addInitScript`, which sets a
+value in the **browser**, while the mock's route handler reads it in
+**Node**. The two never met and the role never changed. Understood
+before anything was "fixed"; the migration was not touched.
+
+The database refuses these columns regardless of the UI. The disabled
+inputs are convenience, not the control.
+
+---
+
 ## 4. Verification — run this after any schema change
 
 ```sql
@@ -536,10 +599,8 @@ each.
 - **`alert_notifications_log` and `alert_cron_auth` have RLS on with no
   policies.** Deliberate: service_role only. The advisor reports this
   as INFO; do not "fix" it by adding a policy.
-- **Department-user column restriction is not enforced.** The spec says
-  a department user may edit only Functional Group, Sequential Number
-  and Description on a part; in reality the form applies no field-level
-  gating. This is a *scope* gap, not an escalation — it needs a product
-  decision. See `CLAUDE.md` §7.
+- ✅ **Department-user column restriction — enforced since `046`.** Was
+  a documented rule that nothing implemented. See §3d for the column
+  list and why the spec's literal three were widened.
 - **No rate limiting on login, sign-up or OTP** beyond Supabase's
   built-in auth limits, which are not configured in this repo.
