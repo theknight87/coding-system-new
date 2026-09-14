@@ -197,6 +197,17 @@ grant would restrict the privileged role too), and that such a guard
 must compare old values to new rather than firing on a column being
 present, since clients commonly send the whole record on every save.
 
+A platform security advisory is not always an actionable task. Managed
+platforms report the desired state, not what the project's plan or
+licence permits, so a warning needing a paid upgrade looks identical to
+a five-second toggle. When an advisory resists clearing, check the
+subscription tier from the API rather than the console's appearance —
+some render a paid control as available and refuse only on save —
+attempt the change and keep the refusal message as evidence, and record
+that the advisory will keep firing so the next audit does not chase it
+again. State the residual risk in one sentence and whether an upgrade is
+warranted for that risk alone; that decision belongs to the owner.
+
 Where every signed-in user reaches the database as the **same** role and
 the application's own roles live in a table, note that a grant cannot
 express per-role authorization at all — revoking to hide something from

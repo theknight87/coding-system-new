@@ -446,6 +446,30 @@ Two implementation notes that generalise:
   column being present rejects every edit anyone makes, which looks like
   a broken feature rather than a security rule, and gets reverted.
 
+#### A platform advisory is not always an actionable task
+
+Managed platforms ship security linters, and they are worth running — but
+they report the desired state, not what your plan or tier can actually
+do. A warning that cannot be cleared without a paid upgrade looks
+identical to one that is a five-second toggle, and a reader who trusts
+the list will chase it repeatedly and each time conclude they missed a
+setting.
+
+So when an advisory resists being cleared:
+
+- Check the subscription tier or licence before assuming it was missed.
+  Read it from the API rather than from the dashboard's appearance —
+  some consoles render a paid control as available and only refuse on
+  save.
+- Attempt the change and **keep the refusal message as evidence**. It is
+  the difference between "not done" and "cannot be done here".
+- Record the reason where the next reader will look, and say explicitly
+  that the advisory will keep firing. Otherwise the same hour is spent
+  again at the next audit.
+- State the residual risk in one sentence, and whether an upgrade is
+  warranted for that risk alone at this size. That is the decision the
+  owner actually faces, and it is theirs, not yours.
+
 #### When every user shares one database role
 
 In backend-as-a-service architectures, every signed-in user typically

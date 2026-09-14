@@ -569,22 +569,61 @@ Re-run these after touching auth, roles or policies. All must fail.
 
 ---
 
-## 5. Still open — both dashboard-only
+## 5. Auth settings — done, and one that cannot be
 
-Neither is reachable through the Supabase MCP or the API, and my
-sandbox blocks outbound `supabase.co`, so these need one manual action
-each.
+These live in the Supabase dashboard, which neither the MCP nor the API
+exposes and which this sandbox cannot reach, so the owner actioned them
+directly on **2026-09-14** and reported the results below.
 
-1. **Confirm sign-up is disabled.**
-   Authentication → Sign In / Providers → "Allow new users to sign up"
-   should be **off** for an internal tool.
-   *This no longer gates privilege escalation* — migration 039 removed
-   that dependency deliberately — but an open sign-up on an internal
-   system still lets strangers create accounts.
+### ✅ Self-service sign-up — DISABLED
 
-2. **Enable leaked-password protection.**
-   Authentication → Policies. Checks passwords against
-   HaveIBeenPwned. Flagged by the Supabase security advisor.
+Authentication → Sign In / Providers → Email → "Allow new users to sign
+up", turned **off**.
+
+This mattered more than its old wording suggested. `039` means a new
+account can never name itself admin, so sign-up was recorded as "not a
+privilege escalation" — but the default role it *does* get,
+`department_user`, can read all 5,867 parts and the whole ledger, **post
+stock movements, run a physical count, log maintenance and issue
+parts**. Open sign-up therefore handed write access over real inventory
+to anyone on the internet who found the URL. With it closed, the three
+known accounts are the only way in.
+
+### ✅ Password policy — strengthened
+
+Same page, both free-plan settings:
+
+| Setting | Before | After |
+|---|---|---|
+| Minimum password length | 6 | **8** |
+| Required characters | not enforced | **enabled** |
+
+### ❌ Leaked-password protection — BLOCKED BY PLAN, not by oversight
+
+Cannot be enabled on this project. The organisation is on the **free**
+plan (`get_organization` → `"plan": "free"`), and the feature is Pro and
+above. The dashboard lets the toggle turn green and then refuses to save
+it:
+
+> Failed to update auth configuration: Configuring leaked password
+> protection via HaveIBeenPwned.org is available on Pro Plans and up.
+
+The Supabase security advisor keeps reporting
+`auth_leaked_password_protection` regardless, with no hint that the
+feature is paid — re-checked at 12:04 on 2026-09-14, immediately after
+the attempt, and it still read "currently disabled". **Do not treat that
+advisory as an unactioned task.** It cannot be actioned without an
+upgrade.
+
+Residual risk, stated plainly: a password that is strong but already
+leaked elsewhere would still be accepted. With sign-up closed that
+applies only to the three known accounts, so the mitigation is
+organisational — those three should use long passwords not reused from
+any other site — rather than a setting. Upgrading to Pro for this
+feature alone is not recommended at this size.
+
+Re-open this if the project moves to Pro: the toggle is on the same page
+and takes effect immediately.
 
 ## 6. Known and accepted
 

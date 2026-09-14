@@ -379,6 +379,8 @@ before changing anything in this section's territory.
   `public`, so nothing can be planted to shadow a name. Hygiene.
 - 🟡 **LOW — 6 dev-dependency advisories** through `vite`.
   `npm audit --omit=dev` is 0; nothing reaches the deployed bundle.
+- ⛔ **Leaked-password protection is a Pro-plan feature** and this project
+  is on free — see open item 4. The advisor reports it anyway.
 
 ⚠ **The browser reaches Postgres directly with a key that ships in the
 bundle.** RLS is not one control among several — it is the only one.
@@ -392,9 +394,9 @@ Anything enforced in React is decoration.
    allowed columns still writable in the same statement, admin
    unaffected; and in a real browser, the four affected inputs disabled
    for a department user and enabled for an admin.
-1b. **Two dashboard-only settings** — confirm sign-up is disabled, and enable
-   leaked-password protection. Neither is reachable via MCP or API; see
-   `docs/SECURITY_History.md` §5. Sign-up being open no longer grants admin (039).
+1b. ✅ **Auth settings — DONE 2026-09-14.** Self-service sign-up is
+   **off**, minimum password length raised 6 → **8**, and required
+   character classes enabled. See `docs/SECURITY_History.md` §5.
 2. ✅ **Trashed part holding stock — RESOLVED.** Re-measured 2026-09-14:
    both `CP-FN-F30-AC-PRV-0001` and `CP-FN-F03-AC-SOV-0001` now hold
    **0**, so the ledger no longer counts phantom units. Neither can be
@@ -403,8 +405,14 @@ Anything enforced in React is decoration.
 3. **Demo data** — `TEST-G04-002/003/004` and 18 `DEMO` maintenance events
    exist so the Indicators page has something to show. Remove with
    `supabase/scripts/remove_demo_assets.sql` (returns the parts to stock).
-4. **Leaked-password protection is disabled** in Supabase Auth — enable it in
-   the dashboard (Authentication → Policies).
+4. ⛔ **Leaked-password protection — CANNOT be enabled on this plan.** The
+   organisation is on **free**; the feature is Pro and above. The dashboard
+   refuses the save outright: *"Failed to update auth configuration:
+   Configuring leaked password protection via HaveIBeenPwned.org is
+   available on Pro Plans and up."* The Supabase advisor still reports
+   `auth_leaked_password_protection` and gives no hint that it is paid —
+   **that advisory is not an unactioned task**, do not chase it. Verified
+   2026-09-14. Re-open only if the project moves to Pro.
 5. **11 pre-030 views are `SECURITY DEFINER`** and bypass RLS. Converting them
    would blank the User column on Stock Movements for department users
    (`user_profiles` is own-row-or-admin). Left deliberately; see `037`.
