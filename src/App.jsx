@@ -1837,7 +1837,9 @@ const TYPE = {
 
 const ICON_PATHS = {
   dashboard:   "M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z",
-  framework:   "M4 20h16M4 20V8l8-5 8 5v12M9 20v-6h6v6",
+  // Three code segments joined by hyphens — CP-GA-G04 — rather than the
+  // building that made this indistinguishable from the dashboard house.
+  framework:   "M2 9h5v6H2zM9.5 9h5v6h-5zM17 9h5v6h-5zM7 12h2.5M14.5 12h2.5",
   category:    "M21 8l-9-5-9 5 9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5",
   discipline:  "M9 3v6l-5 9a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-9V3M9 3h6M7.5 14h9",
   manufacturer:"M2 20h20M4 20V9l5 3V9l5 3V9l5 3v8M8 20v-4h3v4",
